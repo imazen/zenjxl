@@ -23,6 +23,8 @@ pub struct JxlInfo {
     pub has_alpha: bool,
     /// Whether the image contains animation.
     pub has_animation: bool,
+    /// Bits per sample (e.g. 8, 16, 32).
+    pub bit_depth: Option<u8>,
     /// Embedded ICC color profile.
     pub icc_profile: Option<Vec<u8>>,
 }
@@ -92,11 +94,14 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, JxlError> {
         .any(|ec| matches!(ec.ec_type, ExtraChannel::Alpha));
     let has_animation = info.animation.is_some();
 
+    let bit_depth = info.bit_depth.bits_per_sample() as u8;
+
     Ok(JxlInfo {
         width: width as u32,
         height: height as u32,
         has_alpha,
         has_animation,
+        bit_depth: Some(bit_depth),
         icc_profile: None,
     })
 }
@@ -131,6 +136,7 @@ pub fn decode(data: &[u8], limits: Option<&JxlLimits>) -> Result<JxlDecodeOutput
         .iter()
         .any(|ec| matches!(ec.ec_type, ExtraChannel::Alpha));
     let has_animation = info.animation.is_some();
+    let bit_depth = info.bit_depth.bits_per_sample() as u8;
 
     if let Some(lim) = limits {
         let bpp: u32 = if has_alpha { 4 } else { 3 };
@@ -204,6 +210,7 @@ pub fn decode(data: &[u8], limits: Option<&JxlLimits>) -> Result<JxlDecodeOutput
             height: height as u32,
             has_alpha,
             has_animation,
+            bit_depth: Some(bit_depth),
             icc_profile: None,
         },
     })

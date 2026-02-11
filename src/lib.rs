@@ -23,7 +23,7 @@ mod zencodec;
 pub use error::JxlError;
 
 #[cfg(feature = "decode")]
-pub use decode::{JxlDecodeOutput, JxlInfo, decode, probe};
+pub use decode::{JxlDecodeOutput, JxlInfo, JxlLimits, decode, probe};
 
 #[cfg(feature = "encode")]
 pub use encode::{
