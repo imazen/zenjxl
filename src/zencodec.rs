@@ -11,7 +11,7 @@ use rgb::{Gray, Rgb, Rgba};
 
 use zencodec_types::{
     DecodeOutput as ZDecodeOutput, EncodeOutput as ZEncodeOutput, ImageFormat as ZImageFormat,
-    ImageInfo as ZImageInfo, ImageMetadata as ZImageMetadata, Stop,
+    ImageInfo as ZImageInfo, ImageMetadata as ZImageMetadata, ResourceLimits, Stop,
 };
 
 use crate::error::JxlError;
@@ -37,9 +37,7 @@ mod encoding {
     #[derive(Clone, Debug)]
     pub struct JxlEncoding {
         config: JxlConfig,
-        limit_pixels: Option<u64>,
-        limit_memory: Option<u64>,
-        limit_output: Option<u64>,
+        limits: ResourceLimits,
     }
 
     impl JxlEncoding {
@@ -48,9 +46,7 @@ mod encoding {
         pub fn lossy(distance: f32) -> Self {
             Self {
                 config: JxlConfig::Lossy(LossyConfig::new(distance)),
-                limit_pixels: None,
-                limit_memory: None,
-                limit_output: None,
+                limits: ResourceLimits::none(),
             }
         }
 
@@ -59,9 +55,7 @@ mod encoding {
         pub fn lossless() -> Self {
             Self {
                 config: JxlConfig::Lossless(LosslessConfig::new()),
-                limit_pixels: None,
-                limit_memory: None,
-                limit_output: None,
+                limits: ResourceLimits::none(),
             }
         }
 
@@ -82,19 +76,13 @@ mod encoding {
                 JxlConfig::Lossless(c) => Some(c),
             }
         }
-    }
 
-    impl Default for JxlEncoding {
-        fn default() -> Self {
-            Self::lossy(1.0)
-        }
-    }
-
-    impl Encoding for JxlEncoding {
-        type Error = JxlError;
-        type Job<'a> = JxlEncodeJob<'a>;
-
-        fn with_quality(mut self, quality: f32) -> Self {
+        /// Set quality as 0-100 percentage (inherent method, not part of the trait).
+        ///
+        /// 100 switches to lossless mode. Lower values map to higher butteraugli
+        /// distances.
+        #[must_use]
+        pub fn with_quality(mut self, quality: f32) -> Self {
             if quality >= 100.0 {
                 self.config = JxlConfig::Lossless(LosslessConfig::new());
             } else {
@@ -109,7 +97,9 @@ mod encoding {
             self
         }
 
-        fn with_effort(mut self, effort: u32) -> Self {
+        /// Set encoding effort 1-10 (inherent method, not part of the trait).
+        #[must_use]
+        pub fn with_effort(mut self, effort: u32) -> Self {
             let effort_u8 = (effort.min(10)) as u8;
             self.config = match self.config {
                 JxlConfig::Lossy(c) => JxlConfig::Lossy(c.with_effort(effort_u8)),
@@ -118,7 +108,9 @@ mod encoding {
             self
         }
 
-        fn with_lossless(mut self, lossless: bool) -> Self {
+        /// Switch between lossy and lossless mode (inherent method, not part of the trait).
+        #[must_use]
+        pub fn with_lossless(mut self, lossless: bool) -> Self {
             if lossless {
                 let effort = match &self.config {
                     JxlConfig::Lossy(c) => c.effort(),
@@ -134,23 +126,20 @@ mod encoding {
             }
             self
         }
+    }
 
-        fn with_alpha_quality(self, _quality: f32) -> Self {
-            self // JXL handles alpha uniformly
+    impl Default for JxlEncoding {
+        fn default() -> Self {
+            Self::lossy(1.0)
         }
+    }
 
-        fn with_limit_pixels(mut self, max: u64) -> Self {
-            self.limit_pixels = Some(max);
-            self
-        }
+    impl Encoding for JxlEncoding {
+        type Error = JxlError;
+        type Job<'a> = JxlEncodeJob<'a>;
 
-        fn with_limit_memory(mut self, bytes: u64) -> Self {
-            self.limit_memory = Some(bytes);
-            self
-        }
-
-        fn with_limit_output(mut self, bytes: u64) -> Self {
-            self.limit_output = Some(bytes);
+        fn with_limits(mut self, limits: &ResourceLimits) -> Self {
+            self.limits = limits.clone();
             self
         }
 
@@ -161,8 +150,7 @@ mod encoding {
                 icc: None,
                 exif: None,
                 xmp: None,
-                limit_pixels: None,
-                limit_memory: None,
+                limits: ResourceLimits::none(),
             }
         }
     }
@@ -174,11 +162,31 @@ mod encoding {
         icc: Option<&'a [u8]>,
         exif: Option<&'a [u8]>,
         xmp: Option<&'a [u8]>,
-        limit_pixels: Option<u64>,
-        limit_memory: Option<u64>,
+        limits: ResourceLimits,
     }
 
     impl<'a> JxlEncodeJob<'a> {
+        /// Set ICC profile for this encode job (inherent method).
+        #[must_use]
+        pub fn with_icc(mut self, icc: &'a [u8]) -> Self {
+            self.icc = Some(icc);
+            self
+        }
+
+        /// Set EXIF data for this encode job (inherent method).
+        #[must_use]
+        pub fn with_exif(mut self, exif: &'a [u8]) -> Self {
+            self.exif = Some(exif);
+            self
+        }
+
+        /// Set XMP data for this encode job (inherent method).
+        #[must_use]
+        pub fn with_xmp(mut self, xmp: &'a [u8]) -> Self {
+            self.xmp = Some(xmp);
+            self
+        }
+
         fn do_encode(
             self,
             pixels: &[u8],
@@ -204,17 +212,20 @@ mod encoding {
                 meta = None;
             }
 
+            // Merge limits: job-level overrides config-level per field.
+            let merged_pixels = self.limits.max_pixels.or(self.config.limits.max_pixels);
+            let merged_memory = self
+                .limits
+                .max_memory_bytes
+                .or(self.config.limits.max_memory_bytes);
             let limits;
-            let has_limits = self.limit_pixels.is_some()
-                || self.limit_memory.is_some()
-                || self.config.limit_pixels.is_some()
-                || self.config.limit_memory.is_some();
+            let has_limits = merged_pixels.is_some() || merged_memory.is_some();
             if has_limits {
                 let mut l = jxl_encoder::Limits::new();
-                if let Some(p) = self.limit_pixels.or(self.config.limit_pixels) {
+                if let Some(p) = merged_pixels {
                     l = l.with_max_pixels(p);
                 }
-                if let Some(m) = self.limit_memory.or(self.config.limit_memory) {
+                if let Some(m) = merged_memory {
                     l = l.with_max_memory_bytes(m);
                 }
                 limits = Some(l);
@@ -276,28 +287,8 @@ mod encoding {
             self
         }
 
-        fn with_icc(mut self, icc: &'a [u8]) -> Self {
-            self.icc = Some(icc);
-            self
-        }
-
-        fn with_exif(mut self, exif: &'a [u8]) -> Self {
-            self.exif = Some(exif);
-            self
-        }
-
-        fn with_xmp(mut self, xmp: &'a [u8]) -> Self {
-            self.xmp = Some(xmp);
-            self
-        }
-
-        fn with_limit_pixels(mut self, max: u64) -> Self {
-            self.limit_pixels = Some(max);
-            self
-        }
-
-        fn with_limit_memory(mut self, bytes: u64) -> Self {
-            self.limit_memory = Some(bytes);
+        fn with_limits(mut self, limits: &ResourceLimits) -> Self {
+            self.limits = limits.clone();
             self
         }
 
@@ -368,9 +359,7 @@ mod decoding {
     /// JPEG XL decoder configuration implementing [`Decoding`].
     #[derive(Clone, Debug)]
     pub struct JxlDecoding {
-        limit_pixels: Option<u64>,
-        limit_memory: Option<u64>,
-        limit_file_size: Option<u64>,
+        limits: ResourceLimits,
     }
 
     impl JxlDecoding {
@@ -378,9 +367,7 @@ mod decoding {
         #[must_use]
         pub fn new() -> Self {
             Self {
-                limit_pixels: None,
-                limit_memory: None,
-                limit_file_size: None,
+                limits: ResourceLimits::none(),
             }
         }
     }
@@ -395,31 +382,15 @@ mod decoding {
         type Error = JxlError;
         type Job<'a> = JxlDecodeJob<'a>;
 
-        fn with_limit_pixels(mut self, max: u64) -> Self {
-            self.limit_pixels = Some(max);
-            self
-        }
-
-        fn with_limit_memory(mut self, bytes: u64) -> Self {
-            self.limit_memory = Some(bytes);
-            self
-        }
-
-        fn with_limit_dimensions(mut self, width: u32, height: u32) -> Self {
-            self.limit_pixels = Some(width as u64 * height as u64);
-            self
-        }
-
-        fn with_limit_file_size(mut self, bytes: u64) -> Self {
-            self.limit_file_size = Some(bytes);
+        fn with_limits(mut self, limits: &ResourceLimits) -> Self {
+            self.limits = limits.clone();
             self
         }
 
         fn job(&self) -> JxlDecodeJob<'_> {
             JxlDecodeJob {
                 config: self,
-                limit_pixels: None,
-                limit_memory: None,
+                limits: ResourceLimits::none(),
             }
         }
 
@@ -432,8 +403,7 @@ mod decoding {
     /// Per-operation JXL decode job.
     pub struct JxlDecodeJob<'a> {
         config: &'a JxlDecoding,
-        limit_pixels: Option<u64>,
-        limit_memory: Option<u64>,
+        limits: ResourceLimits,
     }
 
     impl<'a> DecodingJob<'a> for JxlDecodeJob<'a> {
@@ -443,25 +413,23 @@ mod decoding {
             self // JXL decoding is not cancellable
         }
 
-        fn with_limit_pixels(mut self, max: u64) -> Self {
-            self.limit_pixels = Some(max);
-            self
-        }
-
-        fn with_limit_memory(mut self, bytes: u64) -> Self {
-            self.limit_memory = Some(bytes);
+        fn with_limits(mut self, limits: &ResourceLimits) -> Self {
+            self.limits = limits.clone();
             self
         }
 
         fn decode(self, data: &[u8]) -> Result<ZDecodeOutput, Self::Error> {
-            let limits = if self.limit_pixels.is_some()
-                || self.limit_memory.is_some()
-                || self.config.limit_pixels.is_some()
-                || self.config.limit_memory.is_some()
-            {
+            // Merge limits: job-level overrides config-level per field.
+            let merged_pixels = self.limits.max_pixels.or(self.config.limits.max_pixels);
+            let merged_memory = self
+                .limits
+                .max_memory_bytes
+                .or(self.config.limits.max_memory_bytes);
+
+            let limits = if merged_pixels.is_some() || merged_memory.is_some() {
                 Some(crate::decode::JxlLimits {
-                    max_pixels: self.limit_pixels.or(self.config.limit_pixels),
-                    max_memory_bytes: self.limit_memory.or(self.config.limit_memory),
+                    max_pixels: merged_pixels,
+                    max_memory_bytes: merged_memory,
                 })
             } else {
                 None
@@ -542,7 +510,6 @@ mod tests {
     #[test]
     #[cfg(feature = "encode")]
     fn encoding_quality_100_becomes_lossless() {
-        use zencodec_types::Encoding;
         let enc = JxlEncoding::default().with_quality(100.0);
         assert!(enc.lossless_config().is_some());
     }
