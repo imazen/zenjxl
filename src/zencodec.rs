@@ -10,8 +10,9 @@ use rgb::alt::BGRA;
 use rgb::{Gray, Rgb, Rgba};
 
 use zencodec_types::{
-    DecodeOutput as ZDecodeOutput, EncodeOutput as ZEncodeOutput, ImageFormat as ZImageFormat,
-    ImageInfo as ZImageInfo, ImageMetadata as ZImageMetadata, ResourceLimits, Stop,
+    CodecCapabilities, DecodeOutput as ZDecodeOutput, EncodeOutput as ZEncodeOutput,
+    ImageFormat as ZImageFormat, ImageInfo as ZImageInfo, ImageMetadata as ZImageMetadata,
+    ResourceLimits, Stop,
 };
 
 use crate::error::JxlError;
@@ -134,12 +135,23 @@ mod encoding {
         }
     }
 
+    static ENCODE_CAPS: CodecCapabilities = CodecCapabilities::new()
+        .with_encode_icc(true)
+        .with_encode_exif(true)
+        .with_encode_xmp(true)
+        .with_encode_cancel(true)
+        .with_cheap_probe(true);
+
     impl Encoding for JxlEncoding {
         type Error = JxlError;
         type Job<'a> = JxlEncodeJob<'a>;
 
-        fn with_limits(mut self, limits: &ResourceLimits) -> Self {
-            self.limits = limits.clone();
+        fn capabilities() -> &'static CodecCapabilities {
+            &ENCODE_CAPS
+        }
+
+        fn with_limits(mut self, limits: ResourceLimits) -> Self {
+            self.limits = limits;
             self
         }
 
@@ -287,8 +299,8 @@ mod encoding {
             self
         }
 
-        fn with_limits(mut self, limits: &ResourceLimits) -> Self {
-            self.limits = limits.clone();
+        fn with_limits(mut self, limits: ResourceLimits) -> Self {
+            self.limits = limits;
             self
         }
 
@@ -378,12 +390,20 @@ mod decoding {
         }
     }
 
+    static DECODE_CAPS: CodecCapabilities = CodecCapabilities::new()
+        .with_decode_icc(true)
+        .with_cheap_probe(true);
+
     impl Decoding for JxlDecoding {
         type Error = JxlError;
         type Job<'a> = JxlDecodeJob<'a>;
 
-        fn with_limits(mut self, limits: &ResourceLimits) -> Self {
-            self.limits = limits.clone();
+        fn capabilities() -> &'static CodecCapabilities {
+            &DECODE_CAPS
+        }
+
+        fn with_limits(mut self, limits: ResourceLimits) -> Self {
+            self.limits = limits;
             self
         }
 
@@ -394,7 +414,7 @@ mod decoding {
             }
         }
 
-        fn probe(&self, data: &[u8]) -> Result<ZImageInfo, Self::Error> {
+        fn probe_header(&self, data: &[u8]) -> Result<ZImageInfo, Self::Error> {
             let info = crate::decode::probe(data)?;
             Ok(convert_info(&info))
         }
@@ -413,8 +433,8 @@ mod decoding {
             self // JXL decoding is not cancellable
         }
 
-        fn with_limits(mut self, limits: &ResourceLimits) -> Self {
-            self.limits = limits.clone();
+        fn with_limits(mut self, limits: ResourceLimits) -> Self {
+            self.limits = limits;
             self
         }
 
