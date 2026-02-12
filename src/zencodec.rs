@@ -6,6 +6,7 @@
 use alloc::vec::Vec;
 
 use imgref::ImgRef;
+use rgb::alt::BGRA;
 use rgb::{Gray, Rgb, Rgba};
 
 use zencodec_types::{
@@ -324,6 +325,20 @@ mod encoding {
                     self.do_encode(&bytes, PixelLayout::Rgb8, w as u32, h as u32)
                 }
             }
+        }
+
+        fn encode_bgra8(self, img: ImgRef<'_, BGRA<u8>>) -> Result<ZEncodeOutput, Self::Error> {
+            let (buf, w, h) = img.to_contiguous_buf();
+            let bytes = crate::encode::bgra_to_bytes(&buf);
+            self.do_encode(&bytes, PixelLayout::Bgra8, w as u32, h as u32)
+        }
+
+        fn encode_bgrx8(self, img: ImgRef<'_, BGRA<u8>>) -> Result<ZEncodeOutput, Self::Error> {
+            // BGRX is opaque — pass as BGRA, jxl-encoder handles the R↔B swap
+            // and the alpha channel is ignored in lossy mode / preserved but meaningless in lossless.
+            let (buf, w, h) = img.to_contiguous_buf();
+            let bytes = crate::encode::bgra_to_bytes(&buf);
+            self.do_encode(&bytes, PixelLayout::Bgra8, w as u32, h as u32)
         }
     }
 
