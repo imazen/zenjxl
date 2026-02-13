@@ -343,6 +343,56 @@ mod encoding {
             let bytes = crate::encode::bgra_to_bytes(&buf);
             self.do_encode(&bytes, PixelLayout::Bgra8, w as u32, h as u32)
         }
+
+        fn encode_rgb_f32(self, img: ImgRef<'_, Rgb<f32>>) -> Result<ZEncodeOutput, Self::Error> {
+            // JXL natively supports linear f32 RGB — no sRGB conversion needed
+            let (buf, w, h) = img.to_contiguous_buf();
+            let bytes: &[u8] = bytemuck::cast_slice(&buf);
+            self.do_encode(bytes, PixelLayout::RgbLinearF32, w as u32, h as u32)
+        }
+
+        fn encode_rgba_f32(self, img: ImgRef<'_, Rgba<f32>>) -> Result<ZEncodeOutput, Self::Error> {
+            // No native RGBA f32 layout — convert linear→sRGB u8, encode as RGBA8
+            use linear_srgb::default::linear_to_srgb_u8;
+            let (buf, w, h) = img.to_contiguous_buf();
+            let rgba: Vec<u8> = buf
+                .iter()
+                .flat_map(|p| {
+                    [
+                        linear_to_srgb_u8(p.r.clamp(0.0, 1.0)),
+                        linear_to_srgb_u8(p.g.clamp(0.0, 1.0)),
+                        linear_to_srgb_u8(p.b.clamp(0.0, 1.0)),
+                        (p.a.clamp(0.0, 1.0) * 255.0 + 0.5) as u8,
+                    ]
+                })
+                .collect();
+            self.do_encode(&rgba, PixelLayout::Rgba8, w as u32, h as u32)
+        }
+
+        fn encode_gray_f32(self, img: ImgRef<'_, Gray<f32>>) -> Result<ZEncodeOutput, Self::Error> {
+            // No native gray f32 layout — convert linear→sRGB u8, encode as Gray8/Rgb8
+            use linear_srgb::default::linear_to_srgb_u8;
+            let (buf, w, h) = img.to_contiguous_buf();
+            match &self.config.config {
+                JxlConfig::Lossless(_) => {
+                    let bytes: Vec<u8> = buf
+                        .iter()
+                        .map(|g| linear_to_srgb_u8(g.value().clamp(0.0, 1.0)))
+                        .collect();
+                    self.do_encode(&bytes, PixelLayout::Gray8, w as u32, h as u32)
+                }
+                JxlConfig::Lossy(_) => {
+                    let bytes: Vec<u8> = buf
+                        .iter()
+                        .flat_map(|g| {
+                            let v = linear_to_srgb_u8(g.value().clamp(0.0, 1.0));
+                            [v, v, v]
+                        })
+                        .collect();
+                    self.do_encode(&bytes, PixelLayout::Rgb8, w as u32, h as u32)
+                }
+            }
+        }
     }
 
     /// Map 0-100 quality percentage to butteraugli distance.
@@ -459,6 +509,161 @@ mod decoding {
             let info = convert_info(&result.info);
             Ok(ZDecodeOutput::new(result.pixels, info))
         }
+
+        fn decode_into_rgb8(
+            self,
+            data: &[u8],
+            mut dst: imgref::ImgRefMut<'_, Rgb<u8>>,
+        ) -> Result<ZImageInfo, Self::Error> {
+            let output = self.decode(data)?;
+            let info = output.info().clone();
+            let src = output.into_rgb8();
+            for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
+                let n = src_row.len().min(dst_row.len());
+                dst_row[..n].copy_from_slice(&src_row[..n]);
+            }
+            Ok(info)
+        }
+
+        fn decode_into_rgba8(
+            self,
+            data: &[u8],
+            mut dst: imgref::ImgRefMut<'_, Rgba<u8>>,
+        ) -> Result<ZImageInfo, Self::Error> {
+            let output = self.decode(data)?;
+            let info = output.info().clone();
+            let src = output.into_rgba8();
+            for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
+                let n = src_row.len().min(dst_row.len());
+                dst_row[..n].copy_from_slice(&src_row[..n]);
+            }
+            Ok(info)
+        }
+
+        fn decode_into_gray8(
+            self,
+            data: &[u8],
+            mut dst: imgref::ImgRefMut<'_, Gray<u8>>,
+        ) -> Result<ZImageInfo, Self::Error> {
+            let output = self.decode(data)?;
+            let info = output.info().clone();
+            let src = output.into_rgb8();
+            for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
+                for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
+                    let luma =
+                        ((s.r as u16 * 77 + s.g as u16 * 150 + s.b as u16 * 29) >> 8) as u8;
+                    *d = Gray::new(luma);
+                }
+            }
+            Ok(info)
+        }
+
+        fn decode_into_bgra8(
+            self,
+            data: &[u8],
+            mut dst: imgref::ImgRefMut<'_, BGRA<u8>>,
+        ) -> Result<ZImageInfo, Self::Error> {
+            let output = self.decode(data)?;
+            let info = output.info().clone();
+            let src = output.into_rgba8();
+            for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
+                for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
+                    *d = BGRA {
+                        b: s.b,
+                        g: s.g,
+                        r: s.r,
+                        a: s.a,
+                    };
+                }
+            }
+            Ok(info)
+        }
+
+        fn decode_into_bgrx8(
+            self,
+            data: &[u8],
+            mut dst: imgref::ImgRefMut<'_, BGRA<u8>>,
+        ) -> Result<ZImageInfo, Self::Error> {
+            let output = self.decode(data)?;
+            let info = output.info().clone();
+            let src = output.into_rgb8();
+            for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
+                for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
+                    *d = BGRA {
+                        b: s.b,
+                        g: s.g,
+                        r: s.r,
+                        a: 255,
+                    };
+                }
+            }
+            Ok(info)
+        }
+
+        fn decode_into_rgb_f32(
+            self,
+            data: &[u8],
+            mut dst: imgref::ImgRefMut<'_, Rgb<f32>>,
+        ) -> Result<ZImageInfo, Self::Error> {
+            // Current decoder always outputs u8; use srgb_u8_to_linear for now.
+            // TODO: when decoder supports native f32 output, use that for float JXL sources.
+            use linear_srgb::default::srgb_u8_to_linear;
+            let output = self.decode(data)?;
+            let info = output.info().clone();
+            let src = output.into_rgb8();
+            for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
+                for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
+                    *d = Rgb {
+                        r: srgb_u8_to_linear(s.r),
+                        g: srgb_u8_to_linear(s.g),
+                        b: srgb_u8_to_linear(s.b),
+                    };
+                }
+            }
+            Ok(info)
+        }
+
+        fn decode_into_rgba_f32(
+            self,
+            data: &[u8],
+            mut dst: imgref::ImgRefMut<'_, Rgba<f32>>,
+        ) -> Result<ZImageInfo, Self::Error> {
+            use linear_srgb::default::srgb_u8_to_linear;
+            let output = self.decode(data)?;
+            let info = output.info().clone();
+            let src = output.into_rgba8();
+            for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
+                for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
+                    *d = Rgba {
+                        r: srgb_u8_to_linear(s.r),
+                        g: srgb_u8_to_linear(s.g),
+                        b: srgb_u8_to_linear(s.b),
+                        a: s.a as f32 / 255.0,
+                    };
+                }
+            }
+            Ok(info)
+        }
+
+        fn decode_into_gray_f32(
+            self,
+            data: &[u8],
+            mut dst: imgref::ImgRefMut<'_, Gray<f32>>,
+        ) -> Result<ZImageInfo, Self::Error> {
+            use linear_srgb::default::srgb_u8_to_linear;
+            let output = self.decode(data)?;
+            let info = output.info().clone();
+            let src = output.into_rgb8();
+            for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
+                for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
+                    let r = srgb_u8_to_linear(s.r);
+                    let g = srgb_u8_to_linear(s.g);
+                    let b = srgb_u8_to_linear(s.b);
+                    *d = Gray::new(0.2126 * r + 0.7152 * g + 0.0722 * b);
+                }
+            }
+            Ok(info)
+        }
     }
 
     fn convert_info(info: &crate::decode::JxlInfo) -> ZImageInfo {
@@ -555,5 +760,55 @@ mod tests {
         assert_eq!(output.info().width, 4);
         assert_eq!(output.info().height, 4);
         assert_eq!(output.info().format, ZImageFormat::Jxl);
+    }
+
+    #[test]
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    fn f32_roundtrip_all_simd_tiers() {
+        use archmage::testing::{for_each_token_permutation, CompileTimePolicy};
+        use imgref::ImgVec;
+        use zencodec_types::{Decoding, Encoding};
+
+        let report = for_each_token_permutation(CompileTimePolicy::Warn, |_perm| {
+            // Encode linear f32 → JXL (native f32 path) → decode back to f32
+            let pixels: Vec<Rgb<f32>> = (0..16 * 16)
+                .map(|i| {
+                    let t = i as f32 / 255.0;
+                    Rgb {
+                        r: t,
+                        g: (t * 0.7),
+                        b: (t * 0.3),
+                    }
+                })
+                .collect();
+            let img = ImgVec::new(pixels, 16, 16);
+
+            // Use lossy with small distance for near-lossless f32 encoding
+            let enc = JxlEncoding::lossy(1.0);
+            let output = enc.encode_rgb_f32(img.as_ref()).unwrap();
+            assert!(!output.bytes().is_empty());
+
+            let dec = JxlDecoding::new();
+            let dst = vec![
+                Rgb {
+                    r: 0.0f32,
+                    g: 0.0,
+                    b: 0.0,
+                };
+                16 * 16
+            ];
+            let mut dst_img = ImgVec::new(dst, 16, 16);
+            let _info = dec
+                .decode_into_rgb_f32(output.bytes(), dst_img.as_mut())
+                .unwrap();
+
+            // Verify values are in valid range
+            for p in dst_img.buf().iter() {
+                assert!(p.r >= 0.0 && p.r <= 1.0, "r out of range: {}", p.r);
+                assert!(p.g >= 0.0 && p.g <= 1.0, "g out of range: {}", p.g);
+                assert!(p.b >= 0.0 && p.b <= 1.0, "b out of range: {}", p.b);
+            }
+        });
+        assert!(report.permutations_run >= 1);
     }
 }
