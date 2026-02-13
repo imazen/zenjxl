@@ -530,12 +530,19 @@ mod decoding {
             data: &[u8],
             mut dst: imgref::ImgRefMut<'_, Rgba<u8>>,
         ) -> Result<ZImageInfo, Self::Error> {
+            // Use into_rgb8 + fill alpha=255 since jxl-rs decoder doesn't support alpha yet
             let output = self.decode(data)?;
             let info = output.info().clone();
-            let src = output.into_rgba8();
+            let src = output.into_rgb8();
             for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
-                let n = src_row.len().min(dst_row.len());
-                dst_row[..n].copy_from_slice(&src_row[..n]);
+                for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
+                    *d = Rgba {
+                        r: s.r,
+                        g: s.g,
+                        b: s.b,
+                        a: 255,
+                    };
+                }
             }
             Ok(info)
         }
@@ -563,16 +570,17 @@ mod decoding {
             data: &[u8],
             mut dst: imgref::ImgRefMut<'_, BGRA<u8>>,
         ) -> Result<ZImageInfo, Self::Error> {
+            // Use into_rgb8 + fill alpha=255 since jxl-rs decoder doesn't support alpha yet
             let output = self.decode(data)?;
             let info = output.info().clone();
-            let src = output.into_rgba8();
+            let src = output.into_rgb8();
             for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
                 for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
                     *d = BGRA {
                         b: s.b,
                         g: s.g,
                         r: s.r,
-                        a: s.a,
+                        a: 255,
                     };
                 }
             }
@@ -628,17 +636,18 @@ mod decoding {
             data: &[u8],
             mut dst: imgref::ImgRefMut<'_, Rgba<f32>>,
         ) -> Result<ZImageInfo, Self::Error> {
+            // Use into_rgb8 + fill alpha=1.0 since jxl-rs decoder doesn't support alpha yet
             use linear_srgb::default::srgb_u8_to_linear;
             let output = self.decode(data)?;
             let info = output.info().clone();
-            let src = output.into_rgba8();
+            let src = output.into_rgb8();
             for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
                 for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
                     *d = Rgba {
                         r: srgb_u8_to_linear(s.r),
                         g: srgb_u8_to_linear(s.g),
                         b: srgb_u8_to_linear(s.b),
-                        a: s.a as f32 / 255.0,
+                        a: 1.0,
                     };
                 }
             }
@@ -810,5 +819,72 @@ mod tests {
             }
         });
         assert!(report.permutations_run >= 1);
+    }
+
+    #[test]
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    fn f32_rgba_decode_from_rgb() {
+        use imgref::ImgVec;
+        use zencodec_types::{Decoding, Encoding, Rgba};
+
+        // Encode as RGB f32 (native path), decode into RGBA f32 buffer
+        // Note: jxl-rs decoder doesn't yet support alpha, so we test the
+        // RGB→RGBA expansion path rather than full RGBA roundtrip
+        let pixels: Vec<Rgb<f32>> = (0..16 * 16)
+            .map(|i| {
+                let t = i as f32 / 255.0;
+                Rgb {
+                    r: t,
+                    g: (t * 0.7),
+                    b: (t * 0.3),
+                }
+            })
+            .collect();
+        let img = ImgVec::new(pixels, 16, 16);
+
+        let enc = JxlEncoding::lossy(1.0);
+        let output = enc.encode_rgb_f32(img.as_ref()).unwrap();
+        assert!(!output.bytes().is_empty());
+
+        let dec = JxlDecoding::new();
+        let mut dst_img = ImgVec::new(
+            vec![Rgba { r: 0.0f32, g: 0.0, b: 0.0, a: 0.0 }; 16 * 16],
+            16,
+            16,
+        );
+        dec.decode_into_rgba_f32(output.bytes(), dst_img.as_mut())
+            .unwrap();
+
+        for p in dst_img.buf().iter() {
+            assert!(p.r >= 0.0 && p.r <= 1.0, "r out of range: {}", p.r);
+            assert!(p.g >= 0.0 && p.g <= 1.0, "g out of range: {}", p.g);
+            assert!(p.b >= 0.0 && p.b <= 1.0, "b out of range: {}", p.b);
+            assert!(p.a >= 0.0 && p.a <= 1.0, "a out of range: {}", p.a);
+        }
+    }
+
+    #[test]
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    fn f32_gray_roundtrip() {
+        use imgref::ImgVec;
+        use zencodec_types::{Decoding, Encoding, Gray};
+
+        let pixels: Vec<Gray<f32>> = (0..16 * 16)
+            .map(|i| Gray(i as f32 / 255.0))
+            .collect();
+        let img = ImgVec::new(pixels, 16, 16);
+
+        let enc = JxlEncoding::lossy(1.0);
+        let output = enc.encode_gray_f32(img.as_ref()).unwrap();
+        assert!(!output.bytes().is_empty());
+
+        let dec = JxlDecoding::new();
+        let mut dst_img = ImgVec::new(vec![Gray(0.0f32); 16 * 16], 16, 16);
+        dec.decode_into_gray_f32(output.bytes(), dst_img.as_mut())
+            .unwrap();
+
+        for p in dst_img.buf().iter() {
+            assert!(p.0 >= 0.0 && p.0 <= 1.0, "gray out of range: {}", p.0);
+        }
     }
 }
