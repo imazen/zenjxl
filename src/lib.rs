@@ -5,8 +5,8 @@
 //!
 //! # zencodec-types traits
 //!
-//! [`JxlEncoding`] implements [`zencodec_types::Encoding`] (encode feature)
-//! and [`JxlDecoding`] implements [`zencodec_types::Decoding`] (decode feature).
+//! [`JxlEncoderConfig`] implements [`zencodec_types::EncoderConfig`] (encode feature)
+//! and [`JxlDecoderConfig`] implements [`zencodec_types::DecoderConfig`] (decode feature).
 
 #![forbid(unsafe_code)]
 #![no_std]
@@ -33,10 +33,10 @@ pub use encode::{
 
 // zencodec-types trait types
 #[cfg(feature = "encode")]
-pub use zencodec::{JxlEncodeJob, JxlEncoding};
+pub use zencodec::{JxlEncodeJob, JxlEncoder, JxlEncoderConfig, JxlFrameEncoder};
 
 #[cfg(feature = "decode")]
-pub use zencodec::{JxlDecodeJob, JxlDecoding};
+pub use zencodec::{JxlDecodeJob, JxlDecoder, JxlDecoderConfig, JxlFrameDecoder};
 
 // Re-export encoder config types for callers.
 #[cfg(feature = "encode")]
