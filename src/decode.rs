@@ -27,6 +27,13 @@ pub struct JxlInfo {
     pub bit_depth: Option<u8>,
     /// Embedded ICC color profile.
     pub icc_profile: Option<Vec<u8>>,
+    /// EXIF orientation (1-8). 1 = Normal.
+    pub orientation: u8,
+    /// CICP color description `(color_primaries, transfer_characteristics, matrix_coefficients, full_range)`.
+    ///
+    /// Derived from JXL's structured color encoding when the image does not use
+    /// an ICC profile. `None` for ICC-profiled images or custom color spaces.
+    pub cicp: Option<(u8, u8, u8, bool)>,
 }
 
 /// JXL decode output.
@@ -67,8 +74,65 @@ impl JxlLimits {
     }
 }
 
+use jxl::api::{JxlColorEncoding, JxlColorProfile, JxlPrimaries, JxlTransferFunction};
+
 fn map_err(e: jxl::error::Error) -> JxlError {
     JxlError::Decode(e)
+}
+
+/// Extract ICC profile and CICP from JXL color profile.
+#[allow(clippy::type_complexity)]
+fn extract_color_info(profile: &JxlColorProfile) -> (Option<Vec<u8>>, Option<(u8, u8, u8, bool)>) {
+    match profile {
+        JxlColorProfile::Icc(icc_bytes) => (Some(icc_bytes.clone()), None),
+        JxlColorProfile::Simple(encoding) => {
+            let cicp = jxl_encoding_to_cicp(encoding);
+            // Try to synthesize an ICC profile from the structured encoding
+            let icc = profile.try_as_icc().map(|cow| cow.into_owned());
+            (icc, cicp)
+        }
+    }
+}
+
+/// Map JXL structured color encoding to CICP code points.
+fn jxl_encoding_to_cicp(encoding: &JxlColorEncoding) -> Option<(u8, u8, u8, bool)> {
+    match encoding {
+        JxlColorEncoding::RgbColorSpace {
+            primaries,
+            transfer_function,
+            ..
+        } => {
+            let cp = match primaries {
+                JxlPrimaries::SRGB => 1,   // BT.709
+                JxlPrimaries::BT2100 => 9, // BT.2020
+                JxlPrimaries::P3 => 12,    // Display P3
+                JxlPrimaries::Chromaticities { .. } => return None,
+            };
+            let tc = transfer_to_cicp(transfer_function)?;
+            // JXL is always full range RGB, matrix = Identity (0)
+            Some((cp, tc, 0, true))
+        }
+        JxlColorEncoding::GrayscaleColorSpace {
+            transfer_function, ..
+        } => {
+            let tc = transfer_to_cicp(transfer_function)?;
+            // Grayscale: BT.709 primaries, Identity matrix
+            Some((1, tc, 0, true))
+        }
+        JxlColorEncoding::XYB { .. } => None,
+    }
+}
+
+fn transfer_to_cicp(tf: &JxlTransferFunction) -> Option<u8> {
+    Some(match tf {
+        JxlTransferFunction::BT709 => 1,
+        JxlTransferFunction::SRGB => 13,
+        JxlTransferFunction::Linear => 8,
+        JxlTransferFunction::PQ => 16,
+        JxlTransferFunction::HLG => 18,
+        JxlTransferFunction::DCI => 17,
+        JxlTransferFunction::Gamma(_) => return None,
+    })
 }
 
 /// Probe JXL metadata without decoding pixels.
@@ -93,8 +157,10 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, JxlError> {
         .iter()
         .any(|ec| matches!(ec.ec_type, ExtraChannel::Alpha));
     let has_animation = info.animation.is_some();
-
     let bit_depth = info.bit_depth.bits_per_sample() as u8;
+    let orientation = info.orientation as u8;
+
+    let (icc_profile, cicp) = extract_color_info(decoder.embedded_color_profile());
 
     Ok(JxlInfo {
         width: width as u32,
@@ -102,7 +168,9 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, JxlError> {
         has_alpha,
         has_animation,
         bit_depth: Some(bit_depth),
-        icc_profile: None,
+        icc_profile,
+        orientation,
+        cicp,
     })
 }
 
@@ -137,6 +205,9 @@ pub fn decode(data: &[u8], limits: Option<&JxlLimits>) -> Result<JxlDecodeOutput
         .any(|ec| matches!(ec.ec_type, ExtraChannel::Alpha));
     let has_animation = info.animation.is_some();
     let bit_depth = info.bit_depth.bits_per_sample() as u8;
+    let orientation = info.orientation as u8;
+
+    let (icc_profile, cicp) = extract_color_info(decoder.embedded_color_profile());
 
     if let Some(lim) = limits {
         let bpp: u32 = if has_alpha { 4 } else { 3 };
@@ -211,7 +282,9 @@ pub fn decode(data: &[u8], limits: Option<&JxlLimits>) -> Result<JxlDecodeOutput
             has_alpha,
             has_animation,
             bit_depth: Some(bit_depth),
-            icc_profile: None,
+            icc_profile,
+            orientation,
+            cicp,
         },
     })
 }

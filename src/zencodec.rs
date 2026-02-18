@@ -168,6 +168,10 @@ mod encoding {
         type Error = JxlError;
         type Job<'a> = JxlEncodeJob<'a>;
 
+        fn format() -> ImageFormat {
+            ImageFormat::Jxl
+        }
+
         fn supported_descriptors() -> &'static [PixelDescriptor] {
             &[
                 PixelDescriptor::RGB8_SRGB,
@@ -593,11 +597,16 @@ mod decoding {
 
     static DECODE_CAPS: CodecCapabilities = CodecCapabilities::new()
         .with_decode_icc(true)
+        .with_decode_cicp(true)
         .with_cheap_probe(true);
 
     impl zencodec_types::DecoderConfig for JxlDecoderConfig {
         type Error = JxlError;
         type Job<'a> = JxlDecodeJob<'a>;
+
+        fn format() -> ImageFormat {
+            ImageFormat::Jxl
+        }
 
         fn supported_descriptors() -> &'static [PixelDescriptor] {
             &[
@@ -866,6 +875,12 @@ mod decoding {
         }
         if let Some(ref icc) = info.icc_profile {
             zi = zi.with_icc_profile(icc.clone());
+        }
+        if info.orientation != 1 {
+            zi = zi.with_orientation(zencodec_types::Orientation::from_exif(info.orientation as u16));
+        }
+        if let Some((cp, tc, mc, fr)) = info.cicp {
+            zi = zi.with_cicp(zencodec_types::Cicp::new(cp, tc, mc, fr));
         }
         zi
     }
