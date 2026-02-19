@@ -16,12 +16,12 @@ imgref = "1.12"
 bytemuck = { version = "1.25", default-features = false }
 enough = "0.3"
 zencodec-types = { path = "../zencodec-types" }
-linear-srgb = "0.4"
+linear-srgb = { version = "0.5", path = "../linear-srgb" }
 jxl = { path = "../jxl-rs/jxl", optional = true }
 jxl-encoder = { path = "../jxl-encoder-rs/jxl_encoder", optional = true, default-features = false, features = ["std"] }
 
 [dev-dependencies]
-archmage = { version = "0.7", features = ["std"] }
+archmage = { version = "0.8.4", features = ["std"] }
 
 [features]
 default = ["encode", "decode"]
