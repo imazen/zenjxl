@@ -16,7 +16,7 @@ imgref = "1.12"
 bytemuck = { version = "1.25", default-features = false }
 enough = "0.3"
 zencodec-types = { path = "../zencodec-types" }
-linear-srgb = { version = "0.5", path = "../linear-srgb" }
+linear-srgb = "0.5.5"
 jxl = { path = "../jxl-rs/jxl", optional = true }
 jxl-encoder = { path = "../jxl-encoder-rs/jxl_encoder", optional = true, default-features = false, features = ["std"] }
 
