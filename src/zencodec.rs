@@ -647,7 +647,6 @@ mod decoding {
         type Error = JxlError;
         type Decoder = JxlDecoder<'a>;
         type FrameDecoder = JxlFrameDecoder;
-
         fn with_stop(self, _stop: &'a dyn Stop) -> Self {
             self // JXL decoding is not cancellable
         }
@@ -678,6 +677,7 @@ mod decoding {
                 "JPEG XL animation decoding not yet supported via this API".into(),
             ))
         }
+
     }
 
     /// JPEG XL single-image decoder.
