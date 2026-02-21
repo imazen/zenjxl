@@ -806,7 +806,7 @@ mod decoding {
         fn decode_rows(
             self,
             data: &[u8],
-            _sink: &mut dyn FnMut(u32, PixelSlice<'_>),
+            _sink: &mut dyn zencodec_types::DecodeRowSink,
         ) -> Result<ImageInfo, JxlError> {
             // JXL decoder doesn't support streaming rows — decode fully
             let output = zencodec_types::Decoder::decode(self, data)?;
@@ -857,7 +857,7 @@ mod decoding {
 
         fn next_frame_rows(
             &mut self,
-            _sink: &mut dyn FnMut(u32, PixelSlice<'_>),
+            _sink: &mut dyn zencodec_types::DecodeRowSink,
         ) -> Result<Option<ImageInfo>, JxlError> {
             Err(JxlError::InvalidInput(
                 "JPEG XL animation decoding not yet supported via this API".into(),
