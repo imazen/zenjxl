@@ -17,7 +17,7 @@ bytemuck = { version = "1.25", default-features = false }
 enough = "0.4"
 zencodec-types = { path = "../zencodec-types" }
 linear-srgb = "0.5.5"
-jxl = { path = "../jxl-rs/jxl", optional = true }
+jxl = { path = "../jxl-rs/jxl", package = "zenjxl-decoder", optional = true }
 jxl-encoder = { path = "../jxl-encoder-rs/jxl_encoder", optional = true, default-features = false, features = ["std"] }
 
 [dev-dependencies]
