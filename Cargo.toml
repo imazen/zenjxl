@@ -14,7 +14,7 @@ thiserror = { version = "2.0", default-features = false }
 rgb = { version = "0.8", default-features = false, features = ["as-bytes"] }
 imgref = "1.12"
 bytemuck = { version = "1.25", default-features = false }
-enough = "0.3"
+enough = "0.4"
 zencodec-types = { path = "../zencodec-types" }
 linear-srgb = "0.5.5"
 jxl = { path = "../jxl-rs/jxl", optional = true }
