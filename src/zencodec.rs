@@ -388,17 +388,17 @@ mod encoding {
             let h = pixels.rows();
 
             if d == PixelDescriptor::RGB8_SRGB {
-                let raw = collect_contiguous_bytes(&pixels);
+                let raw = pixels.contiguous_bytes();
                 self.job.do_encode(&raw, PixelLayout::Rgb8, w, h)
             } else if d == PixelDescriptor::RGBA8_SRGB {
-                let raw = collect_contiguous_bytes(&pixels);
+                let raw = pixels.contiguous_bytes();
                 self.job.do_encode(&raw, PixelLayout::Rgba8, w, h)
             } else if d == PixelDescriptor::BGRA8_SRGB {
-                let raw = collect_contiguous_bytes(&pixels);
+                let raw = pixels.contiguous_bytes();
                 self.job.do_encode(&raw, PixelLayout::Bgra8, w, h)
             } else if d == PixelDescriptor::GRAY8_SRGB {
                 // Gray8 handling depends on lossy vs lossless
-                let raw = collect_contiguous_bytes(&pixels);
+                let raw = pixels.contiguous_bytes();
                 match &self.job.config.config {
                     JxlConfig::Lossless(_) => self.job.do_encode(&raw, PixelLayout::Gray8, w, h),
                     JxlConfig::Lossy(_) => {
@@ -409,12 +409,12 @@ mod encoding {
                 }
             } else if d == PixelDescriptor::RGBF32_LINEAR {
                 // JXL natively supports linear f32 RGB
-                let raw = collect_contiguous_bytes(&pixels);
+                let raw = pixels.contiguous_bytes();
                 self.job.do_encode(&raw, PixelLayout::RgbLinearF32, w, h)
             } else if d == PixelDescriptor::RGBAF32_LINEAR {
                 // No native RGBA f32 layout — convert linear→sRGB u8, encode as RGBA8
                 use linear_srgb::default::linear_to_srgb_u8;
-                let raw = collect_contiguous_bytes(&pixels);
+                let raw = pixels.contiguous_bytes();
                 let floats: &[f32] = bytemuck::cast_slice(&raw);
                 let rgba: Vec<u8> = floats
                     .chunks_exact(4)
@@ -431,7 +431,7 @@ mod encoding {
             } else if d == PixelDescriptor::GRAYF32_LINEAR {
                 // Convert linear gray → sRGB u8
                 use linear_srgb::default::linear_to_srgb_u8;
-                let raw = collect_contiguous_bytes(&pixels);
+                let raw = pixels.contiguous_bytes();
                 let floats: &[f32] = bytemuck::cast_slice(&raw);
                 match &self.job.config.config {
                     JxlConfig::Lossless(_) => {
@@ -531,17 +531,6 @@ mod encoding {
                 "JPEG XL does not support animation encoding via this API".into(),
             ))
         }
-    }
-
-    /// Collect contiguous bytes from a PixelSlice, row by row.
-    fn collect_contiguous_bytes(pixels: &PixelSlice<'_>) -> Vec<u8> {
-        let h = pixels.rows() as usize;
-        let row_len = pixels.width() as usize * pixels.descriptor().bytes_per_pixel();
-        let mut buf = Vec::with_capacity(h * row_len);
-        for y in 0..h {
-            buf.extend_from_slice(pixels.row(y as u32));
-        }
-        buf
     }
 
     /// Map 0-100 quality percentage to butteraugli distance.
@@ -855,14 +844,6 @@ mod decoding {
             ))
         }
 
-        fn next_frame_rows(
-            &mut self,
-            _sink: &mut dyn zencodec_types::DecodeRowSink,
-        ) -> Result<Option<ImageInfo>, JxlError> {
-            Err(JxlError::InvalidInput(
-                "JPEG XL animation decoding not yet supported via this API".into(),
-            ))
-        }
     }
 
     fn convert_info(info: &crate::decode::JxlInfo) -> ImageInfo {
