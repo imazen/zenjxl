@@ -21,4 +21,8 @@ pub enum JxlError {
     /// Resource limit exceeded.
     #[error("limit exceeded: {0}")]
     LimitExceeded(alloc::string::String),
+
+    /// Unsupported codec operation.
+    #[error(transparent)]
+    UnsupportedOperation(#[from] zencodec_types::UnsupportedOperation),
 }
