@@ -18,7 +18,7 @@ use zencodec_types::{
 #[cfg(feature = "decode")]
 use zencodec_types::{DecodeOutput, ImageInfo, OutputInfo};
 #[cfg(feature = "encode")]
-use zencodec_types::{EncodeOutput, ImageMetadata};
+use zencodec_types::{EncodeOutput, MetadataView};
 
 use crate::error::JxlError;
 
@@ -345,7 +345,7 @@ mod encoding {
             self
         }
 
-        fn with_metadata(mut self, meta: &'a ImageMetadata<'a>) -> Self {
+        fn with_metadata(mut self, meta: &'a MetadataView<'a>) -> Self {
             if let Some(icc) = meta.icc_profile {
                 self.icc = Some(icc);
             }
