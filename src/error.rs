@@ -7,7 +7,7 @@ pub enum JxlError {
     /// JXL decoding error from jxl-rs.
     #[cfg(feature = "decode")]
     #[error("JXL decode error: {0}")]
-    Decode(#[from] jxl::error::Error),
+    Decode(#[from] jxl::api::Error),
 
     /// JXL encoding error from jxl-encoder.
     #[cfg(feature = "encode")]

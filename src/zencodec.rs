@@ -161,6 +161,8 @@ mod encoding {
         .with_encode_cancel(true)
         .with_cheap_probe(true)
         .with_lossless(true)
+        .with_lossy(true)
+        .with_native_alpha(true)
         .with_effort_range(1, 10)
         .with_quality_range(0.0, 100.0);
 
@@ -587,7 +589,9 @@ mod decoding {
     static DECODE_CAPS: CodecCapabilities = CodecCapabilities::new()
         .with_decode_icc(true)
         .with_decode_cicp(true)
-        .with_cheap_probe(true);
+        .with_cheap_probe(true)
+        .with_native_alpha(true)
+        .with_enforces_max_pixels(true);
 
     impl zencodec_types::DecoderConfig for JxlDecoderConfig {
         type Error = JxlError;
@@ -666,7 +670,6 @@ mod decoding {
                 "JPEG XL animation decoding not yet supported via this API".into(),
             ))
         }
-
     }
 
     /// JPEG XL single-image decoder.
@@ -843,7 +846,6 @@ mod decoding {
                 "JPEG XL animation decoding not yet supported via this API".into(),
             ))
         }
-
     }
 
     fn convert_info(info: &crate::decode::JxlInfo) -> ImageInfo {
@@ -858,7 +860,9 @@ mod decoding {
             zi = zi.with_icc_profile(icc.clone());
         }
         if info.orientation != 1 {
-            zi = zi.with_orientation(zencodec_types::Orientation::from_exif(info.orientation as u16));
+            zi = zi.with_orientation(zencodec_types::Orientation::from_exif(
+                info.orientation as u16,
+            ));
         }
         if let Some((cp, tc, mc, fr)) = info.cicp {
             zi = zi.with_cicp(zencodec_types::Cicp::new(cp, tc, mc, fr));

@@ -6,8 +6,9 @@ use alloc::vec::Vec;
 use imgref::ImgVec;
 use zencodec_types::PixelData;
 
-use jxl::api::{JxlDecoder, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat, ProcessingResult};
-use jxl::headers::extra_channels::ExtraChannel;
+use jxl::api::{
+    ExtraChannel, JxlDecoder, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat, ProcessingResult,
+};
 
 use crate::error::JxlError;
 
@@ -76,7 +77,7 @@ impl JxlLimits {
 
 use jxl::api::{JxlColorEncoding, JxlColorProfile, JxlPrimaries, JxlTransferFunction};
 
-fn map_err(e: jxl::error::Error) -> JxlError {
+fn map_err(e: jxl::api::Error) -> JxlError {
     JxlError::Decode(e)
 }
 
@@ -180,7 +181,7 @@ pub fn decode(data: &[u8], limits: Option<&JxlLimits>) -> Result<JxlDecodeOutput
 
     if let Some(lim) = limits {
         if let Some(max_px) = lim.max_pixels {
-            options.pixel_limit = Some(max_px as usize);
+            options.limits.max_pixels = Some(max_px as usize);
         }
     }
 
