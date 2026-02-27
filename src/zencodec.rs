@@ -1,9 +1,22 @@
 //! zencodec-types trait implementations for JPEG XL.
 //!
-//! [`JxlEncoderConfig`] implements [`EncoderConfig`](zencodec_types::EncoderConfig)
-//! (encode feature).
-//! [`JxlDecoderConfig`] implements [`DecoderConfig`](zencodec_types::DecoderConfig)
-//! (decode feature).
+//! Provides [`JxlEncoderConfig`] and [`JxlDecoderConfig`] types that implement
+//! the 4-layer trait hierarchy from zencodec-types, wrapping the native zenjxl API.
+//!
+//! The native API remains untouched — this is a thin adapter layer.
+//!
+//! # Trait mapping
+//!
+//! | zencodec-types | zenjxl adapter |
+//! |----------------|----------------|
+//! | `EncoderConfig` | [`JxlEncoderConfig`] |
+//! | `EncodeJob<'a>` | [`JxlEncodeJob`] |
+//! | `EncodeRgb8` etc. | [`JxlEncoder`] |
+//! | `FrameEncodeRgb8` etc. | [`JxlFrameEncoder`] |
+//! | `DecoderConfig` | [`JxlDecoderConfig`] |
+//! | `DecodeJob<'a>` | [`JxlDecodeJob`] |
+//! | `Decode` | [`JxlDecoder`] |
+//! | `FrameDecode` | [`JxlFrameDecoder`] |
 
 #[cfg(feature = "encode")]
 use alloc::vec::Vec;
@@ -11,14 +24,11 @@ use alloc::vec::Vec;
 #[cfg(feature = "decode")]
 use rgb::{Gray, Rgb, Rgba};
 
-use zencodec_types::{
-    CodecCapabilities, ImageFormat, PixelDescriptor, PixelSlice, PixelSliceMut, ResourceLimits,
-    Stop,
-};
 #[cfg(feature = "decode")]
 use zencodec_types::{DecodeOutput, ImageInfo, OutputInfo};
 #[cfg(feature = "encode")]
 use zencodec_types::{EncodeOutput, MetadataView};
+use zencodec_types::{ImageFormat, PixelDescriptor, PixelSlice, ResourceLimits, Stop};
 
 use crate::error::JxlError;
 
@@ -28,6 +38,10 @@ use crate::error::JxlError;
 mod encoding {
     use super::*;
     use jxl_encoder::{LosslessConfig, LossyConfig, PixelLayout};
+    use rgb::{Gray, Rgb, Rgba};
+    // Import traits so .job() and .encoder() are visible on inherent methods.
+    use zencodec_types::EncodeJob as _;
+    use zencodec_types::EncoderConfig as _;
 
     /// Internal: lossy or lossless JXL config.
     #[derive(Clone, Debug)]
@@ -146,6 +160,73 @@ mod encoding {
             }
             self
         }
+
+        // --- Convenience methods (inherent, use trait flow internally) ---
+
+        /// Set calibrated quality (inherent convenience, delegates to trait).
+        #[must_use]
+        pub fn with_calibrated_quality(self, quality: f32) -> Self {
+            <Self as zencodec_types::EncoderConfig>::with_generic_quality(self, quality)
+        }
+
+        /// Get calibrated quality (inherent convenience, delegates to trait).
+        pub fn calibrated_quality(&self) -> Option<f32> {
+            <Self as zencodec_types::EncoderConfig>::generic_quality(self)
+        }
+
+        /// Convenience: encode RGB8 pixels with this config.
+        pub fn encode_rgb8(
+            &self,
+            img: zencodec_types::ImgRef<'_, Rgb<u8>>,
+        ) -> Result<EncodeOutput, JxlError> {
+            use zencodec_types::EncodeRgb8;
+            self.job().encoder()?.encode_rgb8(PixelSlice::from(img))
+        }
+
+        /// Convenience: encode RGBA8 pixels with this config.
+        pub fn encode_rgba8(
+            &self,
+            img: zencodec_types::ImgRef<'_, Rgba<u8>>,
+        ) -> Result<EncodeOutput, JxlError> {
+            use zencodec_types::EncodeRgba8;
+            self.job().encoder()?.encode_rgba8(PixelSlice::from(img))
+        }
+
+        /// Convenience: encode Gray8 pixels with this config.
+        pub fn encode_gray8(
+            &self,
+            img: zencodec_types::ImgRef<'_, Gray<u8>>,
+        ) -> Result<EncodeOutput, JxlError> {
+            use zencodec_types::EncodeGray8;
+            self.job().encoder()?.encode_gray8(PixelSlice::from(img))
+        }
+
+        /// Convenience: encode RGB f32 pixels with this config.
+        pub fn encode_rgb_f32(
+            &self,
+            img: zencodec_types::ImgRef<'_, Rgb<f32>>,
+        ) -> Result<EncodeOutput, JxlError> {
+            use zencodec_types::EncodeRgbF32;
+            self.job().encoder()?.encode_rgb_f32(PixelSlice::from(img))
+        }
+
+        /// Convenience: encode RGBA f32 pixels with this config.
+        pub fn encode_rgba_f32(
+            &self,
+            img: zencodec_types::ImgRef<'_, Rgba<f32>>,
+        ) -> Result<EncodeOutput, JxlError> {
+            use zencodec_types::EncodeRgbaF32;
+            self.job().encoder()?.encode_rgba_f32(PixelSlice::from(img))
+        }
+
+        /// Convenience: encode Gray f32 pixels with this config.
+        pub fn encode_gray_f32(
+            &self,
+            img: zencodec_types::ImgRef<'_, Gray<f32>>,
+        ) -> Result<EncodeOutput, JxlError> {
+            use zencodec_types::EncodeGrayF32;
+            self.job().encoder()?.encode_gray_f32(PixelSlice::from(img))
+        }
     }
 
     impl Default for JxlEncoderConfig {
@@ -153,18 +234,6 @@ mod encoding {
             Self::lossy(1.0)
         }
     }
-
-    static ENCODE_CAPS: CodecCapabilities = CodecCapabilities::new()
-        .with_encode_icc(true)
-        .with_encode_exif(true)
-        .with_encode_xmp(true)
-        .with_encode_cancel(true)
-        .with_cheap_probe(true)
-        .with_lossless(true)
-        .with_lossy(true)
-        .with_native_alpha(true)
-        .with_effort_range(1, 10)
-        .with_quality_range(0.0, 100.0);
 
     impl zencodec_types::EncoderConfig for JxlEncoderConfig {
         type Error = JxlError;
@@ -186,24 +255,20 @@ mod encoding {
             ]
         }
 
-        fn capabilities() -> &'static CodecCapabilities {
-            &ENCODE_CAPS
-        }
-
-        fn calibrated_quality(&self) -> Option<f32> {
+        fn generic_quality(&self) -> Option<f32> {
             self.quality
         }
 
-        fn with_calibrated_quality(mut self, quality: f32) -> Self {
+        fn with_generic_quality(mut self, quality: f32) -> Self {
             self = self.with_quality(quality);
             self
         }
 
-        fn effort(&self) -> Option<i32> {
+        fn generic_effort(&self) -> Option<i32> {
             self.effort
         }
 
-        fn with_effort(mut self, effort: i32) -> Self {
+        fn with_generic_effort(mut self, effort: i32) -> Self {
             let clamped = effort.clamp(1, 10) as u32;
             self = JxlEncoderConfig::with_effort(self, clamped);
             self
@@ -339,8 +404,8 @@ mod encoding {
 
     impl<'a> zencodec_types::EncodeJob<'a> for JxlEncodeJob<'a> {
         type Error = JxlError;
-        type Encoder = JxlEncoder<'a>;
-        type FrameEncoder = JxlFrameEncoder;
+        type Enc = JxlEncoder<'a>;
+        type FrameEnc = JxlFrameEncoder;
 
         fn with_stop(mut self, stop: &'a dyn Stop) -> Self {
             self.stop = Some(stop);
@@ -365,8 +430,8 @@ mod encoding {
             self
         }
 
-        fn encoder(self) -> JxlEncoder<'a> {
-            JxlEncoder { job: self }
+        fn encoder(self) -> Result<JxlEncoder<'a>, JxlError> {
+            Ok(JxlEncoder { job: self })
         }
 
         fn frame_encoder(self) -> Result<JxlFrameEncoder, JxlError> {
@@ -377,122 +442,197 @@ mod encoding {
     }
 
     /// JPEG XL single-image encoder.
+    ///
+    /// Implements per-format encode traits (`EncodeRgb8`, `EncodeRgba8`, etc.)
+    /// for each pixel format JXL accepts.
     pub struct JxlEncoder<'a> {
         job: JxlEncodeJob<'a>,
     }
 
-    impl<'a> zencodec_types::Encoder for JxlEncoder<'a> {
-        type Error = JxlError;
+    // ── Per-format encode trait impls ────────────────────────────────────────
 
-        fn encode(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, JxlError> {
-            let d = pixels.descriptor();
+    impl zencodec_types::EncodeRgb8 for JxlEncoder<'_> {
+        type Error = JxlError;
+        fn encode_rgb8(self, pixels: PixelSlice<'_, Rgb<u8>>) -> Result<EncodeOutput, JxlError> {
             let w = pixels.width();
             let h = pixels.rows();
-
-            if d == PixelDescriptor::RGB8_SRGB {
-                let raw = pixels.contiguous_bytes();
-                self.job.do_encode(&raw, PixelLayout::Rgb8, w, h)
-            } else if d == PixelDescriptor::RGBA8_SRGB {
-                let raw = pixels.contiguous_bytes();
-                self.job.do_encode(&raw, PixelLayout::Rgba8, w, h)
-            } else if d == PixelDescriptor::BGRA8_SRGB {
-                let raw = pixels.contiguous_bytes();
-                self.job.do_encode(&raw, PixelLayout::Bgra8, w, h)
-            } else if d == PixelDescriptor::GRAY8_SRGB {
-                // Gray8 handling depends on lossy vs lossless
-                let raw = pixels.contiguous_bytes();
-                match &self.job.config.config {
-                    JxlConfig::Lossless(_) => self.job.do_encode(&raw, PixelLayout::Gray8, w, h),
-                    JxlConfig::Lossy(_) => {
-                        // Expand gray to RGB for lossy
-                        let rgb: Vec<u8> = raw.iter().flat_map(|&g| [g, g, g]).collect();
-                        self.job.do_encode(&rgb, PixelLayout::Rgb8, w, h)
-                    }
-                }
-            } else if d == PixelDescriptor::RGBF32_LINEAR {
-                // JXL natively supports linear f32 RGB
-                let raw = pixels.contiguous_bytes();
-                self.job.do_encode(&raw, PixelLayout::RgbLinearF32, w, h)
-            } else if d == PixelDescriptor::RGBAF32_LINEAR {
-                // No native RGBA f32 layout — convert linear→sRGB u8, encode as RGBA8
-                use linear_srgb::default::linear_to_srgb_u8;
-                let raw = pixels.contiguous_bytes();
-                let floats: &[f32] = bytemuck::cast_slice(&raw);
-                let rgba: Vec<u8> = floats
-                    .chunks_exact(4)
-                    .flat_map(|p| {
-                        [
-                            linear_to_srgb_u8(p[0].clamp(0.0, 1.0)),
-                            linear_to_srgb_u8(p[1].clamp(0.0, 1.0)),
-                            linear_to_srgb_u8(p[2].clamp(0.0, 1.0)),
-                            (p[3].clamp(0.0, 1.0) * 255.0 + 0.5) as u8,
-                        ]
-                    })
-                    .collect();
-                self.job.do_encode(&rgba, PixelLayout::Rgba8, w, h)
-            } else if d == PixelDescriptor::GRAYF32_LINEAR {
-                // Convert linear gray → sRGB u8
-                use linear_srgb::default::linear_to_srgb_u8;
-                let raw = pixels.contiguous_bytes();
-                let floats: &[f32] = bytemuck::cast_slice(&raw);
-                match &self.job.config.config {
-                    JxlConfig::Lossless(_) => {
-                        let bytes: Vec<u8> = floats
-                            .iter()
-                            .map(|g| linear_to_srgb_u8(g.clamp(0.0, 1.0)))
-                            .collect();
-                        self.job.do_encode(&bytes, PixelLayout::Gray8, w, h)
-                    }
-                    JxlConfig::Lossy(_) => {
-                        let bytes: Vec<u8> = floats
-                            .iter()
-                            .flat_map(|g| {
-                                let v = linear_to_srgb_u8(g.clamp(0.0, 1.0));
-                                [v, v, v]
-                            })
-                            .collect();
-                        self.job.do_encode(&bytes, PixelLayout::Rgb8, w, h)
-                    }
-                }
-            } else {
-                Err(JxlError::InvalidInput(alloc::format!(
-                    "unsupported pixel format: {:?}",
-                    d
-                )))
-            }
-        }
-
-        fn push_rows(&mut self, _rows: PixelSlice<'_>) -> Result<(), JxlError> {
-            Err(JxlError::InvalidInput(
-                "JXL encoder does not support row-level push".into(),
-            ))
-        }
-
-        fn finish(self) -> Result<EncodeOutput, JxlError> {
-            Err(JxlError::InvalidInput(
-                "JXL encoder does not support row-level push/finish".into(),
-            ))
-        }
-
-        fn encode_from(
-            self,
-            _source: &mut dyn FnMut(u32, PixelSliceMut<'_>) -> usize,
-        ) -> Result<EncodeOutput, JxlError> {
-            Err(JxlError::InvalidInput(
-                "JXL encoder does not support pull-based encoding".into(),
-            ))
+            let data = pixels.contiguous_bytes();
+            self.job.do_encode(&data, PixelLayout::Rgb8, w, h)
         }
     }
+
+    impl zencodec_types::EncodeRgba8 for JxlEncoder<'_> {
+        type Error = JxlError;
+        fn encode_rgba8(self, pixels: PixelSlice<'_, Rgba<u8>>) -> Result<EncodeOutput, JxlError> {
+            let w = pixels.width();
+            let h = pixels.rows();
+            let data = pixels.contiguous_bytes();
+            self.job.do_encode(&data, PixelLayout::Rgba8, w, h)
+        }
+    }
+
+    impl zencodec_types::EncodeGray8 for JxlEncoder<'_> {
+        type Error = JxlError;
+        fn encode_gray8(self, pixels: PixelSlice<'_, Gray<u8>>) -> Result<EncodeOutput, JxlError> {
+            let w = pixels.width();
+            let h = pixels.rows();
+            let raw = pixels.contiguous_bytes();
+            match &self.job.config.config {
+                JxlConfig::Lossless(_) => self.job.do_encode(&raw, PixelLayout::Gray8, w, h),
+                JxlConfig::Lossy(_) => {
+                    // Expand gray to RGB for lossy
+                    let rgb: Vec<u8> = raw.iter().flat_map(|&g| [g, g, g]).collect();
+                    self.job.do_encode(&rgb, PixelLayout::Rgb8, w, h)
+                }
+            }
+        }
+    }
+
+    impl zencodec_types::EncodeRgb16 for JxlEncoder<'_> {
+        type Error = JxlError;
+        fn encode_rgb16(
+            self,
+            pixels: PixelSlice<'_, rgb::Rgb<u16>>,
+        ) -> Result<EncodeOutput, JxlError> {
+            // Convert 16-bit RGB to 8-bit RGB for encoding
+            let w = pixels.width();
+            let h = pixels.rows();
+            let raw = pixels.contiguous_bytes();
+            let rgb: Vec<u8> = raw
+                .chunks_exact(2)
+                .map(|c| (u16::from_le_bytes([c[0], c[1]]) >> 8) as u8)
+                .collect();
+            self.job.do_encode(&rgb, PixelLayout::Rgb8, w, h)
+        }
+    }
+
+    impl zencodec_types::EncodeRgba16 for JxlEncoder<'_> {
+        type Error = JxlError;
+        fn encode_rgba16(
+            self,
+            pixels: PixelSlice<'_, rgb::Rgba<u16>>,
+        ) -> Result<EncodeOutput, JxlError> {
+            // Convert 16-bit RGBA to 8-bit RGBA for encoding
+            let w = pixels.width();
+            let h = pixels.rows();
+            let raw = pixels.contiguous_bytes();
+            let rgba: Vec<u8> = raw
+                .chunks_exact(2)
+                .map(|c| (u16::from_le_bytes([c[0], c[1]]) >> 8) as u8)
+                .collect();
+            self.job.do_encode(&rgba, PixelLayout::Rgba8, w, h)
+        }
+    }
+
+    impl zencodec_types::EncodeGray16 for JxlEncoder<'_> {
+        type Error = JxlError;
+        fn encode_gray16(
+            self,
+            pixels: PixelSlice<'_, Gray<u16>>,
+        ) -> Result<EncodeOutput, JxlError> {
+            let w = pixels.width();
+            let h = pixels.rows();
+            let raw = pixels.contiguous_bytes();
+            let bytes: Vec<u8> = raw
+                .chunks_exact(2)
+                .map(|c| (u16::from_le_bytes([c[0], c[1]]) >> 8) as u8)
+                .collect();
+            match &self.job.config.config {
+                JxlConfig::Lossless(_) => self.job.do_encode(&bytes, PixelLayout::Gray8, w, h),
+                JxlConfig::Lossy(_) => {
+                    let rgb: Vec<u8> = bytes.iter().flat_map(|&g| [g, g, g]).collect();
+                    self.job.do_encode(&rgb, PixelLayout::Rgb8, w, h)
+                }
+            }
+        }
+    }
+
+    impl zencodec_types::EncodeRgbF32 for JxlEncoder<'_> {
+        type Error = JxlError;
+        fn encode_rgb_f32(
+            self,
+            pixels: PixelSlice<'_, Rgb<f32>>,
+        ) -> Result<EncodeOutput, JxlError> {
+            // JXL natively supports linear f32 RGB
+            let w = pixels.width();
+            let h = pixels.rows();
+            let data = pixels.contiguous_bytes();
+            self.job.do_encode(&data, PixelLayout::RgbLinearF32, w, h)
+        }
+    }
+
+    impl zencodec_types::EncodeRgbaF32 for JxlEncoder<'_> {
+        type Error = JxlError;
+        fn encode_rgba_f32(
+            self,
+            pixels: PixelSlice<'_, Rgba<f32>>,
+        ) -> Result<EncodeOutput, JxlError> {
+            // No native RGBA f32 layout — convert linear→sRGB u8, encode as RGBA8
+            use linear_srgb::default::linear_to_srgb_u8;
+            let w = pixels.width();
+            let h = pixels.rows();
+            let raw = pixels.contiguous_bytes();
+            let floats: &[f32] = bytemuck::cast_slice(&raw);
+            let rgba: Vec<u8> = floats
+                .chunks_exact(4)
+                .flat_map(|p| {
+                    [
+                        linear_to_srgb_u8(p[0].clamp(0.0, 1.0)),
+                        linear_to_srgb_u8(p[1].clamp(0.0, 1.0)),
+                        linear_to_srgb_u8(p[2].clamp(0.0, 1.0)),
+                        (p[3].clamp(0.0, 1.0) * 255.0 + 0.5) as u8,
+                    ]
+                })
+                .collect();
+            self.job.do_encode(&rgba, PixelLayout::Rgba8, w, h)
+        }
+    }
+
+    impl zencodec_types::EncodeGrayF32 for JxlEncoder<'_> {
+        type Error = JxlError;
+        fn encode_gray_f32(
+            self,
+            pixels: PixelSlice<'_, Gray<f32>>,
+        ) -> Result<EncodeOutput, JxlError> {
+            // Convert linear gray → sRGB u8
+            use linear_srgb::default::linear_to_srgb_u8;
+            let w = pixels.width();
+            let h = pixels.rows();
+            let raw = pixels.contiguous_bytes();
+            let floats: &[f32] = bytemuck::cast_slice(&raw);
+            match &self.job.config.config {
+                JxlConfig::Lossless(_) => {
+                    let bytes: Vec<u8> = floats
+                        .iter()
+                        .map(|g| linear_to_srgb_u8(g.clamp(0.0, 1.0)))
+                        .collect();
+                    self.job.do_encode(&bytes, PixelLayout::Gray8, w, h)
+                }
+                JxlConfig::Lossy(_) => {
+                    let bytes: Vec<u8> = floats
+                        .iter()
+                        .flat_map(|g| {
+                            let v = linear_to_srgb_u8(g.clamp(0.0, 1.0));
+                            [v, v, v]
+                        })
+                        .collect();
+                    self.job.do_encode(&bytes, PixelLayout::Rgb8, w, h)
+                }
+            }
+        }
+    }
+
+    // ── Frame Encoder ───────────────────────────────────────────────────────
 
     /// Stub frame encoder (JXL doesn't support animation encoding via this API).
     pub struct JxlFrameEncoder;
 
-    impl zencodec_types::FrameEncoder for JxlFrameEncoder {
+    impl zencodec_types::FrameEncodeRgb8 for JxlFrameEncoder {
         type Error = JxlError;
 
-        fn push_frame(
+        fn push_frame_rgb8(
             &mut self,
-            _pixels: PixelSlice<'_>,
+            _pixels: PixelSlice<'_, Rgb<u8>>,
             _duration_ms: u32,
         ) -> Result<(), JxlError> {
             Err(JxlError::InvalidInput(
@@ -500,35 +640,27 @@ mod encoding {
             ))
         }
 
-        fn begin_frame(&mut self, _duration_ms: u32) -> Result<(), JxlError> {
+        fn finish_rgb8(self) -> Result<EncodeOutput, JxlError> {
             Err(JxlError::InvalidInput(
                 "JPEG XL does not support animation encoding via this API".into(),
             ))
         }
+    }
 
-        fn push_rows(&mut self, _rows: PixelSlice<'_>) -> Result<(), JxlError> {
-            Err(JxlError::InvalidInput(
-                "JPEG XL does not support animation encoding via this API".into(),
-            ))
-        }
+    impl zencodec_types::FrameEncodeRgba8 for JxlFrameEncoder {
+        type Error = JxlError;
 
-        fn end_frame(&mut self) -> Result<(), JxlError> {
-            Err(JxlError::InvalidInput(
-                "JPEG XL does not support animation encoding via this API".into(),
-            ))
-        }
-
-        fn pull_frame(
+        fn push_frame_rgba8(
             &mut self,
+            _pixels: PixelSlice<'_, Rgba<u8>>,
             _duration_ms: u32,
-            _source: &mut dyn FnMut(u32, PixelSliceMut<'_>) -> usize,
         ) -> Result<(), JxlError> {
             Err(JxlError::InvalidInput(
                 "JPEG XL does not support animation encoding via this API".into(),
             ))
         }
 
-        fn finish(self) -> Result<EncodeOutput, JxlError> {
+        fn finish_rgba8(self) -> Result<EncodeOutput, JxlError> {
             Err(JxlError::InvalidInput(
                 "JPEG XL does not support animation encoding via this API".into(),
             ))
@@ -556,6 +688,9 @@ pub use encoding::{JxlEncodeJob, JxlEncoder, JxlEncoderConfig, JxlFrameEncoder};
 #[cfg(feature = "decode")]
 mod decoding {
     use super::*;
+    // Import traits so .job(), .probe(), .decoder() are visible on inherent methods.
+    use zencodec_types::DecodeJob as _;
+    use zencodec_types::DecoderConfig as _;
 
     /// JPEG XL decoder configuration implementing [`zencodec_types::DecoderConfig`].
     #[derive(Clone, Debug)]
@@ -578,6 +713,79 @@ mod decoding {
             self.limits = limits;
             self
         }
+
+        // --- Convenience methods (inherent) ---
+
+        /// Convenience: probe image header.
+        pub fn probe_header(&self, data: &[u8]) -> Result<ImageInfo, JxlError> {
+            self.job().probe(data)
+        }
+
+        /// Convenience: probe full image metadata (may be expensive).
+        pub fn probe_full(&self, data: &[u8]) -> Result<ImageInfo, JxlError> {
+            self.job().probe_full(data)
+        }
+
+        /// Convenience: decode image with this config.
+        pub fn decode(&self, data: &[u8]) -> Result<DecodeOutput, JxlError> {
+            use zencodec_types::Decode;
+            self.job().decoder()?.decode(data, &[])
+        }
+
+        /// Convenience: decode into a pre-allocated RGB8 buffer.
+        pub fn decode_into_rgb8(
+            &self,
+            data: &[u8],
+            dst: zencodec_types::ImgRefMut<'_, Rgb<u8>>,
+        ) -> Result<ImageInfo, JxlError> {
+            self.job()
+                .decoder()?
+                .decode_into(data, zencodec_types::PixelSliceMut::from(dst))
+        }
+
+        /// Convenience: decode into a pre-allocated RGBA8 buffer.
+        pub fn decode_into_rgba8(
+            &self,
+            data: &[u8],
+            dst: zencodec_types::ImgRefMut<'_, Rgba<u8>>,
+        ) -> Result<ImageInfo, JxlError> {
+            self.job()
+                .decoder()?
+                .decode_into(data, zencodec_types::PixelSliceMut::from(dst))
+        }
+
+        /// Convenience: decode into a pre-allocated RGB f32 buffer.
+        pub fn decode_into_rgb_f32(
+            &self,
+            data: &[u8],
+            dst: zencodec_types::ImgRefMut<'_, Rgb<f32>>,
+        ) -> Result<ImageInfo, JxlError> {
+            self.job()
+                .decoder()?
+                .decode_into(data, zencodec_types::PixelSliceMut::from(dst))
+        }
+
+        /// Convenience: decode into a pre-allocated RGBA f32 buffer.
+        pub fn decode_into_rgba_f32(
+            &self,
+            data: &[u8],
+            dst: zencodec_types::ImgRefMut<'_, Rgba<f32>>,
+        ) -> Result<ImageInfo, JxlError> {
+            self.job()
+                .decoder()?
+                .decode_into(data, zencodec_types::PixelSliceMut::from(dst))
+        }
+
+        /// Convenience: decode into a pre-allocated Gray f32 buffer.
+        pub fn decode_into_gray_f32(
+            &self,
+            data: &[u8],
+            dst: zencodec_types::ImgRefMut<'_, Gray<f32>>,
+        ) -> Result<ImageInfo, JxlError> {
+            self.job()
+                .decoder()?
+                .decode_into(data, zencodec_types::PixelSliceMut::from(dst))
+        }
     }
 
     impl Default for JxlDecoderConfig {
@@ -585,13 +793,6 @@ mod decoding {
             Self::new()
         }
     }
-
-    static DECODE_CAPS: CodecCapabilities = CodecCapabilities::new()
-        .with_decode_icc(true)
-        .with_decode_cicp(true)
-        .with_cheap_probe(true)
-        .with_native_alpha(true)
-        .with_enforces_max_pixels(true);
 
     impl zencodec_types::DecoderConfig for JxlDecoderConfig {
         type Error = JxlError;
@@ -607,14 +808,16 @@ mod decoding {
                 PixelDescriptor::RGBA8_SRGB,
                 PixelDescriptor::GRAY8_SRGB,
                 PixelDescriptor::BGRA8_SRGB,
+                PixelDescriptor::RGB16_SRGB,
+                PixelDescriptor::RGBA16_SRGB,
+                PixelDescriptor::GRAY16_SRGB,
+                PixelDescriptor::GRAYA8_SRGB,
+                PixelDescriptor::GRAYA16_SRGB,
                 PixelDescriptor::RGBF32_LINEAR,
                 PixelDescriptor::RGBAF32_LINEAR,
                 PixelDescriptor::GRAYF32_LINEAR,
+                PixelDescriptor::GRAYAF32_LINEAR,
             ]
-        }
-
-        fn capabilities() -> &'static CodecCapabilities {
-            &DECODE_CAPS
         }
 
         fn job(&self) -> JxlDecodeJob<'_> {
@@ -622,11 +825,6 @@ mod decoding {
                 config: self,
                 limits: ResourceLimits::none(),
             }
-        }
-
-        fn probe_header(&self, data: &[u8]) -> Result<ImageInfo, Self::Error> {
-            let info = crate::decode::probe(data)?;
-            Ok(convert_info(&info))
         }
     }
 
@@ -638,8 +836,9 @@ mod decoding {
 
     impl<'a> zencodec_types::DecodeJob<'a> for JxlDecodeJob<'a> {
         type Error = JxlError;
-        type Decoder = JxlDecoder<'a>;
-        type FrameDecoder = JxlFrameDecoder;
+        type Dec = JxlDecoder<'a>;
+        type FrameDec = JxlFrameDecoder;
+
         fn with_stop(self, _stop: &'a dyn Stop) -> Self {
             self // JXL decoding is not cancellable
         }
@@ -649,20 +848,27 @@ mod decoding {
             self
         }
 
+        fn probe(&self, data: &[u8]) -> Result<ImageInfo, JxlError> {
+            let info = crate::decode::probe(data)?;
+            Ok(convert_info(&info))
+        }
+
         fn output_info(&self, data: &[u8]) -> Result<OutputInfo, JxlError> {
             let info = crate::decode::probe(data)?;
+            // Report native descriptor based on bit depth
+            let descriptor = native_descriptor(&info);
             Ok(OutputInfo::full_decode(
                 info.width,
                 info.height,
-                PixelDescriptor::RGB8_SRGB,
+                descriptor,
             ))
         }
 
-        fn decoder(self) -> JxlDecoder<'a> {
-            JxlDecoder {
+        fn decoder(self) -> Result<JxlDecoder<'a>, JxlError> {
+            Ok(JxlDecoder {
                 config: self.config,
                 limits: self.limits,
-            }
+            })
         }
 
         fn frame_decoder(self, _data: &[u8]) -> Result<JxlFrameDecoder, JxlError> {
@@ -678,26 +884,38 @@ mod decoding {
         limits: ResourceLimits,
     }
 
-    impl<'a> zencodec_types::Decoder for JxlDecoder<'a> {
-        type Error = JxlError;
+    impl<'a> JxlDecoder<'a> {
+        fn merge_limits(&self) -> Option<crate::decode::JxlLimits> {
+            let merged_pixels = self.limits.max_pixels.or(self.config.limits.max_pixels);
+            let merged_memory = self
+                .limits
+                .max_memory_bytes
+                .or(self.config.limits.max_memory_bytes);
 
-        fn decode(self, data: &[u8]) -> Result<DecodeOutput, JxlError> {
-            let merged_limits = self.merge_limits();
-            let result = crate::decode::decode(data, merged_limits.as_ref())?;
-            let info = convert_info(&result.info);
-            Ok(DecodeOutput::new(result.pixels, info))
+            if merged_pixels.is_some() || merged_memory.is_some() {
+                Some(crate::decode::JxlLimits {
+                    max_pixels: merged_pixels,
+                    max_memory_bytes: merged_memory,
+                })
+            } else {
+                None
+            }
         }
 
-        fn decode_into(
+        /// Decode into a pre-allocated buffer (inherent method).
+        pub fn decode_into<P>(
             self,
             data: &[u8],
-            mut dst: PixelSliceMut<'_>,
+            dst: zencodec_types::PixelSliceMut<'_, P>,
         ) -> Result<ImageInfo, JxlError> {
+            let mut dst = dst.erase();
             let d = dst.descriptor();
 
-            // Decode to native format first
+            // decode_into does its own row-by-row conversion from RGB8, so always
+            // request RGB8 from the underlying decoder. The Decode::decode() path
+            // handles full format negotiation instead.
             let merged_limits = self.merge_limits();
-            let result = crate::decode::decode(data, merged_limits.as_ref())?;
+            let result = crate::decode::decode(data, merged_limits.as_ref(), &[])?;
             let info = convert_info(&result.info);
             let src = result.pixels.into_rgb8();
             let w = src.width().min(dst.width() as usize);
@@ -794,57 +1012,61 @@ mod decoding {
 
             Ok(info)
         }
-
-        fn decode_rows(
-            self,
-            data: &[u8],
-            _sink: &mut dyn zencodec_types::DecodeRowSink,
-        ) -> Result<ImageInfo, JxlError> {
-            // JXL decoder doesn't support streaming rows — decode fully
-            let output = zencodec_types::Decoder::decode(self, data)?;
-            Ok(output.info().clone())
-        }
     }
 
-    impl<'a> JxlDecoder<'a> {
-        fn merge_limits(&self) -> Option<crate::decode::JxlLimits> {
-            let merged_pixels = self.limits.max_pixels.or(self.config.limits.max_pixels);
-            let merged_memory = self
-                .limits
-                .max_memory_bytes
-                .or(self.config.limits.max_memory_bytes);
+    impl zencodec_types::Decode for JxlDecoder<'_> {
+        type Error = JxlError;
 
-            if merged_pixels.is_some() || merged_memory.is_some() {
-                Some(crate::decode::JxlLimits {
-                    max_pixels: merged_pixels,
-                    max_memory_bytes: merged_memory,
-                })
-            } else {
-                None
-            }
+        fn decode(
+            self,
+            data: &[u8],
+            preferred: &[PixelDescriptor],
+        ) -> Result<DecodeOutput, JxlError> {
+            let merged_limits = self.merge_limits();
+            let result = crate::decode::decode(data, merged_limits.as_ref(), preferred)?;
+            let info = convert_info(&result.info);
+            Ok(DecodeOutput::new(result.pixels, info))
         }
     }
 
     /// Stub frame decoder (JXL animation not yet supported via this API).
     pub struct JxlFrameDecoder;
 
-    impl zencodec_types::FrameDecoder for JxlFrameDecoder {
+    impl zencodec_types::FrameDecode for JxlFrameDecoder {
         type Error = JxlError;
 
-        fn next_frame(&mut self) -> Result<Option<zencodec_types::DecodeFrame>, JxlError> {
+        fn next_frame(
+            &mut self,
+            _preferred: &[PixelDescriptor],
+        ) -> Result<Option<zencodec_types::DecodeFrame>, JxlError> {
             Err(JxlError::InvalidInput(
                 "JPEG XL animation decoding not yet supported via this API".into(),
             ))
         }
+    }
 
-        fn next_frame_into(
-            &mut self,
-            _dst: PixelSliceMut<'_>,
-            _prior_frame: Option<u32>,
-        ) -> Result<Option<ImageInfo>, JxlError> {
-            Err(JxlError::InvalidInput(
-                "JPEG XL animation decoding not yet supported via this API".into(),
-            ))
+    /// Return the native output descriptor for a JXL image based on its bit depth
+    /// and alpha presence. Used by `output_info()`.
+    fn native_descriptor(info: &crate::decode::JxlInfo) -> PixelDescriptor {
+        let bps = info.bit_depth.unwrap_or(8);
+        // We don't have access to the color profile during probe, so assume RGB.
+        // Grayscale negotiation happens in decode() where we have the profile.
+        if bps > 16 {
+            if info.has_alpha {
+                PixelDescriptor::RGBAF32_LINEAR
+            } else {
+                PixelDescriptor::RGBF32_LINEAR
+            }
+        } else if bps > 8 {
+            if info.has_alpha {
+                PixelDescriptor::RGBA16_SRGB
+            } else {
+                PixelDescriptor::RGB16_SRGB
+            }
+        } else if info.has_alpha {
+            PixelDescriptor::RGBA8_SRGB
+        } else {
+            PixelDescriptor::RGB8_SRGB
         }
     }
 
@@ -887,7 +1109,6 @@ mod tests {
     #[test]
     #[cfg(feature = "encode")]
     fn encoding_lossy_default() {
-        use zencodec_types::EncoderConfig;
         let enc = JxlEncoderConfig::lossy(1.0);
         let pixels = vec![
             Rgb {
@@ -907,7 +1128,6 @@ mod tests {
     #[test]
     #[cfg(feature = "encode")]
     fn encoding_lossless() {
-        use zencodec_types::EncoderConfig;
         let enc = JxlEncoderConfig::lossless();
         let pixels = vec![
             Rgb {
@@ -934,22 +1154,21 @@ mod tests {
     fn effort_and_quality_getters() {
         use zencodec_types::EncoderConfig;
         let enc = JxlEncoderConfig::lossy(1.0)
-            .with_calibrated_quality(75.0)
-            .with_effort(7);
-        assert_eq!(enc.effort(), Some(7));
-        assert_eq!(enc.calibrated_quality(), Some(75.0));
+            .with_generic_quality(75.0)
+            .with_generic_effort(7);
+        assert_eq!(enc.generic_effort(), Some(7));
+        assert_eq!(enc.generic_quality(), Some(75.0));
         assert_eq!(enc.is_lossless(), Some(false));
 
         let enc = enc.with_lossless(true);
         assert_eq!(enc.is_lossless(), Some(true));
         // Effort is preserved across lossless switch
-        assert_eq!(enc.effort(), Some(7));
+        assert_eq!(enc.generic_effort(), Some(7));
     }
 
     #[test]
     #[cfg(all(feature = "encode", feature = "decode"))]
     fn roundtrip() {
-        use zencodec_types::{DecoderConfig, EncoderConfig};
         let enc = JxlEncoderConfig::lossless();
         let pixels = vec![
             Rgb {
@@ -974,7 +1193,6 @@ mod tests {
     fn f32_roundtrip_all_simd_tiers() {
         use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
         use imgref::ImgVec;
-        use zencodec_types::{DecoderConfig, EncoderConfig};
 
         let report = for_each_token_permutation(CompileTimePolicy::Warn, |_perm| {
             // Encode linear f32 → JXL (native f32 path) → decode back to f32
@@ -1023,7 +1241,7 @@ mod tests {
     #[cfg(all(feature = "encode", feature = "decode"))]
     fn f32_rgba_decode_from_rgb() {
         use imgref::ImgVec;
-        use zencodec_types::{DecoderConfig, EncoderConfig, Rgba};
+        use zencodec_types::Rgba;
 
         // Encode as RGB f32 (native path), decode into RGBA f32 buffer
         let pixels: Vec<Rgb<f32>> = (0..16 * 16)
@@ -1071,7 +1289,7 @@ mod tests {
     #[cfg(all(feature = "encode", feature = "decode"))]
     fn f32_gray_roundtrip() {
         use imgref::ImgVec;
-        use zencodec_types::{DecoderConfig, EncoderConfig, Gray};
+        use zencodec_types::Gray;
 
         let pixels: Vec<Gray<f32>> = (0..16 * 16).map(|i| Gray(i as f32 / 255.0)).collect();
         let img = ImgVec::new(pixels, 16, 16);
@@ -1097,7 +1315,7 @@ mod tests {
     #[test]
     #[cfg(all(feature = "encode", feature = "decode"))]
     fn four_layer_encode_flow() {
-        use zencodec_types::{EncodeJob, Encoder, EncoderConfig, PixelSlice};
+        use zencodec_types::{EncodeJob, EncodeRgb8, EncoderConfig, PixelSlice};
 
         let pixels: Vec<Rgb<u8>> = vec![
             Rgb {
@@ -1113,7 +1331,8 @@ mod tests {
         let output = config
             .job()
             .encoder()
-            .encode(PixelSlice::from(img.as_ref()))
+            .unwrap()
+            .encode_rgb8(PixelSlice::from(img.as_ref()))
             .unwrap();
         assert!(!output.is_empty());
         assert_eq!(output.format(), ImageFormat::Jxl);
@@ -1122,7 +1341,7 @@ mod tests {
     #[test]
     #[cfg(all(feature = "encode", feature = "decode"))]
     fn four_layer_decode_flow() {
-        use zencodec_types::{DecodeJob, Decoder, DecoderConfig, EncoderConfig};
+        use zencodec_types::{Decode, DecodeJob, DecoderConfig};
 
         let pixels: Vec<Rgb<u8>> = vec![
             Rgb {
@@ -1138,7 +1357,12 @@ mod tests {
             .unwrap();
 
         let config = JxlDecoderConfig::new();
-        let decoded = config.job().decoder().decode(encoded.bytes()).unwrap();
+        let decoded = config
+            .job()
+            .decoder()
+            .unwrap()
+            .decode(encoded.bytes(), &[])
+            .unwrap();
         assert_eq!(decoded.width(), 8);
         assert_eq!(decoded.height(), 8);
     }
