@@ -3,8 +3,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use imgref::ImgVec;
-use zencodec_types::{ChannelLayout, ChannelType, PixelData, PixelDescriptor};
+use zencodec_types::{ChannelLayout, ChannelType, PixelBuffer, PixelDescriptor};
 
 use jxl::api::{
     ExtraChannel, JxlBitDepth, JxlColorEncoding, JxlColorProfile, JxlColorType, JxlDecoder,
@@ -42,7 +41,7 @@ pub struct JxlInfo {
 #[derive(Debug)]
 pub struct JxlDecodeOutput {
     /// Decoded pixel data.
-    pub pixels: PixelData,
+    pub pixels: PixelBuffer,
     /// Image metadata.
     pub info: JxlInfo,
 }
@@ -206,10 +205,10 @@ fn choose_pixel_format(
             // XYB-encoded JXL files have 3 color channels internally even if
             // the color profile says "gray", and jxl-rs rejects grayscale output
             // for 3-channel images.
-            if desc.layout == ChannelLayout::Gray || desc.layout == ChannelLayout::GrayAlpha {
-                if !is_gray {
-                    continue;
-                }
+            if (desc.layout == ChannelLayout::Gray || desc.layout == ChannelLayout::GrayAlpha)
+                && !is_gray
+            {
+                continue;
             }
             return build_chosen(ct, desc.layout, has_alpha, num_extra);
         }
@@ -461,10 +460,17 @@ pub fn decode(
     })
 }
 
-/// Interpret the raw output buffer as the appropriate `PixelData` variant.
-fn build_pixel_data(buf: &[u8], width: usize, height: usize, chosen: &ChosenFormat) -> PixelData {
+/// Interpret the raw output buffer as a [`PixelBuffer`].
+///
+/// Returns a type-erased PixelBuffer with the base descriptor (Unknown transfer
+/// function). The caller should set the correct transfer function from CICP metadata.
+fn build_pixel_data(buf: &[u8], width: usize, height: usize, chosen: &ChosenFormat) -> PixelBuffer {
     use rgb::{Gray, Rgb, Rgba};
-    use zencodec_types::GrayAlpha;
+
+    let w = width as u32;
+    let h = height as u32;
+    // from_pixels validates count — unwrap is safe here because the decoder
+    // guarantees buf has exactly width*height*bpp bytes.
 
     match (chosen.channel_type, &chosen.color_type) {
         // ── u8 variants ──────────────────────────────────────────────
@@ -473,40 +479,37 @@ fn build_pixel_data(buf: &[u8], width: usize, height: usize, chosen: &ChosenForm
                 .chunks_exact(3)
                 .map(|c| Rgb { r: c[0], g: c[1], b: c[2] })
                 .collect();
-            PixelData::Rgb8(ImgVec::new(pixels, width, height))
+            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
         (ChannelType::U8, JxlColorType::Rgba) => {
             let pixels: Vec<Rgba<u8>> = buf
                 .chunks_exact(4)
                 .map(|c| Rgba { r: c[0], g: c[1], b: c[2], a: c[3] })
                 .collect();
-            PixelData::Rgba8(ImgVec::new(pixels, width, height))
+            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
         (ChannelType::U8, JxlColorType::Grayscale) => {
             let pixels: Vec<Gray<u8>> = buf.iter().map(|&v| Gray::new(v)).collect();
-            PixelData::Gray8(ImgVec::new(pixels, width, height))
+            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
         (ChannelType::U8, JxlColorType::GrayscaleAlpha) => {
-            let pixels: Vec<GrayAlpha<u8>> = buf
-                .chunks_exact(2)
-                .map(|c| GrayAlpha::new(c[0], c[1]))
-                .collect();
-            PixelData::GrayAlpha8(ImgVec::new(pixels, width, height))
+            // GrayAlpha lacks bytemuck NoUninit, use from_vec with raw bytes
+            PixelBuffer::from_vec(buf.to_vec(), w, h, PixelDescriptor::GRAYA8).unwrap()
         }
         (ChannelType::U8, JxlColorType::Bgra) => {
             let pixels: Vec<rgb::alt::BGRA<u8>> = buf
                 .chunks_exact(4)
                 .map(|c| rgb::alt::BGRA { b: c[0], g: c[1], r: c[2], a: c[3] })
                 .collect();
-            PixelData::Bgra8(ImgVec::new(pixels, width, height))
+            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
         (ChannelType::U8, JxlColorType::Bgr) => {
-            // No Bgr8 variant in PixelData, convert to Rgb8
+            // No Bgr pixel type, convert to Rgb
             let pixels: Vec<Rgb<u8>> = buf
                 .chunks_exact(3)
                 .map(|c| Rgb { r: c[2], g: c[1], b: c[0] })
                 .collect();
-            PixelData::Rgb8(ImgVec::new(pixels, width, height))
+            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
 
         // ── u16 variants ─────────────────────────────────────────────
@@ -519,7 +522,7 @@ fn build_pixel_data(buf: &[u8], width: usize, height: usize, chosen: &ChosenForm
                     b: u16::from_ne_bytes([c[4], c[5]]),
                 })
                 .collect();
-            PixelData::Rgb16(ImgVec::new(pixels, width, height))
+            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
         (ChannelType::U16, JxlColorType::Rgba) => {
             let pixels: Vec<Rgba<u16>> = buf
@@ -531,24 +534,18 @@ fn build_pixel_data(buf: &[u8], width: usize, height: usize, chosen: &ChosenForm
                     a: u16::from_ne_bytes([c[6], c[7]]),
                 })
                 .collect();
-            PixelData::Rgba16(ImgVec::new(pixels, width, height))
+            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
         (ChannelType::U16, JxlColorType::Grayscale) => {
             let pixels: Vec<Gray<u16>> = buf
                 .chunks_exact(2)
                 .map(|c| Gray::new(u16::from_ne_bytes([c[0], c[1]])))
                 .collect();
-            PixelData::Gray16(ImgVec::new(pixels, width, height))
+            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
         (ChannelType::U16, JxlColorType::GrayscaleAlpha) => {
-            let pixels: Vec<GrayAlpha<u16>> = buf
-                .chunks_exact(4)
-                .map(|c| GrayAlpha::new(
-                    u16::from_ne_bytes([c[0], c[1]]),
-                    u16::from_ne_bytes([c[2], c[3]]),
-                ))
-                .collect();
-            PixelData::GrayAlpha16(ImgVec::new(pixels, width, height))
+            // GrayAlpha lacks bytemuck NoUninit, use from_vec with raw bytes
+            PixelBuffer::from_vec(buf.to_vec(), w, h, PixelDescriptor::GRAYA16).unwrap()
         }
 
         // ── f32 variants ─────────────────────────────────────────────
@@ -561,7 +558,7 @@ fn build_pixel_data(buf: &[u8], width: usize, height: usize, chosen: &ChosenForm
                     b: f32::from_ne_bytes([c[8], c[9], c[10], c[11]]),
                 })
                 .collect();
-            PixelData::RgbF32(ImgVec::new(pixels, width, height))
+            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
         (ChannelType::F32, JxlColorType::Rgba) => {
             let pixels: Vec<Rgba<f32>> = buf
@@ -573,24 +570,18 @@ fn build_pixel_data(buf: &[u8], width: usize, height: usize, chosen: &ChosenForm
                     a: f32::from_ne_bytes([c[12], c[13], c[14], c[15]]),
                 })
                 .collect();
-            PixelData::RgbaF32(ImgVec::new(pixels, width, height))
+            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
         (ChannelType::F32, JxlColorType::Grayscale) => {
             let pixels: Vec<Gray<f32>> = buf
                 .chunks_exact(4)
                 .map(|c| Gray::new(f32::from_ne_bytes([c[0], c[1], c[2], c[3]])))
                 .collect();
-            PixelData::GrayF32(ImgVec::new(pixels, width, height))
+            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
         (ChannelType::F32, JxlColorType::GrayscaleAlpha) => {
-            let pixels: Vec<GrayAlpha<f32>> = buf
-                .chunks_exact(8)
-                .map(|c| GrayAlpha::new(
-                    f32::from_ne_bytes([c[0], c[1], c[2], c[3]]),
-                    f32::from_ne_bytes([c[4], c[5], c[6], c[7]]),
-                ))
-                .collect();
-            PixelData::GrayAlphaF32(ImgVec::new(pixels, width, height))
+            // GrayAlpha lacks bytemuck NoUninit, use from_vec with raw bytes
+            PixelBuffer::from_vec(buf.to_vec(), w, h, PixelDescriptor::GRAYAF32).unwrap()
         }
 
         // Fallback: shouldn't happen given choose_pixel_format logic,
@@ -600,7 +591,7 @@ fn build_pixel_data(buf: &[u8], width: usize, height: usize, chosen: &ChosenForm
                 .chunks_exact(4)
                 .map(|c| Rgba { r: c[0], g: c[1], b: c[2], a: c[3] })
                 .collect();
-            PixelData::Rgba8(ImgVec::new(pixels, width, height))
+            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
     }
 }

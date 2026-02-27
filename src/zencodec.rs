@@ -249,6 +249,9 @@ mod encoding {
                 PixelDescriptor::RGBA8_SRGB,
                 PixelDescriptor::GRAY8_SRGB,
                 PixelDescriptor::BGRA8_SRGB,
+                PixelDescriptor::RGB16_SRGB,
+                PixelDescriptor::RGBA16_SRGB,
+                PixelDescriptor::GRAY16_SRGB,
                 PixelDescriptor::RGBF32_LINEAR,
                 PixelDescriptor::RGBAF32_LINEAR,
                 PixelDescriptor::GRAYF32_LINEAR,
@@ -494,15 +497,10 @@ mod encoding {
             self,
             pixels: PixelSlice<'_, rgb::Rgb<u16>>,
         ) -> Result<EncodeOutput, JxlError> {
-            // Convert 16-bit RGB to 8-bit RGB for encoding
             let w = pixels.width();
             let h = pixels.rows();
-            let raw = pixels.contiguous_bytes();
-            let rgb: Vec<u8> = raw
-                .chunks_exact(2)
-                .map(|c| (u16::from_le_bytes([c[0], c[1]]) >> 8) as u8)
-                .collect();
-            self.job.do_encode(&rgb, PixelLayout::Rgb8, w, h)
+            let data = pixels.contiguous_bytes();
+            self.job.do_encode(&data, PixelLayout::Rgb16, w, h)
         }
     }
 
@@ -512,15 +510,10 @@ mod encoding {
             self,
             pixels: PixelSlice<'_, rgb::Rgba<u16>>,
         ) -> Result<EncodeOutput, JxlError> {
-            // Convert 16-bit RGBA to 8-bit RGBA for encoding
             let w = pixels.width();
             let h = pixels.rows();
-            let raw = pixels.contiguous_bytes();
-            let rgba: Vec<u8> = raw
-                .chunks_exact(2)
-                .map(|c| (u16::from_le_bytes([c[0], c[1]]) >> 8) as u8)
-                .collect();
-            self.job.do_encode(&rgba, PixelLayout::Rgba8, w, h)
+            let data = pixels.contiguous_bytes();
+            self.job.do_encode(&data, PixelLayout::Rgba16, w, h)
         }
     }
 
@@ -532,18 +525,8 @@ mod encoding {
         ) -> Result<EncodeOutput, JxlError> {
             let w = pixels.width();
             let h = pixels.rows();
-            let raw = pixels.contiguous_bytes();
-            let bytes: Vec<u8> = raw
-                .chunks_exact(2)
-                .map(|c| (u16::from_le_bytes([c[0], c[1]]) >> 8) as u8)
-                .collect();
-            match &self.job.config.config {
-                JxlConfig::Lossless(_) => self.job.do_encode(&bytes, PixelLayout::Gray8, w, h),
-                JxlConfig::Lossy(_) => {
-                    let rgb: Vec<u8> = bytes.iter().flat_map(|&g| [g, g, g]).collect();
-                    self.job.do_encode(&rgb, PixelLayout::Rgb8, w, h)
-                }
-            }
+            let data = pixels.contiguous_bytes();
+            self.job.do_encode(&data, PixelLayout::Gray16, w, h)
         }
     }
 
@@ -567,24 +550,10 @@ mod encoding {
             self,
             pixels: PixelSlice<'_, Rgba<f32>>,
         ) -> Result<EncodeOutput, JxlError> {
-            // No native RGBA f32 layout — convert linear→sRGB u8, encode as RGBA8
-            use linear_srgb::default::linear_to_srgb_u8;
             let w = pixels.width();
             let h = pixels.rows();
-            let raw = pixels.contiguous_bytes();
-            let floats: &[f32] = bytemuck::cast_slice(&raw);
-            let rgba: Vec<u8> = floats
-                .chunks_exact(4)
-                .flat_map(|p| {
-                    [
-                        linear_to_srgb_u8(p[0].clamp(0.0, 1.0)),
-                        linear_to_srgb_u8(p[1].clamp(0.0, 1.0)),
-                        linear_to_srgb_u8(p[2].clamp(0.0, 1.0)),
-                        (p[3].clamp(0.0, 1.0) * 255.0 + 0.5) as u8,
-                    ]
-                })
-                .collect();
-            self.job.do_encode(&rgba, PixelLayout::Rgba8, w, h)
+            let data = pixels.contiguous_bytes();
+            self.job.do_encode(&data, PixelLayout::RgbaLinearF32, w, h)
         }
     }
 
@@ -594,31 +563,11 @@ mod encoding {
             self,
             pixels: PixelSlice<'_, Gray<f32>>,
         ) -> Result<EncodeOutput, JxlError> {
-            // Convert linear gray → sRGB u8
-            use linear_srgb::default::linear_to_srgb_u8;
             let w = pixels.width();
             let h = pixels.rows();
-            let raw = pixels.contiguous_bytes();
-            let floats: &[f32] = bytemuck::cast_slice(&raw);
-            match &self.job.config.config {
-                JxlConfig::Lossless(_) => {
-                    let bytes: Vec<u8> = floats
-                        .iter()
-                        .map(|g| linear_to_srgb_u8(g.clamp(0.0, 1.0)))
-                        .collect();
-                    self.job.do_encode(&bytes, PixelLayout::Gray8, w, h)
-                }
-                JxlConfig::Lossy(_) => {
-                    let bytes: Vec<u8> = floats
-                        .iter()
-                        .flat_map(|g| {
-                            let v = linear_to_srgb_u8(g.clamp(0.0, 1.0));
-                            [v, v, v]
-                        })
-                        .collect();
-                    self.job.do_encode(&bytes, PixelLayout::Rgb8, w, h)
-                }
-            }
+            let data = pixels.contiguous_bytes();
+            self.job
+                .do_encode(&data, PixelLayout::GrayLinearF32, w, h)
         }
     }
 
@@ -903,6 +852,10 @@ mod decoding {
         }
 
         /// Decode into a pre-allocated buffer (inherent method).
+        ///
+        /// Uses format negotiation: the destination descriptor is passed as the
+        /// preferred output format so the jxl-rs decoder produces matching data
+        /// natively whenever possible, preserving alpha and bit depth.
         pub fn decode_into<P>(
             self,
             data: &[u8],
@@ -911,102 +864,38 @@ mod decoding {
             let mut dst = dst.erase();
             let d = dst.descriptor();
 
-            // decode_into does its own row-by-row conversion from RGB8, so always
-            // request RGB8 from the underlying decoder. The Decode::decode() path
-            // handles full format negotiation instead.
+            // Decode with the target format as preferred — the decoder will
+            // produce matching pixel data natively when possible.
             let merged_limits = self.merge_limits();
-            let result = crate::decode::decode(data, merged_limits.as_ref(), &[])?;
+            let result = crate::decode::decode(data, merged_limits.as_ref(), &[d])?;
             let info = convert_info(&result.info);
-            let src = result.pixels.into_rgb8();
-            let w = src.width().min(dst.width() as usize);
-            let h = src.height().min(dst.rows() as usize);
 
-            if d == PixelDescriptor::RGB8_SRGB {
+            let src = result.pixels.as_slice();
+            let src_desc = src.descriptor();
+            let w = (result.info.width).min(dst.width());
+            let h = (result.info.height).min(dst.rows());
+
+            let src_bpp = src_desc.bytes_per_pixel();
+            let dst_bpp = d.bytes_per_pixel();
+
+            if src_bpp == dst_bpp
+                && src_desc.channel_type == d.channel_type
+                && src_desc.layout == d.layout
+            {
+                // Direct copy — decoded format matches destination exactly.
+                let copy_bytes = w as usize * src_bpp;
                 for y in 0..h {
-                    let src_row = &src.as_ref().rows().nth(y).unwrap();
-                    let dst_row = dst.row_mut(y as u32);
-                    let row_bytes: &[u8] = bytemuck::cast_slice(&src_row[..w]);
-                    dst_row[..row_bytes.len()].copy_from_slice(row_bytes);
-                }
-            } else if d == PixelDescriptor::RGBA8_SRGB {
-                for y in 0..h {
-                    let src_row = &src.as_ref().rows().nth(y).unwrap();
-                    let dst_row = dst.row_mut(y as u32);
-                    let dst_pixels: &mut [Rgba<u8>] = bytemuck::cast_slice_mut(dst_row);
-                    for (i, s) in src_row[..w].iter().enumerate() {
-                        dst_pixels[i] = Rgba {
-                            r: s.r,
-                            g: s.g,
-                            b: s.b,
-                            a: 255,
-                        };
-                    }
-                }
-            } else if d == PixelDescriptor::GRAY8_SRGB {
-                for y in 0..h {
-                    let src_row = &src.as_ref().rows().nth(y).unwrap();
-                    let dst_row = dst.row_mut(y as u32);
-                    for (i, s) in src_row[..w].iter().enumerate() {
-                        let luma =
-                            ((s.r as u16 * 77 + s.g as u16 * 150 + s.b as u16 * 29) >> 8) as u8;
-                        dst_row[i] = luma;
-                    }
-                }
-            } else if d == PixelDescriptor::BGRA8_SRGB {
-                for y in 0..h {
-                    let src_row = &src.as_ref().rows().nth(y).unwrap();
-                    let dst_row = dst.row_mut(y as u32);
-                    let dst_pixels: &mut [[u8; 4]] = bytemuck::cast_slice_mut(dst_row);
-                    for (i, s) in src_row[..w].iter().enumerate() {
-                        dst_pixels[i] = [s.b, s.g, s.r, 255];
-                    }
-                }
-            } else if d == PixelDescriptor::RGBF32_LINEAR {
-                use linear_srgb::default::srgb_u8_to_linear;
-                for y in 0..h {
-                    let src_row = &src.as_ref().rows().nth(y).unwrap();
-                    let dst_row = dst.row_mut(y as u32);
-                    let dst_pixels: &mut [Rgb<f32>] = bytemuck::cast_slice_mut(dst_row);
-                    for (i, s) in src_row[..w].iter().enumerate() {
-                        dst_pixels[i] = Rgb {
-                            r: srgb_u8_to_linear(s.r),
-                            g: srgb_u8_to_linear(s.g),
-                            b: srgb_u8_to_linear(s.b),
-                        };
-                    }
-                }
-            } else if d == PixelDescriptor::RGBAF32_LINEAR {
-                use linear_srgb::default::srgb_u8_to_linear;
-                for y in 0..h {
-                    let src_row = &src.as_ref().rows().nth(y).unwrap();
-                    let dst_row = dst.row_mut(y as u32);
-                    let dst_pixels: &mut [Rgba<f32>] = bytemuck::cast_slice_mut(dst_row);
-                    for (i, s) in src_row[..w].iter().enumerate() {
-                        dst_pixels[i] = Rgba {
-                            r: srgb_u8_to_linear(s.r),
-                            g: srgb_u8_to_linear(s.g),
-                            b: srgb_u8_to_linear(s.b),
-                            a: 1.0,
-                        };
-                    }
-                }
-            } else if d == PixelDescriptor::GRAYF32_LINEAR {
-                use linear_srgb::default::srgb_u8_to_linear;
-                for y in 0..h {
-                    let src_row = &src.as_ref().rows().nth(y).unwrap();
-                    let dst_row = dst.row_mut(y as u32);
-                    let dst_pixels: &mut [Gray<f32>] = bytemuck::cast_slice_mut(dst_row);
-                    for (i, s) in src_row[..w].iter().enumerate() {
-                        let r = srgb_u8_to_linear(s.r);
-                        let g = srgb_u8_to_linear(s.g);
-                        let b = srgb_u8_to_linear(s.b);
-                        dst_pixels[i] = Gray::new(0.2126 * r + 0.7152 * g + 0.0722 * b);
-                    }
+                    let src_row = src.row(y);
+                    let dst_row = dst.row_mut(y);
+                    dst_row[..copy_bytes].copy_from_slice(&src_row[..copy_bytes]);
                 }
             } else {
+                // Format negotiation picked a different format than requested
+                // (e.g., the image is 16-bit but caller wants u8). This shouldn't
+                // normally happen since choose_pixel_format prefers lossless matches.
                 return Err(JxlError::InvalidInput(alloc::format!(
-                    "unsupported pixel format: {:?}",
-                    d
+                    "decoded format {:?} incompatible with destination {:?}",
+                    src_desc, d
                 )));
             }
 
@@ -1025,7 +914,18 @@ mod decoding {
             let merged_limits = self.merge_limits();
             let result = crate::decode::decode(data, merged_limits.as_ref(), preferred)?;
             let info = convert_info(&result.info);
-            Ok(DecodeOutput::new(result.pixels, info))
+
+            // Set the transfer function on the PixelBuffer from the decoded format.
+            // JXL decoder outputs linear for f32, sRGB for u8/u16.
+            let desc = result.pixels.descriptor();
+            let tf = if desc.channel_type == zencodec_types::ChannelType::F32 {
+                zencodec_types::TransferFunction::Linear
+            } else {
+                zencodec_types::TransferFunction::Srgb
+            };
+            let pixels = result.pixels.with_descriptor(desc.with_transfer(tf));
+
+            Ok(DecodeOutput::new(pixels, info))
         }
     }
 

@@ -18,6 +18,7 @@ mod decode;
 #[cfg(feature = "encode")]
 mod encode;
 mod error;
+#[cfg(feature = "zencodec")]
 mod zencodec;
 
 pub use error::JxlError;
@@ -32,10 +33,10 @@ pub use encode::{
 };
 
 // zencodec-types trait types
-#[cfg(feature = "encode")]
+#[cfg(all(feature = "zencodec", feature = "encode"))]
 pub use zencodec::{JxlEncodeJob, JxlEncoder, JxlEncoderConfig, JxlFrameEncoder};
 
-#[cfg(feature = "decode")]
+#[cfg(all(feature = "zencodec", feature = "decode"))]
 pub use zencodec::{JxlDecodeJob, JxlDecoder, JxlDecoderConfig, JxlFrameDecoder};
 
 // Re-export encoder config types for callers.
