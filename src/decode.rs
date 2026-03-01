@@ -220,7 +220,11 @@ fn choose_pixel_format(
     // images. Only use grayscale when both the profile says gray AND the caller
     // explicitly requests it (handled above).
     let default_layout = if is_gray {
-        if has_alpha { ChannelLayout::GrayAlpha } else { ChannelLayout::Gray }
+        if has_alpha {
+            ChannelLayout::GrayAlpha
+        } else {
+            ChannelLayout::Gray
+        }
     } else if has_alpha {
         ChannelLayout::Rgba
     } else {
@@ -232,7 +236,10 @@ fn choose_pixel_format(
 /// Returns true if we can produce `target` type from `native` without lossy conversion.
 fn can_produce_losslessly(native: ChannelType, target: ChannelType) -> bool {
     match native {
-        ChannelType::U8 => matches!(target, ChannelType::U8 | ChannelType::U16 | ChannelType::F32),
+        ChannelType::U8 => matches!(
+            target,
+            ChannelType::U8 | ChannelType::U16 | ChannelType::F32
+        ),
         ChannelType::U16 => matches!(target, ChannelType::U16 | ChannelType::F32),
         ChannelType::F32 => matches!(target, ChannelType::F32),
         _ => false,
@@ -261,9 +268,15 @@ fn layout_compatible(native: ChannelLayout, target: ChannelLayout) -> bool {
         (ChannelLayout::Gray, ChannelLayout::GrayAlpha) => true,
         (ChannelLayout::GrayAlpha, ChannelLayout::Gray) => true,
         // Gray → RGB (replicate — lossless)
-        (ChannelLayout::Gray | ChannelLayout::GrayAlpha, ChannelLayout::Rgb | ChannelLayout::Rgba | ChannelLayout::Bgra) => true,
+        (
+            ChannelLayout::Gray | ChannelLayout::GrayAlpha,
+            ChannelLayout::Rgb | ChannelLayout::Rgba | ChannelLayout::Bgra,
+        ) => true,
         // RGB → Gray (luminance — conceptually lossy, but decoder does it correctly)
-        (ChannelLayout::Rgb | ChannelLayout::Rgba, ChannelLayout::Gray | ChannelLayout::GrayAlpha) => true,
+        (
+            ChannelLayout::Rgb | ChannelLayout::Rgba,
+            ChannelLayout::Gray | ChannelLayout::GrayAlpha,
+        ) => true,
         _ => false,
     }
 }
@@ -477,14 +490,23 @@ fn build_pixel_data(buf: &[u8], width: usize, height: usize, chosen: &ChosenForm
         (ChannelType::U8, JxlColorType::Rgb) => {
             let pixels: Vec<Rgb<u8>> = buf
                 .chunks_exact(3)
-                .map(|c| Rgb { r: c[0], g: c[1], b: c[2] })
+                .map(|c| Rgb {
+                    r: c[0],
+                    g: c[1],
+                    b: c[2],
+                })
                 .collect();
             PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
         (ChannelType::U8, JxlColorType::Rgba) => {
             let pixels: Vec<Rgba<u8>> = buf
                 .chunks_exact(4)
-                .map(|c| Rgba { r: c[0], g: c[1], b: c[2], a: c[3] })
+                .map(|c| Rgba {
+                    r: c[0],
+                    g: c[1],
+                    b: c[2],
+                    a: c[3],
+                })
                 .collect();
             PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
@@ -499,7 +521,12 @@ fn build_pixel_data(buf: &[u8], width: usize, height: usize, chosen: &ChosenForm
         (ChannelType::U8, JxlColorType::Bgra) => {
             let pixels: Vec<rgb::alt::BGRA<u8>> = buf
                 .chunks_exact(4)
-                .map(|c| rgb::alt::BGRA { b: c[0], g: c[1], r: c[2], a: c[3] })
+                .map(|c| rgb::alt::BGRA {
+                    b: c[0],
+                    g: c[1],
+                    r: c[2],
+                    a: c[3],
+                })
                 .collect();
             PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
@@ -507,7 +534,11 @@ fn build_pixel_data(buf: &[u8], width: usize, height: usize, chosen: &ChosenForm
             // No Bgr pixel type, convert to Rgb
             let pixels: Vec<Rgb<u8>> = buf
                 .chunks_exact(3)
-                .map(|c| Rgb { r: c[2], g: c[1], b: c[0] })
+                .map(|c| Rgb {
+                    r: c[2],
+                    g: c[1],
+                    b: c[0],
+                })
                 .collect();
             PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
@@ -589,7 +620,12 @@ fn build_pixel_data(buf: &[u8], width: usize, height: usize, chosen: &ChosenForm
         _ => {
             let pixels: Vec<Rgba<u8>> = buf
                 .chunks_exact(4)
-                .map(|c| Rgba { r: c[0], g: c[1], b: c[2], a: c[3] })
+                .map(|c| Rgba {
+                    r: c[0],
+                    g: c[1],
+                    b: c[2],
+                    a: c[3],
+                })
                 .collect();
             PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
