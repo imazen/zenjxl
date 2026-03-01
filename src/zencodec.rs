@@ -293,6 +293,7 @@ mod encoding {
                 exif: None,
                 xmp: None,
                 limits: ResourceLimits::none(),
+                cicp: None,
             }
         }
     }
@@ -305,6 +306,7 @@ mod encoding {
         exif: Option<&'a [u8]>,
         xmp: Option<&'a [u8]>,
         limits: ResourceLimits,
+        cicp: Option<zencodec_types::Cicp>,
     }
 
     impl<'a> JxlEncodeJob<'a> {
@@ -372,6 +374,9 @@ mod encoding {
                 limits = None;
             }
 
+            // Map CICP to jxl_encoder ColorEncoding if present.
+            let color_enc = self.cicp.map(cicp_to_jxl_color_encoding);
+
             let data = match &self.config.config {
                 JxlConfig::Lossy(cfg) => {
                     let mut req = cfg.encode_request(w, h, layout);
@@ -383,6 +388,9 @@ mod encoding {
                     }
                     if let Some(stop) = self.stop {
                         req = req.with_stop(stop);
+                    }
+                    if let Some(ref ce) = color_enc {
+                        req = req.with_color_encoding(ce.clone());
                     }
                     req.encode(pixels).map_err(|e| e.into_inner())?
                 }
@@ -396,6 +404,9 @@ mod encoding {
                     }
                     if let Some(stop) = self.stop {
                         req = req.with_stop(stop);
+                    }
+                    if let Some(ref ce) = color_enc {
+                        req = req.with_color_encoding(ce.clone());
                     }
                     req.encode(pixels).map_err(|e| e.into_inner())?
                 }
@@ -424,6 +435,9 @@ mod encoding {
             }
             if let Some(xmp) = meta.xmp {
                 self.xmp = Some(xmp);
+            }
+            if let Some(cicp) = meta.cicp {
+                self.cicp = Some(cicp);
             }
             self
         }
@@ -566,8 +580,7 @@ mod encoding {
             let w = pixels.width();
             let h = pixels.rows();
             let data = pixels.contiguous_bytes();
-            self.job
-                .do_encode(&data, PixelLayout::GrayLinearF32, w, h)
+            self.job.do_encode(&data, PixelLayout::GrayLinearF32, w, h)
         }
     }
 
@@ -625,6 +638,36 @@ mod encoding {
             1.0 + (90 - q) as f32 / 20.0
         } else {
             2.0 + (70 - q) as f32 / 10.0
+        }
+    }
+
+    /// Map CICP code points to a jxl_encoder ColorEncoding.
+    fn cicp_to_jxl_color_encoding(cicp: zencodec_types::Cicp) -> jxl_encoder::ColorEncoding {
+        let primaries = match cicp.color_primaries {
+            1 => jxl_encoder::Primaries::Srgb,
+            9 => jxl_encoder::Primaries::Bt2100,
+            11 | 12 => jxl_encoder::Primaries::P3,
+            _ => jxl_encoder::Primaries::Srgb, // fallback
+        };
+
+        let transfer_function = match cicp.transfer_characteristics {
+            1 | 6 | 14 | 15 => jxl_encoder::TransferFunction::Bt709,
+            8 => jxl_encoder::TransferFunction::Linear,
+            13 => jxl_encoder::TransferFunction::Srgb,
+            16 => jxl_encoder::TransferFunction::Pq,
+            17 => jxl_encoder::TransferFunction::Dci,
+            18 => jxl_encoder::TransferFunction::Hlg,
+            _ => jxl_encoder::TransferFunction::Srgb, // fallback
+        };
+
+        jxl_encoder::ColorEncoding {
+            color_space: jxl_encoder::ColorSpace::Rgb,
+            white_point: jxl_encoder::WhitePoint::D65,
+            primaries,
+            transfer_function,
+            rendering_intent: jxl_encoder::RenderingIntent::Perceptual,
+            want_icc: false,
+            gamma: None,
         }
     }
 }
@@ -806,11 +849,7 @@ mod decoding {
             let info = crate::decode::probe(data)?;
             // Report native descriptor based on bit depth
             let descriptor = native_descriptor(&info);
-            Ok(OutputInfo::full_decode(
-                info.width,
-                info.height,
-                descriptor,
-            ))
+            Ok(OutputInfo::full_decode(info.width, info.height, descriptor))
         }
 
         fn decoder(self) -> Result<JxlDecoder<'a>, JxlError> {
@@ -895,7 +934,8 @@ mod decoding {
                 // normally happen since choose_pixel_format prefers lossless matches.
                 return Err(JxlError::InvalidInput(alloc::format!(
                     "decoded format {:?} incompatible with destination {:?}",
-                    src_desc, d
+                    src_desc,
+                    d
                 )));
             }
 
