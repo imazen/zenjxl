@@ -915,15 +915,29 @@ mod decoding {
             let result = crate::decode::decode(data, merged_limits.as_ref(), preferred)?;
             let info = convert_info(&result.info);
 
-            // Set the transfer function on the PixelBuffer from the decoded format.
-            // JXL decoder outputs linear for f32, sRGB for u8/u16.
+            // Set the transfer function on the PixelBuffer from CICP metadata.
+            // If CICP is available (PQ, HLG, sRGB, etc.), use it directly.
+            // Otherwise fall back to heuristic: linear for f32, sRGB for u8/u16.
             let desc = result.pixels.descriptor();
-            let tf = if desc.channel_type == zencodec_types::ChannelType::F32 {
-                zencodec_types::TransferFunction::Linear
-            } else {
-                zencodec_types::TransferFunction::Srgb
-            };
-            let pixels = result.pixels.with_descriptor(desc.with_transfer(tf));
+            let tf = result
+                .info
+                .cicp
+                .and_then(|(_, tc, _, _)| zencodec_types::TransferFunction::from_cicp(tc))
+                .unwrap_or_else(|| {
+                    if desc.channel_type == zencodec_types::ChannelType::F32 {
+                        zencodec_types::TransferFunction::Linear
+                    } else {
+                        zencodec_types::TransferFunction::Srgb
+                    }
+                });
+            let primaries = result
+                .info
+                .cicp
+                .and_then(|(cp, _, _, _)| zencodec_types::ColorPrimaries::from_cicp(cp))
+                .unwrap_or(desc.primaries);
+            let pixels = result
+                .pixels
+                .with_descriptor(desc.with_transfer(tf).with_primaries(primaries));
 
             Ok(DecodeOutput::new(pixels, info))
         }
@@ -945,13 +959,22 @@ mod decoding {
         }
     }
 
-    /// Return the native output descriptor for a JXL image based on its bit depth
-    /// and alpha presence. Used by `output_info()`.
+    /// Return the native output descriptor for a JXL image based on its bit depth,
+    /// alpha presence, and CICP metadata. Used by `output_info()`.
     fn native_descriptor(info: &crate::decode::JxlInfo) -> PixelDescriptor {
         let bps = info.bit_depth.unwrap_or(8);
+
+        // Extract transfer function and primaries from CICP if available.
+        let tf = info
+            .cicp
+            .and_then(|(_, tc, _, _)| zencodec_types::TransferFunction::from_cicp(tc));
+        let primaries = info
+            .cicp
+            .and_then(|(cp, _, _, _)| zencodec_types::ColorPrimaries::from_cicp(cp));
+
         // We don't have access to the color profile during probe, so assume RGB.
         // Grayscale negotiation happens in decode() where we have the profile.
-        if bps > 16 {
+        let mut desc = if bps > 16 {
             if info.has_alpha {
                 PixelDescriptor::RGBAF32_LINEAR
             } else {
@@ -967,7 +990,16 @@ mod decoding {
             PixelDescriptor::RGBA8_SRGB
         } else {
             PixelDescriptor::RGB8_SRGB
+        };
+
+        // Override transfer function from CICP (e.g., PQ or HLG for HDR).
+        if let Some(t) = tf {
+            desc = desc.with_transfer(t);
         }
+        if let Some(p) = primaries {
+            desc = desc.with_primaries(p);
+        }
+        desc
     }
 
     fn convert_info(info: &crate::decode::JxlInfo) -> ImageInfo {
