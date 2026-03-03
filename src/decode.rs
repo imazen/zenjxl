@@ -193,24 +193,24 @@ fn choose_pixel_format(
     if !preferred.is_empty() {
         for desc in preferred {
             // Can we produce this channel type without precision loss?
-            let ct = desc.channel_type;
+            let ct = desc.channel_type();
             if !can_produce_losslessly(native_channel_type, ct) {
                 continue;
             }
             // Can we produce this layout from the native data?
-            if !layout_compatible(native_layout, desc.layout) {
+            if !layout_compatible(native_layout, desc.layout()) {
                 continue;
             }
             // Only allow grayscale output when the source is actually grayscale.
             // XYB-encoded JXL files have 3 color channels internally even if
             // the color profile says "gray", and jxl-rs rejects grayscale output
             // for 3-channel images.
-            if (desc.layout == ChannelLayout::Gray || desc.layout == ChannelLayout::GrayAlpha)
+            if (desc.layout() == ChannelLayout::Gray || desc.layout() == ChannelLayout::GrayAlpha)
                 && !is_gray
             {
                 continue;
             }
-            return build_chosen(ct, desc.layout, has_alpha, num_extra);
+            return build_chosen(ct, desc.layout(), has_alpha, num_extra);
         }
     }
 

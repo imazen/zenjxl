@@ -918,8 +918,8 @@ mod decoding {
             let dst_bpp = d.bytes_per_pixel();
 
             if src_bpp == dst_bpp
-                && src_desc.channel_type == d.channel_type
-                && src_desc.layout == d.layout
+                && src_desc.channel_type() == d.channel_type()
+                && src_desc.layout() == d.layout()
             {
                 // Direct copy — decoded format matches destination exactly.
                 let copy_bytes = w as usize * src_bpp;
@@ -964,7 +964,7 @@ mod decoding {
                 .cicp
                 .and_then(|(_, tc, _, _)| zencodec_types::TransferFunction::from_cicp(tc))
                 .unwrap_or_else(|| {
-                    if desc.channel_type == zencodec_types::ChannelType::F32 {
+                    if desc.channel_type() == zencodec_types::ChannelType::F32 {
                         zencodec_types::TransferFunction::Linear
                     } else {
                         zencodec_types::TransferFunction::Srgb
