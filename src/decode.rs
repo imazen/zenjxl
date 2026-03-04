@@ -3,7 +3,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use zencodec_types::{ChannelLayout, ChannelType, PixelBuffer, PixelDescriptor};
+use zenpixels::{ChannelLayout, ChannelType, PixelBuffer, PixelDescriptor};
 
 use jxl::api::{
     ExtraChannel, JxlBitDepth, JxlColorEncoding, JxlColorProfile, JxlColorType, JxlDecoder,
