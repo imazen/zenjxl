@@ -28,7 +28,8 @@ use rgb::{Gray, Rgb, Rgba};
 use zencodec_types::{DecodeOutput, ImageInfo, OutputInfo};
 #[cfg(feature = "encode")]
 use zencodec_types::{EncodeOutput, MetadataView};
-use zencodec_types::{ImageFormat, PixelDescriptor, PixelSlice, ResourceLimits, Stop};
+use zencodec_types::{ImageFormat, ResourceLimits, Stop};
+use zenpixels::{PixelDescriptor, PixelSlice};
 
 use crate::error::JxlError;
 
@@ -680,6 +681,7 @@ pub use encoding::{JxlEncodeJob, JxlEncoder, JxlEncoderConfig, JxlFrameEncoder};
 #[cfg(feature = "decode")]
 mod decoding {
     use super::*;
+    use alloc::vec::Vec;
     // Import traits so .job(), .probe(), .decoder() are visible on inherent methods.
     use zencodec_types::DecodeJob as _;
     use zencodec_types::DecoderConfig as _;
@@ -721,7 +723,7 @@ mod decoding {
         /// Convenience: decode image with this config.
         pub fn decode(&self, data: &[u8]) -> Result<DecodeOutput, JxlError> {
             use zencodec_types::Decode;
-            self.job().decoder()?.decode(data, &[])
+            self.job().decoder(data, &[])?.decode()
         }
 
         /// Convenience: decode into a pre-allocated RGB8 buffer.
@@ -731,8 +733,8 @@ mod decoding {
             dst: zencodec_types::ImgRefMut<'_, Rgb<u8>>,
         ) -> Result<ImageInfo, JxlError> {
             self.job()
-                .decoder()?
-                .decode_into(data, zencodec_types::PixelSliceMut::from(dst))
+                .decoder(data, &[])?
+                .decode_into(zenpixels::PixelSliceMut::from(dst))
         }
 
         /// Convenience: decode into a pre-allocated RGBA8 buffer.
@@ -742,8 +744,8 @@ mod decoding {
             dst: zencodec_types::ImgRefMut<'_, Rgba<u8>>,
         ) -> Result<ImageInfo, JxlError> {
             self.job()
-                .decoder()?
-                .decode_into(data, zencodec_types::PixelSliceMut::from(dst))
+                .decoder(data, &[])?
+                .decode_into(zenpixels::PixelSliceMut::from(dst))
         }
 
         /// Convenience: decode into a pre-allocated RGB f32 buffer.
@@ -753,8 +755,8 @@ mod decoding {
             dst: zencodec_types::ImgRefMut<'_, Rgb<f32>>,
         ) -> Result<ImageInfo, JxlError> {
             self.job()
-                .decoder()?
-                .decode_into(data, zencodec_types::PixelSliceMut::from(dst))
+                .decoder(data, &[])?
+                .decode_into(zenpixels::PixelSliceMut::from(dst))
         }
 
         /// Convenience: decode into a pre-allocated RGBA f32 buffer.
@@ -764,8 +766,8 @@ mod decoding {
             dst: zencodec_types::ImgRefMut<'_, Rgba<f32>>,
         ) -> Result<ImageInfo, JxlError> {
             self.job()
-                .decoder()?
-                .decode_into(data, zencodec_types::PixelSliceMut::from(dst))
+                .decoder(data, &[])?
+                .decode_into(zenpixels::PixelSliceMut::from(dst))
         }
 
         /// Convenience: decode into a pre-allocated Gray f32 buffer.
@@ -775,8 +777,8 @@ mod decoding {
             dst: zencodec_types::ImgRefMut<'_, Gray<f32>>,
         ) -> Result<ImageInfo, JxlError> {
             self.job()
-                .decoder()?
-                .decode_into(data, zencodec_types::PixelSliceMut::from(dst))
+                .decoder(data, &[])?
+                .decode_into(zenpixels::PixelSliceMut::from(dst))
         }
     }
 
@@ -826,9 +828,27 @@ mod decoding {
         limits: ResourceLimits,
     }
 
+    /// Unit struct for unsupported JXL streaming decode.
+    pub struct JxlStreamingDecoder;
+
+    impl zencodec_types::StreamingDecode for JxlStreamingDecoder {
+        type Error = JxlError;
+
+        fn next_batch(&mut self) -> Result<Option<(u32, PixelSlice<'_>)>, Self::Error> {
+            Err(JxlError::InvalidInput(
+                "JPEG XL does not support streaming decode".into(),
+            ))
+        }
+
+        fn info(&self) -> &ImageInfo {
+            panic!("StreamingDecode not supported for JXL");
+        }
+    }
+
     impl<'a> zencodec_types::DecodeJob<'a> for JxlDecodeJob<'a> {
         type Error = JxlError;
         type Dec = JxlDecoder<'a>;
+        type StreamDec = JxlStreamingDecoder;
         type FrameDec = JxlFrameDecoder;
 
         fn with_stop(self, _stop: &'a dyn Stop) -> Self {
@@ -852,14 +872,34 @@ mod decoding {
             Ok(OutputInfo::full_decode(info.width, info.height, descriptor))
         }
 
-        fn decoder(self) -> Result<JxlDecoder<'a>, JxlError> {
+        fn decoder(
+            self,
+            data: &'a [u8],
+            preferred: &[PixelDescriptor],
+        ) -> Result<JxlDecoder<'a>, JxlError> {
             Ok(JxlDecoder {
                 config: self.config,
                 limits: self.limits,
+                data,
+                preferred: preferred.to_vec(),
             })
         }
 
-        fn frame_decoder(self, _data: &[u8]) -> Result<JxlFrameDecoder, JxlError> {
+        fn streaming_decoder(
+            self,
+            _data: &'a [u8],
+            _preferred: &[PixelDescriptor],
+        ) -> Result<JxlStreamingDecoder, JxlError> {
+            Err(JxlError::InvalidInput(
+                "JPEG XL does not support streaming decode".into(),
+            ))
+        }
+
+        fn frame_decoder(
+            self,
+            _data: &'a [u8],
+            _preferred: &[PixelDescriptor],
+        ) -> Result<JxlFrameDecoder, JxlError> {
             Err(JxlError::InvalidInput(
                 "JPEG XL animation decoding not yet supported via this API".into(),
             ))
@@ -870,6 +910,8 @@ mod decoding {
     pub struct JxlDecoder<'a> {
         config: &'a JxlDecoderConfig,
         limits: ResourceLimits,
+        data: &'a [u8],
+        preferred: Vec<PixelDescriptor>,
     }
 
     impl<'a> JxlDecoder<'a> {
@@ -897,8 +939,7 @@ mod decoding {
         /// natively whenever possible, preserving alpha and bit depth.
         pub fn decode_into<P>(
             self,
-            data: &[u8],
-            dst: zencodec_types::PixelSliceMut<'_, P>,
+            dst: zenpixels::PixelSliceMut<'_, P>,
         ) -> Result<ImageInfo, JxlError> {
             let mut dst = dst.erase();
             let d = dst.descriptor();
@@ -906,7 +947,7 @@ mod decoding {
             // Decode with the target format as preferred — the decoder will
             // produce matching pixel data natively when possible.
             let merged_limits = self.merge_limits();
-            let result = crate::decode::decode(data, merged_limits.as_ref(), &[d])?;
+            let result = crate::decode::decode(self.data, merged_limits.as_ref(), &[d])?;
             let info = convert_info(&result.info);
 
             let src = result.pixels.as_slice();
@@ -946,13 +987,10 @@ mod decoding {
     impl zencodec_types::Decode for JxlDecoder<'_> {
         type Error = JxlError;
 
-        fn decode(
-            self,
-            data: &[u8],
-            preferred: &[PixelDescriptor],
-        ) -> Result<DecodeOutput, JxlError> {
+        fn decode(self) -> Result<DecodeOutput, JxlError> {
             let merged_limits = self.merge_limits();
-            let result = crate::decode::decode(data, merged_limits.as_ref(), preferred)?;
+            let result =
+                crate::decode::decode(self.data, merged_limits.as_ref(), &self.preferred)?;
             let info = convert_info(&result.info);
 
             // Set the transfer function on the PixelBuffer from CICP metadata.
@@ -962,18 +1000,18 @@ mod decoding {
             let tf = result
                 .info
                 .cicp
-                .and_then(|(_, tc, _, _)| zencodec_types::TransferFunction::from_cicp(tc))
+                .and_then(|(_, tc, _, _)| zenpixels::TransferFunction::from_cicp(tc))
                 .unwrap_or_else(|| {
-                    if desc.channel_type() == zencodec_types::ChannelType::F32 {
-                        zencodec_types::TransferFunction::Linear
+                    if desc.channel_type() == zenpixels::ChannelType::F32 {
+                        zenpixels::TransferFunction::Linear
                     } else {
-                        zencodec_types::TransferFunction::Srgb
+                        zenpixels::TransferFunction::Srgb
                     }
                 });
             let primaries = result
                 .info
                 .cicp
-                .and_then(|(cp, _, _, _)| zencodec_types::ColorPrimaries::from_cicp(cp))
+                .and_then(|(cp, _, _, _)| zenpixels::ColorPrimaries::from_cicp(cp))
                 .unwrap_or(desc.primaries);
             let pixels = result
                 .pixels
@@ -989,10 +1027,7 @@ mod decoding {
     impl zencodec_types::FrameDecode for JxlFrameDecoder {
         type Error = JxlError;
 
-        fn next_frame(
-            &mut self,
-            _preferred: &[PixelDescriptor],
-        ) -> Result<Option<zencodec_types::DecodeFrame>, JxlError> {
+        fn next_frame(&mut self) -> Result<Option<zencodec_types::DecodeFrame>, JxlError> {
             Err(JxlError::InvalidInput(
                 "JPEG XL animation decoding not yet supported via this API".into(),
             ))
@@ -1007,10 +1042,10 @@ mod decoding {
         // Extract transfer function and primaries from CICP if available.
         let tf = info
             .cicp
-            .and_then(|(_, tc, _, _)| zencodec_types::TransferFunction::from_cicp(tc));
+            .and_then(|(_, tc, _, _)| zenpixels::TransferFunction::from_cicp(tc));
         let primaries = info
             .cicp
-            .and_then(|(cp, _, _, _)| zencodec_types::ColorPrimaries::from_cicp(cp));
+            .and_then(|(cp, _, _, _)| zenpixels::ColorPrimaries::from_cicp(cp));
 
         // We don't have access to the color profile during probe, so assume RGB.
         // Grayscale negotiation happens in decode() where we have the profile.
@@ -1066,7 +1101,9 @@ mod decoding {
 }
 
 #[cfg(feature = "decode")]
-pub use decoding::{JxlDecodeJob, JxlDecoder, JxlDecoderConfig, JxlFrameDecoder};
+pub use decoding::{
+    JxlDecodeJob, JxlDecoder, JxlDecoderConfig, JxlFrameDecoder, JxlStreamingDecoder,
+};
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
@@ -1287,7 +1324,8 @@ mod tests {
     #[test]
     #[cfg(all(feature = "encode", feature = "decode"))]
     fn four_layer_encode_flow() {
-        use zencodec_types::{EncodeJob, EncodeRgb8, EncoderConfig, PixelSlice};
+        use zencodec_types::{EncodeJob, EncodeRgb8, EncoderConfig};
+        use zenpixels::PixelSlice;
 
         let pixels: Vec<Rgb<u8>> = vec![
             Rgb {
@@ -1331,9 +1369,9 @@ mod tests {
         let config = JxlDecoderConfig::new();
         let decoded = config
             .job()
-            .decoder()
+            .decoder(encoded.bytes(), &[])
             .unwrap()
-            .decode(encoded.bytes(), &[])
+            .decode()
             .unwrap();
         assert_eq!(decoded.width(), 8);
         assert_eq!(decoded.height(), 8);
