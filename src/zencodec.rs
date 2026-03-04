@@ -828,20 +828,41 @@ mod decoding {
         limits: ResourceLimits,
     }
 
-    /// Unit struct for unsupported JXL streaming decode.
-    pub struct JxlStreamingDecoder;
+    /// JXL streaming decoder: decodes the full image upfront, then emits
+    /// fixed-height strips via [`next_batch()`](zencodec_types::StreamingDecode::next_batch).
+    ///
+    /// JXL doesn't support spatial streaming (progressive mode refines
+    /// quality, not spatial extent), so this is a facade that provides the
+    /// `StreamingDecode` interface over a fully-decoded buffer.
+    pub struct JxlStreamingDecoder {
+        pixels: zenpixels::PixelBuffer,
+        info: ImageInfo,
+        y_offset: u32,
+        strip_height: u32,
+    }
+
+    impl JxlStreamingDecoder {
+        /// Default strip height (rows per batch).
+        const DEFAULT_STRIP_HEIGHT: u32 = 64;
+    }
 
     impl zencodec_types::StreamingDecode for JxlStreamingDecoder {
         type Error = JxlError;
 
         fn next_batch(&mut self) -> Result<Option<(u32, PixelSlice<'_>)>, Self::Error> {
-            Err(JxlError::InvalidInput(
-                "JPEG XL does not support streaming decode".into(),
-            ))
+            let height = self.pixels.height();
+            if self.y_offset >= height {
+                return Ok(None);
+            }
+            let h = self.strip_height.min(height - self.y_offset);
+            let slice = self.pixels.rows(self.y_offset, h);
+            let y = self.y_offset;
+            self.y_offset += h;
+            Ok(Some((y, slice.erase())))
         }
 
         fn info(&self) -> &ImageInfo {
-            panic!("StreamingDecode not supported for JXL");
+            &self.info
         }
     }
 
@@ -887,12 +908,57 @@ mod decoding {
 
         fn streaming_decoder(
             self,
-            _data: &'a [u8],
-            _preferred: &[PixelDescriptor],
+            data: &'a [u8],
+            preferred: &[PixelDescriptor],
         ) -> Result<JxlStreamingDecoder, JxlError> {
-            Err(JxlError::InvalidInput(
-                "JPEG XL does not support streaming decode".into(),
-            ))
+            // Full decode upfront — JXL doesn't support spatial streaming.
+            let merged_limits = {
+                let merged_pixels = self.limits.max_pixels.or(self.config.limits.max_pixels);
+                let merged_memory = self
+                    .limits
+                    .max_memory_bytes
+                    .or(self.config.limits.max_memory_bytes);
+                if merged_pixels.is_some() || merged_memory.is_some() {
+                    Some(crate::decode::JxlLimits {
+                        max_pixels: merged_pixels,
+                        max_memory_bytes: merged_memory,
+                    })
+                } else {
+                    None
+                }
+            };
+            let result =
+                crate::decode::decode(data, merged_limits.as_ref(), preferred)?;
+            let info = convert_info(&result.info);
+
+            // Apply CICP-derived color metadata to the pixel buffer.
+            let desc = result.pixels.descriptor();
+            let tf = result
+                .info
+                .cicp
+                .and_then(|(_, tc, _, _)| zenpixels::TransferFunction::from_cicp(tc))
+                .unwrap_or_else(|| {
+                    if desc.channel_type() == zenpixels::ChannelType::F32 {
+                        zenpixels::TransferFunction::Linear
+                    } else {
+                        zenpixels::TransferFunction::Srgb
+                    }
+                });
+            let primaries = result
+                .info
+                .cicp
+                .and_then(|(cp, _, _, _)| zenpixels::ColorPrimaries::from_cicp(cp))
+                .unwrap_or(desc.primaries);
+            let pixels = result
+                .pixels
+                .with_descriptor(desc.with_transfer(tf).with_primaries(primaries));
+
+            Ok(JxlStreamingDecoder {
+                pixels,
+                info,
+                y_offset: 0,
+                strip_height: JxlStreamingDecoder::DEFAULT_STRIP_HEIGHT,
+            })
         }
 
         fn frame_decoder(
