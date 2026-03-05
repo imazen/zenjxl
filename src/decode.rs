@@ -284,7 +284,7 @@ fn layout_compatible(native: ChannelLayout, target: ChannelLayout) -> bool {
 fn build_chosen(
     channel_type: ChannelType,
     layout: ChannelLayout,
-    _has_alpha: bool,
+    has_alpha: bool,
     num_extra: usize,
 ) -> ChosenFormat {
     let color_type = match layout {
@@ -308,10 +308,32 @@ fn build_chosen(
         _ => jxl::api::JxlDataFormat::U8 { bit_depth: 8 },
     };
 
+    // extra_channel_format must have exactly num_extra entries (matching
+    // frame_header.num_extra_channels). When the color output already
+    // includes alpha (RGBA/BGRA/GrayscaleAlpha), the alpha extra channel
+    // is consumed by the color output — set its entry to None.
+    // Non-alpha extra channels (depth, spot color, etc.) also get None
+    // since we don't need separate buffers for them.
+    let color_includes_alpha = has_alpha
+        && matches!(
+            color_type,
+            JxlColorType::Rgba | JxlColorType::Bgra | JxlColorType::GrayscaleAlpha
+        );
+
+    let extra_channel_format = if color_includes_alpha || num_extra == 0 {
+        // Alpha is part of the color output; all extra channels get None
+        vec![None; num_extra]
+    } else {
+        // No alpha in color output; provide format for extra channels that
+        // the caller might want (e.g. if we later support separate extra
+        // channel output). For now, use None to skip them.
+        vec![None; num_extra]
+    };
+
     let pixel_format = JxlPixelFormat {
         color_type,
         color_data_format: Some(data_format),
-        extra_channel_format: vec![Some(data_format); num_extra],
+        extra_channel_format,
     };
 
     ChosenFormat {
@@ -405,11 +427,7 @@ pub fn decode(
 
     let (icc_profile, cicp) = extract_color_info(decoder.embedded_color_profile());
 
-    let num_extra = info
-        .extra_channels
-        .iter()
-        .filter(|ec| !matches!(ec.ec_type, ExtraChannel::Alpha))
-        .count();
+    let num_extra = info.extra_channels.len();
 
     // Choose output format based on native properties and caller preferences
     let chosen = choose_pixel_format(jxl_bit_depth, has_alpha, is_gray, num_extra, preferred);
