@@ -927,8 +927,7 @@ mod decoding {
                     None
                 }
             };
-            let result =
-                crate::decode::decode(data, merged_limits.as_ref(), preferred)?;
+            let result = crate::decode::decode(data, merged_limits.as_ref(), preferred)?;
             let info = convert_info(&result.info);
 
             // Apply CICP-derived color metadata to the pixel buffer.
@@ -1055,8 +1054,7 @@ mod decoding {
 
         fn decode(self) -> Result<DecodeOutput, JxlError> {
             let merged_limits = self.merge_limits();
-            let result =
-                crate::decode::decode(self.data, merged_limits.as_ref(), &self.preferred)?;
+            let result = crate::decode::decode(self.data, merged_limits.as_ref(), &self.preferred)?;
             let info = convert_info(&result.info);
 
             // Set the transfer function on the PixelBuffer from CICP metadata.
@@ -1195,9 +1193,9 @@ mod tests {
         ];
         let img = Img::new(pixels, 8, 8);
         let output = enc.encode_rgb8(img.as_ref()).unwrap();
-        assert!(!output.bytes().is_empty());
+        assert!(!output.data().is_empty());
         assert_eq!(output.format(), ImageFormat::Jxl);
-        assert_eq!(&output.bytes()[0..2], &[0xFF, 0x0A]);
+        assert_eq!(&output.data()[0..2], &[0xFF, 0x0A]);
     }
 
     #[test]
@@ -1214,7 +1212,7 @@ mod tests {
         ];
         let img = Img::new(pixels, 4, 4);
         let output = enc.encode_rgb8(img.as_ref()).unwrap();
-        assert!(!output.bytes().is_empty());
+        assert!(!output.data().is_empty());
     }
 
     #[test]
@@ -1286,7 +1284,7 @@ mod tests {
             // Use lossy with small distance for near-lossless f32 encoding
             let enc = JxlEncoderConfig::lossy(1.0);
             let output = enc.encode_rgb_f32(img.as_ref()).unwrap();
-            assert!(!output.bytes().is_empty());
+            assert!(!output.data().is_empty());
 
             let dec = JxlDecoderConfig::new();
             let dst = vec![
@@ -1299,7 +1297,7 @@ mod tests {
             ];
             let mut dst_img = ImgVec::new(dst, 16, 16);
             let _info = dec
-                .decode_into_rgb_f32(output.bytes(), dst_img.as_mut())
+                .decode_into_rgb_f32(output.data(), dst_img.as_mut())
                 .unwrap();
 
             // Verify values are in valid range
@@ -1333,7 +1331,7 @@ mod tests {
 
         let enc = JxlEncoderConfig::lossy(1.0);
         let output = enc.encode_rgb_f32(img.as_ref()).unwrap();
-        assert!(!output.bytes().is_empty());
+        assert!(!output.data().is_empty());
 
         let dec = JxlDecoderConfig::new();
         let mut dst_img = ImgVec::new(
@@ -1349,7 +1347,7 @@ mod tests {
             16,
             16,
         );
-        dec.decode_into_rgba_f32(output.bytes(), dst_img.as_mut())
+        dec.decode_into_rgba_f32(output.data(), dst_img.as_mut())
             .unwrap();
 
         for p in dst_img.buf().iter() {
@@ -1371,11 +1369,11 @@ mod tests {
 
         let enc = JxlEncoderConfig::lossy(1.0);
         let output = enc.encode_gray_f32(img.as_ref()).unwrap();
-        assert!(!output.bytes().is_empty());
+        assert!(!output.data().is_empty());
 
         let dec = JxlDecoderConfig::new();
         let mut dst_img = ImgVec::new(vec![Gray(0.0f32); 16 * 16], 16, 16);
-        dec.decode_into_gray_f32(output.bytes(), dst_img.as_mut())
+        dec.decode_into_gray_f32(output.data(), dst_img.as_mut())
             .unwrap();
 
         for p in dst_img.buf().iter() {
