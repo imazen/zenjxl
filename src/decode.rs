@@ -394,10 +394,10 @@ pub fn decode(
 ) -> Result<JxlDecodeOutput, JxlError> {
     let mut options = JxlDecoderOptions::default();
 
-    if let Some(lim) = limits {
-        if let Some(max_px) = lim.max_pixels {
-            options.limits.max_pixels = Some(max_px as usize);
-        }
+    if let Some(lim) = limits
+        && let Some(max_px) = lim.max_pixels
+    {
+        options.limits.max_pixels = Some(max_px as usize);
     }
 
     let decoder = JxlDecoder::new(options);

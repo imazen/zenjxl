@@ -19,7 +19,7 @@ zencodec-types = { path = "../zencodec-types" }
 zenpixels = { version = "0.1", default-features = false, features = ["buffer"] }
 linear-srgb = "0.6"
 jxl = { path = "../zenjxl-decoder/jxl", package = "zenjxl-decoder", optional = true }
-jxl-encoder = { path = "../jxl-encoder-rs/jxl_encoder", optional = true, default-features = false, features = ["std"] }
+jxl-encoder = { version = "0.1.3", optional = true, default-features = false, features = ["std"] }
 
 [dev-dependencies]
 archmage = { version = "0.9", features = ["std"] }

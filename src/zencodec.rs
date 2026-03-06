@@ -1255,7 +1255,7 @@ mod tests {
         let encoded = enc.encode_rgb8(img.as_ref()).unwrap();
 
         let dec = JxlDecoderConfig::new();
-        let output = dec.decode(encoded.bytes()).unwrap();
+        let output = dec.decode(encoded.data()).unwrap();
         assert_eq!(output.info().width, 4);
         assert_eq!(output.info().height, 4);
         assert_eq!(output.info().format, ImageFormat::Jxl);
@@ -1433,7 +1433,7 @@ mod tests {
         let config = JxlDecoderConfig::new();
         let decoded = config
             .job()
-            .decoder(encoded.bytes(), &[])
+            .decoder(encoded.data(), &[])
             .unwrap()
             .decode()
             .unwrap();

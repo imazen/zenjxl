@@ -8,7 +8,8 @@ Wraps [jxl-rs](https://github.com/libjxl/jxl-rs) for decoding and `jxl-encoder` 
 
 - `decode` — JPEG XL decoding via jxl-rs
 - `encode` — JPEG XL encoding via jxl-encoder
-- `std` — Enable std support (default)
+- `zencodec` — Enable zencodec-types trait integration
+- `butteraugli-loop` — Perceptual quality tuning (requires `encode`)
 
 ## zencodec-types integration
 
