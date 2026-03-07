@@ -24,6 +24,10 @@ pub enum JxlError {
     #[error("limit exceeded: {0}")]
     LimitExceeded(alloc::string::String),
 
+    /// Operation was cancelled via Stop token.
+    #[error("cancelled: {0}")]
+    Cancelled(enough::StopReason),
+
     /// Unsupported codec operation.
     #[error("{0}")]
     UnsupportedOperation(
