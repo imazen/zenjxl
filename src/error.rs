@@ -1,6 +1,6 @@
 //! JXL error types with location tracking via [`whereat::At`].
 
-use zc::{HasUnsupportedOperation, UnsupportedOperation};
+use zc::UnsupportedOperation;
 
 /// Errors from JXL encode/decode operations.
 #[derive(Debug, thiserror::Error)]
@@ -27,13 +27,4 @@ pub enum JxlError {
     /// Unsupported codec operation.
     #[error(transparent)]
     UnsupportedOperation(#[from] UnsupportedOperation),
-}
-
-impl HasUnsupportedOperation for JxlError {
-    fn unsupported_operation(&self) -> Option<UnsupportedOperation> {
-        match self {
-            Self::UnsupportedOperation(op) => Some(*op),
-            _ => None,
-        }
-    }
 }

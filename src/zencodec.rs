@@ -1064,7 +1064,7 @@ mod tests {
     #[test]
     fn streaming_decoder_unsupported() {
         use zc::decode::{DecodeJob, DecoderConfig};
-        use zc::{HasUnsupportedOperation, UnsupportedOperation};
+        use zc::{CodecErrorExt, UnsupportedOperation};
 
         let dec_config = JxlDecoderConfig::new();
         let job = dec_config.job();
