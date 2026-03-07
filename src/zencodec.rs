@@ -405,6 +405,7 @@ mod encoding {
 mod decoding {
     use super::*;
     use alloc::collections::VecDeque;
+    use alloc::borrow::Cow;
     use alloc::vec;
     use alloc::vec::Vec;
 
@@ -540,7 +541,7 @@ mod decoding {
         type Error = At<JxlError>;
         type Dec = JxlDecoder<'a>;
         type StreamDec = Unsupported<At<JxlError>>;
-        type FrameDec = JxlFrameDecoder<'a>;
+        type FrameDec = JxlFrameDecoder;
 
         fn with_stop(mut self, stop: &'a dyn Stop) -> Self {
             self._stop = Some(stop);
@@ -579,7 +580,7 @@ mod decoding {
 
         fn decoder(
             self,
-            data: &'a [u8],
+            data: Cow<'a, [u8]>,
             preferred: &[PixelDescriptor],
         ) -> Result<JxlDecoder<'a>, At<JxlError>> {
             Ok(JxlDecoder {
@@ -591,7 +592,7 @@ mod decoding {
 
         fn streaming_decoder(
             self,
-            _data: &'a [u8],
+            _data: Cow<'a, [u8]>,
             _preferred: &[PixelDescriptor],
         ) -> Result<Unsupported<At<JxlError>>, At<JxlError>> {
             Err(at(JxlError::UnsupportedOperation(
@@ -601,11 +602,11 @@ mod decoding {
 
         fn frame_decoder(
             self,
-            data: &'a [u8],
+            data: Cow<'a, [u8]>,
             preferred: &[PixelDescriptor],
-        ) -> Result<JxlFrameDecoder<'a>, At<JxlError>> {
+        ) -> Result<JxlFrameDecoder, At<JxlError>> {
             Ok(JxlFrameDecoder {
-                data,
+                data: data.into_owned(),
                 limits: self.limits,
                 preferred: preferred.to_vec(),
                 frames: None,
@@ -617,7 +618,7 @@ mod decoding {
 
     /// Single-image JPEG XL decoder.
     pub struct JxlDecoder<'a> {
-        data: &'a [u8],
+        data: Cow<'a, [u8]>,
         limits: Option<ResourceLimits>,
         preferred: Vec<PixelDescriptor>,
     }
@@ -627,7 +628,7 @@ mod decoding {
 
         fn decode(self) -> Result<DecodeOutput, At<JxlError>> {
             let native_limits = JxlDecodeJob::to_native_limits(&self.limits);
-            let result = decode(self.data, native_limits.as_ref(), &self.preferred).map_err(at)?;
+            let result = decode(&self.data, native_limits.as_ref(), &self.preferred).map_err(at)?;
 
             let info = JxlDecodeJob::jxl_info_to_image_info(&result.info);
             Ok(DecodeOutput::new(result.pixels, info))
@@ -641,8 +642,8 @@ mod decoding {
     /// Decodes all frames eagerly on first call to `next_frame()` — the
     /// jxl-rs decoder handles blending/disposal internally, producing
     /// fully composited frames.
-    pub struct JxlFrameDecoder<'a> {
-        data: &'a [u8],
+    pub struct JxlFrameDecoder {
+        data: Vec<u8>,
         limits: Option<ResourceLimits>,
         preferred: Vec<PixelDescriptor>,
         /// Pre-decoded frames (lazily populated on first next_frame call).
@@ -654,7 +655,7 @@ mod decoding {
         loop_count: Option<u32>,
     }
 
-    impl JxlFrameDecoder<'_> {
+    impl JxlFrameDecoder {
         /// Decode all frames up front.
         fn decode_all_frames(&mut self) -> Result<(), At<JxlError>> {
             let mut options = JxlDecoderOptions::default();
@@ -668,7 +669,7 @@ mod decoding {
             let decoder = JxlRsDecoder::new(options);
 
             // Parse header
-            let mut input: &[u8] = self.data;
+            let mut input: &[u8] = &self.data;
             let mut decoder = match decoder
                 .process(&mut input)
                 .map_err(|e| at(JxlError::Decode(e)))?
@@ -794,7 +795,7 @@ mod decoding {
         }
     }
 
-    impl zc::decode::FrameDecode for JxlFrameDecoder<'_> {
+    impl zc::decode::FrameDecode for JxlFrameDecoder {
         type Error = At<JxlError>;
 
         fn frame_count(&self) -> Option<u32> {
@@ -829,6 +830,7 @@ pub use decoding::{JxlDecodeJob, JxlDecoder, JxlDecoderConfig, JxlFrameDecoder};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::borrow::Cow;
     use alloc::vec;
     use alloc::vec::Vec;
 
@@ -892,7 +894,7 @@ mod tests {
         // Decode back
         use zc::decode::{DecodeJob, DecoderConfig};
         let dec_config = JxlDecoderConfig::new();
-        let decoder = dec_config.job().decoder(output.data(), &[]).unwrap();
+        let decoder = dec_config.job().decoder(Cow::Borrowed(output.data()), &[]).unwrap();
         let decoded = decoder.decode().unwrap();
         assert_eq!(decoded.width(), width);
         assert_eq!(decoded.height(), height);
@@ -928,7 +930,7 @@ mod tests {
 
         use zc::decode::{DecodeJob, DecoderConfig};
         let dec_config = JxlDecoderConfig::new();
-        let decoder = dec_config.job().decoder(output.data(), &[]).unwrap();
+        let decoder = dec_config.job().decoder(Cow::Borrowed(output.data()), &[]).unwrap();
         let decoded = decoder.decode().unwrap();
         assert_eq!(decoded.width(), width);
         assert_eq!(decoded.height(), height);
@@ -968,7 +970,7 @@ mod tests {
 
         let dec_config = JxlDecoderConfig::new();
         let job = dec_config.job();
-        let result = job.streaming_decoder(&[0xFF], &[]);
+        let result = job.streaming_decoder(Cow::Borrowed(&[0xFF]), &[]);
         match result {
             Err(err) => {
                 assert_eq!(
