@@ -866,13 +866,17 @@ mod decoding {
                     }
                 };
 
-                if clamp {
-                    crate::decode::clamp_f32_buf(&mut buf);
+                // Skip frames before start_frame_index: decode them (jxl-rs
+                // requires sequential decode) but drop immediately instead of
+                // storing in the VecDeque.  This avoids holding all skipped
+                // frames in memory at peak.
+                if frame_index >= self.start_frame_index {
+                    if clamp {
+                        crate::decode::clamp_f32_buf(&mut buf);
+                    }
+                    let pixel_buf = build_pixel_data(&buf, width, height, &chosen);
+                    frames.push_back(OwnedFullFrame::new(pixel_buf, duration_ms, frame_index));
                 }
-
-                let pixel_buf = build_pixel_data(&buf, width, height, &chosen);
-
-                frames.push_back(OwnedFullFrame::new(pixel_buf, duration_ms, frame_index));
 
                 frame_index += 1;
 
@@ -880,11 +884,6 @@ mod decoding {
                     break;
                 }
                 decoder = next_decoder;
-            }
-
-            // Skip leading frames if start_frame_index was set.
-            for _ in 0..self.start_frame_index.min(frames.len() as u32) {
-                frames.pop_front();
             }
 
             self.image_info = Some(image_info);
