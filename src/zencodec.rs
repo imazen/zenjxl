@@ -466,6 +466,56 @@ mod encoding {
                 .with_extension("jxl"))
         }
 
+        fn encode_srgba8(
+            self,
+            data: &mut [u8],
+            make_opaque: bool,
+            width: u32,
+            height: u32,
+            stride_pixels: u32,
+        ) -> Result<EncodeOutput, At<JxlError>> {
+            let w = width as usize;
+            let h = height as usize;
+            let stride = stride_pixels as usize;
+
+            if make_opaque {
+                // Encode as RGB — strip alpha entirely for smaller output.
+                self.check_limits(width, height, 3)?;
+                let mut rgb = Vec::with_capacity(w * h * 3);
+                for y in 0..h {
+                    let row_start = y * stride * 4;
+                    let row = &data[row_start..row_start + w * 4];
+                    for px in row.chunks_exact(4) {
+                        rgb.push(px[0]);
+                        rgb.push(px[1]);
+                        rgb.push(px[2]);
+                    }
+                }
+                let encoded = self.encode_with_metadata(&rgb, width, height, PixelLayout::Rgb8)?;
+                Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
+                    .with_mime_type("image/jxl")
+                    .with_extension("jxl"))
+            } else {
+                // RGBA path — copy contiguous if strided, otherwise zero-copy.
+                self.check_limits(width, height, 4)?;
+                let pixel_data: alloc::borrow::Cow<'_, [u8]> = if stride == w {
+                    alloc::borrow::Cow::Borrowed(&data[..w * h * 4])
+                } else {
+                    let mut buf = Vec::with_capacity(w * h * 4);
+                    for y in 0..h {
+                        let row_start = y * stride * 4;
+                        buf.extend_from_slice(&data[row_start..row_start + w * 4]);
+                    }
+                    alloc::borrow::Cow::Owned(buf)
+                };
+                let encoded =
+                    self.encode_with_metadata(&pixel_data, width, height, PixelLayout::Rgba8)?;
+                Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
+                    .with_mime_type("image/jxl")
+                    .with_extension("jxl"))
+            }
+        }
+
         fn push_rows(&mut self, rows: PixelSlice<'_>) -> Result<(), At<JxlError>> {
             let desc = rows.descriptor();
             let layout = Self::descriptor_to_layout(desc)?;
@@ -643,7 +693,7 @@ mod encoding {
         ) -> Result<(), At<JxlError>> {
             // Check cancellation before doing any work.
             if let Some(stop) = stop {
-                stop.check().map_err(|e| at(JxlError::InvalidInput(e.to_string())))?;
+                stop.check().map_err(|e| at(JxlError::Cancelled(e)))?;
             }
 
             let layout = JxlEncoder::descriptor_to_layout(pixels.descriptor())?;
@@ -689,7 +739,12 @@ mod encoding {
             Ok(())
         }
 
-        fn finish(self, _stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<JxlError>> {
+        fn finish(self, stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<JxlError>> {
+            // Check cancellation before expensive encode.
+            if let Some(stop) = stop {
+                stop.check().map_err(|e| at(JxlError::Cancelled(e)))?;
+            }
+
             let layout = self
                 .layout
                 .ok_or_else(|| at(JxlError::InvalidInput("no frames pushed".into())))?;
@@ -710,9 +765,6 @@ mod encoding {
                 })
                 .collect();
 
-            // Note: encode_animation doesn't support ICC embedding directly.
-            // ICC would need to be embedded via the codestream, which the
-            // animation API doesn't expose. EXIF/XMP are wrapped via container.
             let encoded = match &self.mode {
                 JxlEncMode::Lossy(cfg) => cfg
                     .encode_animation(self.width, self.height, layout, &animation, &anim_frames)
