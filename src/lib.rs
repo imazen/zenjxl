@@ -34,10 +34,10 @@ pub use encode::{
 
 // zencodec-types trait types
 #[cfg(all(feature = "zencodec", feature = "encode"))]
-pub use zencodec::{JxlEncodeJob, JxlEncoder, JxlEncoderConfig, JxlFrameEncoder};
+pub use zencodec::{JxlEncodeJob, JxlEncoder, JxlEncoderConfig, JxlFullFrameEncoder};
 
 #[cfg(all(feature = "zencodec", feature = "decode"))]
-pub use zencodec::{JxlDecodeJob, JxlDecoder, JxlDecoderConfig, JxlFrameDecoder};
+pub use zencodec::{JxlDecodeJob, JxlDecoder, JxlDecoderConfig, JxlFullFrameDecoder};
 
 // Re-export encoder config types for callers.
 #[cfg(feature = "encode")]

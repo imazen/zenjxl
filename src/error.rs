@@ -27,4 +27,8 @@ pub enum JxlError {
     /// Unsupported codec operation.
     #[error(transparent)]
     UnsupportedOperation(#[from] UnsupportedOperation),
+
+    /// Decode row sink error.
+    #[error("sink error: {0}")]
+    Sink(zc::decode::SinkError),
 }
