@@ -530,8 +530,8 @@ mod decoding {
         type Error = At<JxlError>;
         type Job<'a> = JxlDecodeJob<'a>;
 
-        fn format() -> ImageFormat {
-            ImageFormat::Jxl
+        fn formats() -> &'static [ImageFormat] {
+            &[ImageFormat::Jxl]
         }
 
         fn supported_descriptors() -> &'static [PixelDescriptor] {
