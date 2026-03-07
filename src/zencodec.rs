@@ -459,7 +459,9 @@ mod decoding {
         ProcessingResult,
     };
     use zc::Unsupported;
-    use zc::decode::{DecodeCapabilities, DecodeOutput, OutputInfo, SinkError};
+    use zc::decode::{
+        DecodeCapabilities, DecodeOutput, OutputInfo, SinkError, push_decoder_via_full_decode,
+    };
     use zc::{FullFrame, OwnedFullFrame};
     use zc::{ImageInfo, ResourceLimits, UnsupportedOperation};
     use zenpixels::Cicp;
@@ -671,6 +673,17 @@ mod decoding {
             Err(at(JxlError::UnsupportedOperation(
                 UnsupportedOperation::RowLevelDecode,
             )))
+        }
+
+        fn push_decoder(
+            self,
+            data: Cow<'a, [u8]>,
+            sink: &mut dyn zc::decode::DecodeRowSink,
+            preferred: &[PixelDescriptor],
+        ) -> Result<OutputInfo, At<JxlError>> {
+            push_decoder_via_full_decode(self, data, sink, preferred, |e| {
+                at(JxlError::Sink(e))
+            })
         }
 
         fn full_frame_decoder(
@@ -910,6 +923,13 @@ mod decoding {
             let decoded = self.frames.as_mut().unwrap();
             self.current = decoded.frames.pop_front();
             Ok(self.current.as_ref().map(|f| f.as_full_frame()))
+        }
+
+        fn render_next_frame_to_sink(
+            &mut self,
+            sink: &mut dyn zc::decode::DecodeRowSink,
+        ) -> Result<Option<OutputInfo>, At<JxlError>> {
+            zc::decode::render_frame_to_sink_via_copy(self, sink)
         }
 
         fn render_next_frame_owned(&mut self) -> Result<Option<OwnedFullFrame>, At<JxlError>> {
