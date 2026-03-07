@@ -542,6 +542,15 @@ mod encoding {
     ///
     /// Collects frames, then encodes them all at once via
     /// `jxl-encoder`'s `encode_animation`.
+    ///
+    /// # Limitations
+    ///
+    /// ICC profile embedding is not supported for animation encoding.
+    /// The jxl-encoder animation API (`encode_animation`) generates the
+    /// codestream internally and does not accept metadata parameters.
+    /// ICC profiles are embedded in the JXL codestream image header, not
+    /// in container boxes, so they cannot be wrapped via `wrap_in_container`.
+    /// Single-frame encoding supports ICC via `EncodeRequest::with_metadata`.
     pub struct JxlFullFrameEncoder {
         mode: JxlEncMode,
         anim_meta: Option<OwnedAnimMeta>,
@@ -551,6 +560,8 @@ mod encoding {
         frames: Vec<u32>,
         /// Raw pixel data for each frame (owned copies).
         pixel_data: Vec<Vec<u8>>,
+        /// Total accumulated pixel data in bytes (for memory limit checking).
+        accumulated_bytes: u64,
         width: u32,
         height: u32,
         layout: Option<PixelLayout>,
@@ -592,6 +603,7 @@ mod encoding {
                 loop_count,
                 frames: Vec::new(),
                 pixel_data: Vec::new(),
+                accumulated_bytes: 0,
                 width: 0,
                 height: 0,
                 layout: None,
@@ -627,8 +639,13 @@ mod encoding {
             &mut self,
             pixels: PixelSlice<'_>,
             duration_ms: u32,
-            _stop: Option<&dyn Stop>,
+            stop: Option<&dyn Stop>,
         ) -> Result<(), At<JxlError>> {
+            // Check cancellation before doing any work.
+            if let Some(stop) = stop {
+                stop.check().map_err(|e| at(JxlError::InvalidInput(e.to_string())))?;
+            }
+
             let layout = JxlEncoder::descriptor_to_layout(pixels.descriptor())?;
             let w = pixels.width();
             let h = pixels.rows();
@@ -638,11 +655,6 @@ mod encoding {
                 if let Some(ref limits) = self.limits {
                     limits
                         .check_dimensions(w, h)
-                        .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
-                    let bpp = pixels.descriptor().bytes_per_pixel() as u64;
-                    let estimated = w as u64 * h as u64 * bpp;
-                    limits
-                        .check_memory(estimated)
                         .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
                 }
                 self.width = w;
@@ -661,7 +673,18 @@ mod encoding {
                     .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
             }
 
-            self.pixel_data.push(pixels.contiguous_bytes().into_owned());
+            let frame_data = pixels.contiguous_bytes().into_owned();
+            let frame_bytes = frame_data.len() as u64;
+            self.accumulated_bytes += frame_bytes;
+
+            // Check accumulated memory across ALL frames, not just the first.
+            if let Some(ref limits) = self.limits {
+                limits
+                    .check_memory(self.accumulated_bytes)
+                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+            }
+
+            self.pixel_data.push(frame_data);
             self.frames.push(duration_ms);
             Ok(())
         }
