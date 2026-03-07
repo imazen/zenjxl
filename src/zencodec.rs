@@ -23,6 +23,25 @@ use crate::error::JxlError;
 
 type At<E> = whereat::At<E>;
 
+/// Convert quality on 0–100 scale to JXL butteraugli distance.
+///
+/// Matches the jxl-encoder's own `percent_to_distance` piecewise mapping:
+/// - 90–100 → distance 0.0–1.0  (perceptually lossless zone)
+/// - 70–90  → distance 1.0–2.0  (high quality)
+/// - 0–70   → distance 2.0–9.0  (lower quality)
+fn quality_to_distance(quality: f32) -> f32 {
+    let q = quality.clamp(0.0, 100.0);
+    if q >= 100.0 {
+        0.0
+    } else if q >= 90.0 {
+        (100.0 - q) / 10.0
+    } else if q >= 70.0 {
+        1.0 + (90.0 - q) / 20.0
+    } else {
+        2.0 + (70.0 - q) / 10.0
+    }
+}
+
 // ── Encoding ────────────────────────────────────────────────────────────────
 
 #[cfg(feature = "encode")]
@@ -56,11 +75,25 @@ mod encoding {
 
     /// Supported pixel descriptors for encoding.
     ///
-    /// jxl-encoder supports RGB8, RGBA8, BGRA8, and Gray8 via PixelLayout.
+    /// jxl-encoder supports U8/U16/F32 × RGB/RGBA/Gray/GrayAlpha + BGRA8.
+    /// F32 layouts are linear-light (jxl-encoder assumes linear for float input).
     static JXL_ENCODE_DESCRIPTORS: &[PixelDescriptor] = &[
+        // 8-bit sRGB
         PixelDescriptor::RGB8_SRGB,
         PixelDescriptor::RGBA8_SRGB,
-        PixelDescriptor::GRAY8,
+        PixelDescriptor::BGRA8_SRGB,
+        PixelDescriptor::GRAY8_SRGB,
+        PixelDescriptor::GRAYA8_SRGB,
+        // 16-bit sRGB
+        PixelDescriptor::RGB16_SRGB,
+        PixelDescriptor::RGBA16_SRGB,
+        PixelDescriptor::GRAY16_SRGB,
+        PixelDescriptor::GRAYA16_SRGB,
+        // f32 linear
+        PixelDescriptor::RGBF32_LINEAR,
+        PixelDescriptor::RGBAF32_LINEAR,
+        PixelDescriptor::GRAYF32_LINEAR,
+        PixelDescriptor::GRAYAF32_LINEAR,
     ];
 
     // ── Internal encoder config ─────────────────────────────────────────
@@ -76,7 +109,7 @@ mod encoding {
 
     /// JPEG XL encoder configuration.
     ///
-    /// Implements [`zc::EncoderConfig`].
+    /// Implements [`zc::encode::EncoderConfig`].
     #[derive(Clone, Debug)]
     pub struct JxlEncoderConfig {
         mode: JxlEncMode,
@@ -86,7 +119,7 @@ mod encoding {
     }
 
     impl JxlEncoderConfig {
-        /// Create a default lossy encoder config.
+        /// Create a default lossy encoder config (distance 1.0, effort 7).
         pub fn new() -> Self {
             Self {
                 mode: JxlEncMode::Lossy(LossyConfig::new(1.0)),
@@ -110,6 +143,25 @@ mod encoding {
                 JxlEncMode::Lossless(c) => Some(c),
                 JxlEncMode::Lossy(_) => None,
             }
+        }
+
+        /// Rebuild the lossy mode from current quality + effort state.
+        fn rebuild_lossy(&mut self) {
+            let distance = self.quality.map(quality_to_distance).unwrap_or(1.0);
+            let mut cfg = LossyConfig::new(distance);
+            if let Some(e) = self.effort {
+                cfg = cfg.with_effort(e.clamp(1, 10) as u8);
+            }
+            self.mode = JxlEncMode::Lossy(cfg);
+        }
+
+        /// Rebuild lossless mode from current effort state.
+        fn rebuild_lossless(&mut self) {
+            let mut cfg = LosslessConfig::default();
+            if let Some(e) = self.effort {
+                cfg = cfg.with_effort(e.clamp(1, 10) as u8);
+            }
+            self.mode = JxlEncMode::Lossless(cfg);
         }
     }
 
@@ -138,44 +190,25 @@ mod encoding {
         fn with_generic_quality(mut self, quality: f32) -> Self {
             self.quality = Some(quality);
             if !self.lossless {
-                // Map 0-100 quality to JXL distance.
-                // quality 100 → distance 0.0 (lossless-quality lossy)
-                // quality 0 → distance 25.0 (very lossy)
-                let distance = (100.0 - quality.clamp(0.0, 100.0)) * 0.25;
-                let effort = self.effort.unwrap_or(7) as u8;
-                self.mode = JxlEncMode::Lossy(LossyConfig::new(distance).with_effort(effort));
+                self.rebuild_lossy();
             }
             self
         }
 
         fn with_generic_effort(mut self, effort: i32) -> Self {
-            let effort = effort.clamp(1, 10);
-            self.effort = Some(effort);
-            self.mode = match self.mode {
-                JxlEncMode::Lossy(cfg) => JxlEncMode::Lossy(cfg.with_effort(effort as u8)),
-                JxlEncMode::Lossless(cfg) => JxlEncMode::Lossless(cfg.with_effort(effort as u8)),
-            };
+            self.effort = Some(effort.clamp(1, 10));
+            match self.lossless {
+                true => self.rebuild_lossless(),
+                false => self.rebuild_lossy(),
+            }
             self
         }
 
         fn with_lossless(mut self, lossless: bool) -> Self {
             self.lossless = lossless;
-            if lossless {
-                let mut cfg = LosslessConfig::default();
-                if let Some(e) = self.effort {
-                    cfg = cfg.with_effort(e.clamp(1, 10) as u8);
-                }
-                self.mode = JxlEncMode::Lossless(cfg);
-            } else {
-                let distance = self
-                    .quality
-                    .map(|q| (100.0 - q.clamp(0.0, 100.0)) * 0.25)
-                    .unwrap_or(1.0);
-                let mut cfg = LossyConfig::new(distance);
-                if let Some(e) = self.effort {
-                    cfg = cfg.with_effort(e.clamp(1, 10) as u8);
-                }
-                self.mode = JxlEncMode::Lossy(cfg);
+            match lossless {
+                true => self.rebuild_lossless(),
+                false => self.rebuild_lossy(),
             }
             self
         }
@@ -273,10 +306,22 @@ mod encoding {
             let layout = desc.layout();
             let ct = desc.channel_type();
             match (layout, ct) {
+                // U8
                 (ChannelLayout::Rgb, ChannelType::U8) => Ok(PixelLayout::Rgb8),
                 (ChannelLayout::Rgba, ChannelType::U8) => Ok(PixelLayout::Rgba8),
                 (ChannelLayout::Bgra, ChannelType::U8) => Ok(PixelLayout::Bgra8),
                 (ChannelLayout::Gray, ChannelType::U8) => Ok(PixelLayout::Gray8),
+                (ChannelLayout::GrayAlpha, ChannelType::U8) => Ok(PixelLayout::GrayAlpha8),
+                // U16
+                (ChannelLayout::Rgb, ChannelType::U16) => Ok(PixelLayout::Rgb16),
+                (ChannelLayout::Rgba, ChannelType::U16) => Ok(PixelLayout::Rgba16),
+                (ChannelLayout::Gray, ChannelType::U16) => Ok(PixelLayout::Gray16),
+                (ChannelLayout::GrayAlpha, ChannelType::U16) => Ok(PixelLayout::GrayAlpha16),
+                // F32 (jxl-encoder assumes linear-light for float)
+                (ChannelLayout::Rgb, ChannelType::F32) => Ok(PixelLayout::RgbLinearF32),
+                (ChannelLayout::Rgba, ChannelType::F32) => Ok(PixelLayout::RgbaLinearF32),
+                (ChannelLayout::Gray, ChannelType::F32) => Ok(PixelLayout::GrayLinearF32),
+                (ChannelLayout::GrayAlpha, ChannelType::F32) => Ok(PixelLayout::GrayAlphaLinearF32),
                 _ => Err(at(JxlError::UnsupportedOperation(
                     UnsupportedOperation::PixelFormat,
                 ))),
@@ -357,7 +402,7 @@ mod encoding {
             }
 
             self.pixel_data.push(pixels.contiguous_bytes().into_owned());
-            // Convert ms to ticks at 1000 tps (1ms precision)
+            // 1000 tps = 1ms precision, so ticks == duration_ms
             self.frames.push(duration_ms);
             Ok(())
         }
@@ -404,8 +449,8 @@ mod encoding {
 #[cfg(feature = "decode")]
 mod decoding {
     use super::*;
-    use alloc::collections::VecDeque;
     use alloc::borrow::Cow;
+    use alloc::collections::VecDeque;
     use alloc::vec;
     use alloc::vec::Vec;
 
@@ -446,24 +491,30 @@ mod decoding {
 
     /// Supported pixel descriptors for decoding.
     ///
-    /// jxl-rs can decode to any combination of U8/U16/F32 × Gray/RGB/RGBA/BGRA.
+    /// jxl-rs can decode to U8/U16/F32 × Gray/GrayAlpha/RGB/RGBA.
     static JXL_DECODE_DESCRIPTORS: &[PixelDescriptor] = &[
+        // 8-bit
         PixelDescriptor::RGB8_SRGB,
         PixelDescriptor::RGBA8_SRGB,
-        PixelDescriptor::GRAY8,
-        PixelDescriptor::RGB16,
-        PixelDescriptor::RGBA16,
-        PixelDescriptor::GRAY16,
-        PixelDescriptor::RGBF32,
-        PixelDescriptor::RGBAF32,
-        PixelDescriptor::GRAYF32,
+        PixelDescriptor::GRAY8_SRGB,
+        PixelDescriptor::GRAYA8_SRGB,
+        // 16-bit
+        PixelDescriptor::RGB16_SRGB,
+        PixelDescriptor::RGBA16_SRGB,
+        PixelDescriptor::GRAY16_SRGB,
+        PixelDescriptor::GRAYA16_SRGB,
+        // f32 linear
+        PixelDescriptor::RGBF32_LINEAR,
+        PixelDescriptor::RGBAF32_LINEAR,
+        PixelDescriptor::GRAYF32_LINEAR,
+        PixelDescriptor::GRAYAF32_LINEAR,
     ];
 
     // ── JxlDecoderConfig ────────────────────────────────────────────────
 
     /// JPEG XL decoder configuration.
     ///
-    /// Implements [`zc::DecoderConfig`].
+    /// Implements [`zc::decode::DecoderConfig`].
     #[derive(Clone, Debug, Default)]
     pub struct JxlDecoderConfig {
         _priv: (),
@@ -535,6 +586,31 @@ mod decoding {
                 max_memory_bytes: l.max_memory_bytes,
             })
         }
+
+        /// Determine the native output pixel descriptor from probe info.
+        fn native_descriptor(info: &JxlInfo) -> PixelDescriptor {
+            let bit_depth_u8 = info.bit_depth.unwrap_or(8);
+            let is_float = bit_depth_u8 == 32;
+            let is_16 = bit_depth_u8 > 8 && !is_float;
+
+            match (info.is_gray, info.has_alpha, is_float, is_16) {
+                // f32
+                (true, true, true, _) => PixelDescriptor::GRAYAF32_LINEAR,
+                (true, false, true, _) => PixelDescriptor::GRAYF32_LINEAR,
+                (false, true, true, _) => PixelDescriptor::RGBAF32_LINEAR,
+                (false, false, true, _) => PixelDescriptor::RGBF32_LINEAR,
+                // u16
+                (true, true, _, true) => PixelDescriptor::GRAYA16_SRGB,
+                (true, false, _, true) => PixelDescriptor::GRAY16_SRGB,
+                (false, true, _, true) => PixelDescriptor::RGBA16_SRGB,
+                (false, false, _, true) => PixelDescriptor::RGB16_SRGB,
+                // u8
+                (true, true, _, _) => PixelDescriptor::GRAYA8_SRGB,
+                (true, false, _, _) => PixelDescriptor::GRAY8_SRGB,
+                (false, true, _, _) => PixelDescriptor::RGBA8_SRGB,
+                (false, false, _, _) => PixelDescriptor::RGB8_SRGB,
+            }
+        }
     }
 
     impl<'a> zc::decode::DecodeJob<'a> for JxlDecodeJob<'a> {
@@ -560,18 +636,7 @@ mod decoding {
 
         fn output_info(&self, data: &[u8]) -> Result<OutputInfo, At<JxlError>> {
             let info = probe(data).map_err(at)?;
-            // Determine the native output descriptor based on what choose_pixel_format
-            // would select (without actually decoding).
-            let bit_depth_u8 = info.bit_depth.unwrap_or(8);
-            let is_float = bit_depth_u8 == 32;
-            let native_desc = match (info.has_alpha, is_float, bit_depth_u8 > 8) {
-                (false, true, _) => PixelDescriptor::RGBF32,
-                (true, true, _) => PixelDescriptor::RGBAF32,
-                (false, _, true) => PixelDescriptor::RGB16,
-                (true, _, true) => PixelDescriptor::RGBA16,
-                (false, _, _) => PixelDescriptor::RGB8_SRGB,
-                (true, _, _) => PixelDescriptor::RGBA8_SRGB,
-            };
+            let native_desc = Self::native_descriptor(&info);
             Ok(
                 OutputInfo::full_decode(info.width, info.height, native_desc)
                     .with_alpha(info.has_alpha),
@@ -637,7 +702,7 @@ mod decoding {
 
     // ── JxlFrameDecoder ─────────────────────────────────────────────────
 
-    /// Animation JPEG XL decoder (full composited frames).
+    /// Animation JPEG XL decoder (fully composited frames).
     ///
     /// Decodes all frames eagerly on first call to `next_frame()` — the
     /// jxl-rs decoder handles blending/disposal internally, producing
@@ -726,6 +791,7 @@ mod decoding {
                 icc_profile,
                 orientation,
                 cicp,
+                is_gray,
             };
             let image_info = Arc::new(JxlDecodeJob::jxl_info_to_image_info(&jxl_info));
 
@@ -733,7 +799,9 @@ mod decoding {
                 chosen.pixel_format.color_data_format,
                 Some(jxl::api::JxlDataFormat::F32 { .. })
             );
-            let clamp = is_f32 && !is_hdr_or_wide_gamut(cicp);
+            // Only clamp when CICP explicitly tells us it's SDR.
+            // When CICP is absent (ICC-only), we don't know the gamut.
+            let clamp = is_f32 && cicp.is_some() && !is_hdr_or_wide_gamut(cicp);
 
             let mut frames = VecDeque::new();
             let mut frame_index = 0u32;
@@ -867,6 +935,30 @@ mod tests {
         assert!(config.lossy_config().is_none());
     }
 
+    #[cfg(feature = "encode")]
+    #[test]
+    fn quality_mapping_matches_jxl_encoder() {
+        // Verify our piecewise mapping matches jxl-encoder's percent_to_distance.
+        assert_eq!(quality_to_distance(100.0), 0.0);
+        assert_eq!(quality_to_distance(90.0), 1.0); // visually lossless
+        assert_eq!(quality_to_distance(80.0), 1.5);
+        assert_eq!(quality_to_distance(70.0), 2.0);
+        assert_eq!(quality_to_distance(50.0), 4.0);
+        assert_eq!(quality_to_distance(0.0), 9.0);
+        // Clamped above 100
+        assert_eq!(quality_to_distance(110.0), 0.0);
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn quality_sets_correct_distance() {
+        use zc::encode::EncoderConfig;
+        let config = JxlEncoderConfig::new().with_generic_quality(90.0);
+        // Quality 90 → distance 1.0 (visually lossless)
+        let lossy = config.lossy_config().unwrap();
+        assert!((lossy.distance() - 1.0).abs() < 0.001);
+    }
+
     #[cfg(all(feature = "encode", feature = "decode"))]
     #[test]
     fn roundtrip_rgb8() {
@@ -894,7 +986,10 @@ mod tests {
         // Decode back
         use zc::decode::{DecodeJob, DecoderConfig};
         let dec_config = JxlDecoderConfig::new();
-        let decoder = dec_config.job().decoder(Cow::Borrowed(output.data()), &[]).unwrap();
+        let decoder = dec_config
+            .job()
+            .decoder(Cow::Borrowed(output.data()), &[])
+            .unwrap();
         let decoded = decoder.decode().unwrap();
         assert_eq!(decoded.width(), width);
         assert_eq!(decoded.height(), height);
@@ -930,7 +1025,10 @@ mod tests {
 
         use zc::decode::{DecodeJob, DecoderConfig};
         let dec_config = JxlDecoderConfig::new();
-        let decoder = dec_config.job().decoder(Cow::Borrowed(output.data()), &[]).unwrap();
+        let decoder = dec_config
+            .job()
+            .decoder(Cow::Borrowed(output.data()), &[])
+            .unwrap();
         let decoded = decoder.decode().unwrap();
         assert_eq!(decoded.width(), width);
         assert_eq!(decoded.height(), height);
@@ -992,6 +1090,7 @@ mod tests {
         assert!(caps.hdr());
         assert!(caps.native_gray());
         assert!(caps.native_alpha());
+        assert!(caps.native_f32());
         assert!(caps.animation());
     }
 
@@ -1009,5 +1108,23 @@ mod tests {
         assert!(caps.native_alpha());
         assert!(caps.animation());
         assert!(caps.cheap_probe());
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encode_descriptors_cover_all_layouts() {
+        use zc::encode::EncoderConfig;
+        let descs = JxlEncoderConfig::supported_descriptors();
+        // Should include RGB, RGBA, BGRA, Gray, GrayAlpha across U8/U16/F32
+        assert!(descs.len() >= 13);
+    }
+
+    #[cfg(feature = "decode")]
+    #[test]
+    fn decode_descriptors_cover_all_layouts() {
+        use zc::decode::DecoderConfig;
+        let descs = JxlDecoderConfig::supported_descriptors();
+        // Should include RGB, RGBA, Gray, GrayAlpha across U8/U16/F32
+        assert!(descs.len() >= 12);
     }
 }

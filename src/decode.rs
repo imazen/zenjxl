@@ -35,6 +35,8 @@ pub struct JxlInfo {
     /// Derived from JXL's structured color encoding when the image does not use
     /// an ICC profile. `None` for ICC-profiled images or custom color spaces.
     pub cicp: Option<(u8, u8, u8, bool)>,
+    /// Whether the image's color encoding is grayscale.
+    pub is_gray: bool,
 }
 
 /// JXL decode output.
@@ -395,6 +397,7 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, JxlError> {
     let orientation = info.orientation as u8;
 
     let (icc_profile, cicp) = extract_color_info(decoder.embedded_color_profile());
+    let is_gray = profile_is_grayscale(decoder.embedded_color_profile());
 
     Ok(JxlInfo {
         width: width as u32,
@@ -405,6 +408,7 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, JxlError> {
         icc_profile,
         orientation,
         cicp,
+        is_gray,
     })
 }
 
@@ -503,7 +507,8 @@ pub fn decode(
     // Clamp f32 output to [0.0, 1.0] for SDR / BT.709 content.
     // Lossy JXL can produce values slightly outside range as compression artifacts.
     // HDR (PQ/HLG) and wide gamut (BT.2020/P3) content is left unclamped.
-    if chosen.channel_type == ChannelType::F32 && !is_hdr_or_wide_gamut(cicp) {
+    // When CICP is absent (ICC-only images), we don't know the gamut — don't clamp.
+    if chosen.channel_type == ChannelType::F32 && cicp.is_some() && !is_hdr_or_wide_gamut(cicp) {
         clamp_f32_buf(&mut buf);
     }
 
@@ -520,6 +525,7 @@ pub fn decode(
             icc_profile,
             orientation,
             cicp,
+            is_gray,
         },
     })
 }
