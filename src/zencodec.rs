@@ -47,9 +47,10 @@ fn quality_to_distance(quality: f32) -> f32 {
 #[cfg(feature = "encode")]
 mod encoding {
     use super::*;
+    use alloc::string::ToString;
     use alloc::vec::Vec;
     use jxl_encoder::{AnimationFrame, AnimationParams, LosslessConfig, LossyConfig, PixelLayout};
-    use zc::encode::{EncodeCapabilities, EncodeOutput};
+    use zc::encode::{EncodeCapabilities, EncodeOutput, EncodePolicy};
     use zc::{MetadataView, ResourceLimits, UnsupportedOperation};
     use zenpixels::{ChannelLayout, ChannelType, PixelSlice};
 
@@ -71,7 +72,13 @@ mod encoding {
         .with_native_f32(true)
         .with_animation(true)
         .with_effort_range(1, 10)
-        .with_quality_range(0.0, 100.0);
+        .with_quality_range(0.0, 100.0)
+        .with_icc(true)
+        .with_exif(true)
+        .with_xmp(true)
+        .with_enforces_max_pixels(true)
+        .with_enforces_max_memory(true)
+        .with_cancel(true);
 
     /// Supported pixel descriptors for encoding.
     ///
@@ -228,9 +235,10 @@ mod encoding {
         fn job(&self) -> JxlEncodeJob<'_> {
             JxlEncodeJob {
                 config: self,
-                _stop: None,
+                stop: None,
                 limits: None,
                 metadata: None,
+                policy: EncodePolicy::none(),
                 loop_count: None,
             }
         }
@@ -241,9 +249,10 @@ mod encoding {
     /// Per-operation encode job for JPEG XL.
     pub struct JxlEncodeJob<'a> {
         config: &'a JxlEncoderConfig,
-        _stop: Option<&'a dyn Stop>,
+        stop: Option<&'a dyn Stop>,
         limits: Option<ResourceLimits>,
         metadata: Option<&'a MetadataView<'a>>,
+        policy: EncodePolicy,
         loop_count: Option<u32>,
     }
 
@@ -253,7 +262,7 @@ mod encoding {
         type FullFrameEnc = JxlFullFrameEncoder;
 
         fn with_stop(mut self, stop: &'a dyn Stop) -> Self {
-            self._stop = Some(stop);
+            self.stop = Some(stop);
             self
         }
 
@@ -267,6 +276,11 @@ mod encoding {
             self
         }
 
+        fn with_policy(mut self, policy: EncodePolicy) -> Self {
+            self.policy = policy;
+            self
+        }
+
         fn with_loop_count(mut self, count: Option<u32>) -> Self {
             self.loop_count = count;
             self
@@ -275,21 +289,22 @@ mod encoding {
         fn encoder(self) -> Result<JxlEncoder<'a>, At<JxlError>> {
             Ok(JxlEncoder {
                 mode: self.config.mode.clone(),
-                _metadata: self.metadata,
+                metadata: self.metadata,
+                policy: self.policy,
+                limits: self.limits,
+                stop: self.stop,
                 stream: StreamState::Empty,
             })
         }
 
         fn full_frame_encoder(self) -> Result<JxlFullFrameEncoder, At<JxlError>> {
-            Ok(JxlFullFrameEncoder {
-                mode: self.config.mode.clone(),
-                loop_count: self.loop_count,
-                frames: Vec::new(),
-                pixel_data: Vec::new(),
-                width: 0,
-                height: 0,
-                layout: None,
-            })
+            Ok(JxlFullFrameEncoder::from_job(
+                self.config.mode.clone(),
+                self.metadata,
+                &self.policy,
+                self.limits,
+                self.loop_count,
+            ))
         }
     }
 
@@ -317,7 +332,10 @@ mod encoding {
     /// [`finish()`](zc::encode::Encoder::finish).
     pub struct JxlEncoder<'a> {
         mode: JxlEncMode,
-        _metadata: Option<&'a MetadataView<'a>>,
+        metadata: Option<&'a MetadataView<'a>>,
+        policy: EncodePolicy,
+        limits: Option<ResourceLimits>,
+        stop: Option<&'a dyn Stop>,
         stream: StreamState,
     }
 
@@ -350,6 +368,82 @@ mod encoding {
         }
     }
 
+    impl JxlEncoder<'_> {
+        /// Build jxl-encoder ImageMetadata from the zencodec MetadataView,
+        /// respecting the EncodePolicy for what to embed.
+        fn build_jxl_metadata(&self) -> Option<jxl_encoder::ImageMetadata<'_>> {
+            let meta = self.metadata?;
+            let mut jxl_meta = jxl_encoder::ImageMetadata::new();
+            let mut has_any = false;
+
+            if self.policy.resolve_icc(true) {
+                if let Some(icc) = meta.icc_profile {
+                    jxl_meta = jxl_meta.with_icc_profile(icc);
+                    has_any = true;
+                }
+            }
+            if self.policy.resolve_exif(true) {
+                if let Some(exif) = meta.exif {
+                    jxl_meta = jxl_meta.with_exif(exif);
+                    has_any = true;
+                }
+            }
+            if self.policy.resolve_xmp(true) {
+                if let Some(xmp) = meta.xmp {
+                    jxl_meta = jxl_meta.with_xmp(xmp);
+                    has_any = true;
+                }
+            }
+
+            has_any.then_some(jxl_meta)
+        }
+
+        /// Check ResourceLimits against the given dimensions and bytes-per-pixel.
+        fn check_limits(&self, width: u32, height: u32, bpp: u32) -> Result<(), At<JxlError>> {
+            if let Some(ref limits) = self.limits {
+                limits
+                    .check_dimensions(width, height)
+                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+                let estimated = width as u64 * height as u64 * bpp as u64;
+                limits
+                    .check_memory(estimated)
+                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+            }
+            Ok(())
+        }
+
+        /// Encode pixel data using the encode_request API with metadata + stop support.
+        fn encode_with_metadata(
+            &self,
+            data: &[u8],
+            width: u32,
+            height: u32,
+            layout: PixelLayout,
+        ) -> Result<Vec<u8>, At<JxlError>> {
+            let jxl_meta = self.build_jxl_metadata();
+
+            let encode = |req: jxl_encoder::EncodeRequest<'_>| -> Result<Vec<u8>, At<JxlError>> {
+                let req = if let Some(ref meta) = jxl_meta {
+                    req.with_metadata(meta)
+                } else {
+                    req
+                };
+                let req = if let Some(stop) = self.stop {
+                    req.with_stop(stop)
+                } else {
+                    req
+                };
+                req.encode(data)
+                    .map_err(|e| at(JxlError::Encode(e.into_inner())))
+            };
+
+            match &self.mode {
+                JxlEncMode::Lossy(cfg) => encode(cfg.encode_request(width, height, layout)),
+                JxlEncMode::Lossless(cfg) => encode(cfg.encode_request(width, height, layout)),
+            }
+        }
+    }
+
     impl zc::encode::Encoder for JxlEncoder<'_> {
         type Error = At<JxlError>;
 
@@ -361,16 +455,11 @@ mod encoding {
             let layout = Self::descriptor_to_layout(pixels.descriptor())?;
             let width = pixels.width();
             let height = pixels.rows();
-            let data = pixels.contiguous_bytes();
+            let bpp = pixels.descriptor().bytes_per_pixel() as u32;
+            self.check_limits(width, height, bpp)?;
 
-            let encoded = match &self.mode {
-                JxlEncMode::Lossy(cfg) => cfg
-                    .encode(&data, width, height, layout)
-                    .map_err(|e| at(JxlError::Encode(e.into_inner())))?,
-                JxlEncMode::Lossless(cfg) => cfg
-                    .encode(&data, width, height, layout)
-                    .map_err(|e| at(JxlError::Encode(e.into_inner())))?,
-            };
+            let data = pixels.contiguous_bytes();
+            let encoded = self.encode_with_metadata(&data, width, height, layout)?;
 
             Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                 .with_mime_type("image/jxl")
@@ -419,7 +508,8 @@ mod encoding {
             let StreamState::Accumulating {
                 width,
                 layout,
-                data,
+                descriptor,
+                ref data,
                 rows_pushed,
                 ..
             } = self.stream
@@ -429,14 +519,10 @@ mod encoding {
                 )));
             };
 
-            let encoded = match &self.mode {
-                JxlEncMode::Lossy(cfg) => cfg
-                    .encode(&data, width, rows_pushed, layout)
-                    .map_err(|e| at(JxlError::Encode(e.into_inner())))?,
-                JxlEncMode::Lossless(cfg) => cfg
-                    .encode(&data, width, rows_pushed, layout)
-                    .map_err(|e| at(JxlError::Encode(e.into_inner())))?,
-            };
+            let bpp = descriptor.bytes_per_pixel() as u32;
+            self.check_limits(width, rows_pushed, bpp)?;
+
+            let encoded = self.encode_with_metadata(data, width, rows_pushed, layout)?;
 
             Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                 .with_mime_type("image/jxl")
@@ -446,12 +532,20 @@ mod encoding {
 
     // ── JxlFullFrameEncoder ──────────────────────────────────────────────
 
+    /// Owned metadata for animation encoding (must be `'static` per trait bounds).
+    struct OwnedAnimMeta {
+        exif: Option<Vec<u8>>,
+        xmp: Option<Vec<u8>>,
+    }
+
     /// Animation JPEG XL encoder.
     ///
     /// Collects frames, then encodes them all at once via
     /// `jxl-encoder`'s `encode_animation`.
     pub struct JxlFullFrameEncoder {
         mode: JxlEncMode,
+        anim_meta: Option<OwnedAnimMeta>,
+        limits: Option<ResourceLimits>,
         loop_count: Option<u32>,
         /// Duration per frame in milliseconds.
         frames: Vec<u32>,
@@ -460,6 +554,66 @@ mod encoding {
         width: u32,
         height: u32,
         layout: Option<PixelLayout>,
+    }
+
+    impl JxlFullFrameEncoder {
+        /// Create from job state, copying metadata we need for container wrapping.
+        fn from_job(
+            mode: JxlEncMode,
+            metadata: Option<&MetadataView<'_>>,
+            policy: &EncodePolicy,
+            limits: Option<ResourceLimits>,
+            loop_count: Option<u32>,
+        ) -> Self {
+            // For animation, ICC is handled in the codestream by jxl-encoder.
+            // EXIF/XMP go in the container — copy them out now so we're 'static.
+            let anim_meta = metadata.and_then(|meta| {
+                let exif = if policy.resolve_exif(true) {
+                    meta.exif.map(|b| b.to_vec())
+                } else {
+                    None
+                };
+                let xmp = if policy.resolve_xmp(true) {
+                    meta.xmp.map(|b| b.to_vec())
+                } else {
+                    None
+                };
+                if exif.is_some() || xmp.is_some() {
+                    Some(OwnedAnimMeta { exif, xmp })
+                } else {
+                    None
+                }
+            });
+
+            Self {
+                mode,
+                anim_meta,
+                limits,
+                loop_count,
+                frames: Vec::new(),
+                pixel_data: Vec::new(),
+                width: 0,
+                height: 0,
+                layout: None,
+            }
+        }
+
+        /// Wrap an encoded animation codestream with EXIF/XMP metadata boxes.
+        fn wrap_with_metadata(self, codestream: Vec<u8>) -> Vec<u8> {
+            let meta = match self.anim_meta {
+                Some(m) => m,
+                None => return codestream,
+            };
+
+            let exif = meta.exif.as_deref();
+            let xmp = meta.xmp.as_deref();
+
+            if exif.is_none() && xmp.is_none() {
+                return codestream;
+            }
+
+            jxl_encoder::container::wrap_in_container(&codestream, exif, xmp)
+        }
     }
 
     impl zc::encode::FullFrameEncoder for JxlFullFrameEncoder {
@@ -480,6 +634,17 @@ mod encoding {
             let h = pixels.rows();
 
             if self.pixel_data.is_empty() {
+                // Validate dimensions against limits on first frame.
+                if let Some(ref limits) = self.limits {
+                    limits
+                        .check_dimensions(w, h)
+                        .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+                    let bpp = pixels.descriptor().bytes_per_pixel() as u64;
+                    let estimated = w as u64 * h as u64 * bpp;
+                    limits
+                        .check_memory(estimated)
+                        .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+                }
                 self.width = w;
                 self.height = h;
                 self.layout = Some(layout);
@@ -489,8 +654,14 @@ mod encoding {
                 )));
             }
 
+            // Check max_frames limit.
+            if let Some(ref limits) = self.limits {
+                limits
+                    .check_frames(self.pixel_data.len() as u32 + 1)
+                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+            }
+
             self.pixel_data.push(pixels.contiguous_bytes().into_owned());
-            // 1000 tps = 1ms precision, so ticks == duration_ms
             self.frames.push(duration_ms);
             Ok(())
         }
@@ -516,6 +687,9 @@ mod encoding {
                 })
                 .collect();
 
+            // Note: encode_animation doesn't support ICC embedding directly.
+            // ICC would need to be embedded via the codestream, which the
+            // animation API doesn't expose. EXIF/XMP are wrapped via container.
             let encoded = match &self.mode {
                 JxlEncMode::Lossy(cfg) => cfg
                     .encode_animation(self.width, self.height, layout, &animation, &anim_frames)
@@ -524,6 +698,8 @@ mod encoding {
                     .encode_animation(self.width, self.height, layout, &animation, &anim_frames)
                     .map_err(|e| at(JxlError::Encode(e.into_inner())))?,
             };
+
+            let encoded = self.wrap_with_metadata(encoded);
 
             Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                 .with_mime_type("image/jxl")
