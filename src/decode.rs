@@ -83,7 +83,9 @@ fn map_err(e: jxl::api::Error) -> JxlError {
 
 /// Extract ICC profile and CICP from JXL color profile.
 #[allow(clippy::type_complexity)]
-fn extract_color_info(profile: &JxlColorProfile) -> (Option<Vec<u8>>, Option<(u8, u8, u8, bool)>) {
+pub(crate) fn extract_color_info(
+    profile: &JxlColorProfile,
+) -> (Option<Vec<u8>>, Option<(u8, u8, u8, bool)>) {
     match profile {
         JxlColorProfile::Icc(icc_bytes) => (Some(icc_bytes.clone()), None),
         JxlColorProfile::Simple(encoding) => {
@@ -138,7 +140,7 @@ fn transfer_to_cicp(tf: &JxlTransferFunction) -> Option<u8> {
 
 /// Returns true if CICP indicates HDR transfer (PQ/HLG) or wide gamut primaries
 /// (BT.2020/P3). These signals mean values outside [0, 1] may be intentional.
-fn is_hdr_or_wide_gamut(cicp: Option<(u8, u8, u8, bool)>) -> bool {
+pub(crate) fn is_hdr_or_wide_gamut(cicp: Option<(u8, u8, u8, bool)>) -> bool {
     let Some((cp, tc, _, _)) = cicp else {
         return false;
     };
@@ -150,7 +152,7 @@ fn is_hdr_or_wide_gamut(cicp: Option<(u8, u8, u8, bool)>) -> bool {
 }
 
 /// Clamp all f32 values in a byte buffer to [0.0, 1.0].
-fn clamp_f32_buf(buf: &mut [u8]) {
+pub(crate) fn clamp_f32_buf(buf: &mut [u8]) {
     for chunk in buf.chunks_exact_mut(4) {
         let v = f32::from_ne_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         let clamped = v.clamp(0.0, 1.0);
@@ -161,7 +163,7 @@ fn clamp_f32_buf(buf: &mut [u8]) {
 }
 
 /// Check if a JXL color profile indicates grayscale.
-fn profile_is_grayscale(profile: &JxlColorProfile) -> bool {
+pub(crate) fn profile_is_grayscale(profile: &JxlColorProfile) -> bool {
     matches!(
         profile,
         JxlColorProfile::Simple(JxlColorEncoding::GrayscaleColorSpace { .. })
@@ -170,13 +172,13 @@ fn profile_is_grayscale(profile: &JxlColorProfile) -> bool {
 
 /// Chosen output format for the JXL decoder.
 #[derive(Clone, Debug)]
-struct ChosenFormat {
+pub(crate) struct ChosenFormat {
     /// The JXL pixel format to request from the decoder.
-    pixel_format: JxlPixelFormat,
+    pub(crate) pixel_format: JxlPixelFormat,
     /// The color type we requested (for buffer interpretation).
-    color_type: JxlColorType,
+    pub(crate) color_type: JxlColorType,
     /// The channel type we're decoding into.
-    channel_type: ChannelType,
+    pub(crate) channel_type: ChannelType,
 }
 
 /// Choose the output pixel format based on the image's native properties and
@@ -184,7 +186,7 @@ struct ChosenFormat {
 ///
 /// If `preferred` is non-empty, picks the first descriptor we can produce without
 /// lossy conversion. If empty, returns the native format (matching bit depth).
-fn choose_pixel_format(
+pub(crate) fn choose_pixel_format(
     bit_depth: &JxlBitDepth,
     has_alpha: bool,
     is_gray: bool,
@@ -526,7 +528,12 @@ pub fn decode(
 ///
 /// Returns a type-erased PixelBuffer with the base descriptor (Unknown transfer
 /// function). The caller should set the correct transfer function from CICP metadata.
-fn build_pixel_data(buf: &[u8], width: usize, height: usize, chosen: &ChosenFormat) -> PixelBuffer {
+pub(crate) fn build_pixel_data(
+    buf: &[u8],
+    width: usize,
+    height: usize,
+    chosen: &ChosenFormat,
+) -> PixelBuffer {
     use rgb::{Gray, Rgb, Rgba};
 
     let w = width as u32;

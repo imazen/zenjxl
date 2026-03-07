@@ -11,6 +11,7 @@ repository = "https://github.com/imazen/zenjxl"
 
 [dependencies]
 thiserror = { version = "2.0", default-features = false }
+whereat = "0.1"
 rgb = { version = "0.8", default-features = false, features = ["as-bytes"] }
 imgref = "1.12"
 bytemuck = { version = "1.25", default-features = false }
@@ -29,5 +30,5 @@ default = ["encode", "decode"]
 decode = ["dep:jxl"]
 encode = ["dep:jxl-encoder"]
 butteraugli-loop = ["encode", "jxl-encoder/butteraugli-loop"]
-# Enable zencodec-types trait integration (broken pending trait update)
+# Enable zencodec-types trait integration
 zencodec = []

@@ -37,9 +37,7 @@ pub use encode::{
 pub use zencodec::{JxlEncodeJob, JxlEncoder, JxlEncoderConfig, JxlFrameEncoder};
 
 #[cfg(all(feature = "zencodec", feature = "decode"))]
-pub use zencodec::{
-    JxlDecodeJob, JxlDecoder, JxlDecoderConfig, JxlFrameDecoder, JxlStreamingDecoder,
-};
+pub use zencodec::{JxlDecodeJob, JxlDecoder, JxlDecoderConfig, JxlFrameDecoder};
 
 // Re-export encoder config types for callers.
 #[cfg(feature = "encode")]
