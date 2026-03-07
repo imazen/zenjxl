@@ -547,6 +547,7 @@ mod decoding {
             JxlDecodeJob {
                 limits: None,
                 _stop: None,
+                start_frame_index: 0,
             }
         }
     }
@@ -557,6 +558,7 @@ mod decoding {
     pub struct JxlDecodeJob<'a> {
         limits: Option<ResourceLimits>,
         _stop: Option<&'a dyn Stop>,
+        start_frame_index: u32,
     }
 
     impl JxlDecodeJob<'_> {
@@ -630,6 +632,11 @@ mod decoding {
             self
         }
 
+        fn with_start_frame_index(mut self, index: u32) -> Self {
+            self.start_frame_index = index;
+            self
+        }
+
         fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<JxlError>> {
             let info = probe(data).map_err(at)?;
             Ok(Self::jxl_info_to_image_info(&info))
@@ -678,6 +685,7 @@ mod decoding {
                 frames: None,
                 image_info: None,
                 current: None,
+                start_frame_index: self.start_frame_index,
             })
         }
     }
@@ -720,6 +728,8 @@ mod decoding {
         image_info: Option<Arc<ImageInfo>>,
         /// Current frame for borrowed access via `render_next_frame`.
         current: Option<OwnedFullFrame>,
+        /// Number of displayed frames to skip from the front.
+        start_frame_index: u32,
     }
 
     struct DecodedFrames {
@@ -857,6 +867,11 @@ mod decoding {
                     break;
                 }
                 decoder = next_decoder;
+            }
+
+            // Skip leading frames if start_frame_index was set.
+            for _ in 0..self.start_frame_index.min(frames.len() as u32) {
+                frames.pop_front();
             }
 
             self.image_info = Some(image_info);
