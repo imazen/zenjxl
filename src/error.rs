@@ -25,8 +25,12 @@ pub enum JxlError {
     LimitExceeded(alloc::string::String),
 
     /// Unsupported codec operation.
-    #[error(transparent)]
-    UnsupportedOperation(#[from] UnsupportedOperation),
+    #[error("{0}")]
+    UnsupportedOperation(
+        #[source]
+        #[from]
+        UnsupportedOperation,
+    ),
 
     /// Decode row sink error.
     #[error("sink error: {0}")]

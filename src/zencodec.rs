@@ -276,6 +276,7 @@ mod encoding {
             Ok(JxlEncoder {
                 mode: self.config.mode.clone(),
                 _metadata: self.metadata,
+                stream: StreamState::Empty,
             })
         }
 
@@ -294,10 +295,30 @@ mod encoding {
 
     // ── JxlEncoder ──────────────────────────────────────────────────────
 
+    /// Streaming state for incremental row pushing.
+    enum StreamState {
+        /// No rows pushed yet.
+        Empty,
+        /// Accumulating raw pixel bytes.
+        Accumulating {
+            width: u32,
+            layout: PixelLayout,
+            descriptor: PixelDescriptor,
+            data: Vec<u8>,
+            rows_pushed: u32,
+        },
+    }
+
     /// Single-image JPEG XL encoder.
+    ///
+    /// Supports both one-shot encoding via [`encode()`](zc::encode::Encoder::encode)
+    /// and incremental row-level encoding via
+    /// [`push_rows()`](zc::encode::Encoder::push_rows) +
+    /// [`finish()`](zc::encode::Encoder::finish).
     pub struct JxlEncoder<'a> {
         mode: JxlEncMode,
         _metadata: Option<&'a MetadataView<'a>>,
+        stream: StreamState,
     }
 
     impl JxlEncoder<'_> {
@@ -355,6 +376,72 @@ mod encoding {
                 .with_mime_type("image/jxl")
                 .with_extension("jxl"))
         }
+
+        fn push_rows(&mut self, rows: PixelSlice<'_>) -> Result<(), At<JxlError>> {
+            let desc = rows.descriptor();
+            let layout = Self::descriptor_to_layout(desc)?;
+            let width = rows.width();
+            let num_rows = rows.rows();
+            let bytes = rows.contiguous_bytes();
+
+            match &mut self.stream {
+                StreamState::Empty => {
+                    let mut data = Vec::new();
+                    data.extend_from_slice(&bytes);
+                    self.stream = StreamState::Accumulating {
+                        width,
+                        layout,
+                        descriptor: desc,
+                        data,
+                        rows_pushed: num_rows,
+                    };
+                }
+                StreamState::Accumulating {
+                    width: w,
+                    descriptor: d,
+                    data,
+                    rows_pushed,
+                    ..
+                } => {
+                    if width != *w || desc != *d {
+                        return Err(at(JxlError::InvalidInput(
+                            "push_rows: width or pixel format changed between calls".into(),
+                        )));
+                    }
+                    data.extend_from_slice(&bytes);
+                    *rows_pushed += num_rows;
+                }
+            }
+            Ok(())
+        }
+
+        fn finish(self) -> Result<EncodeOutput, At<JxlError>> {
+            let StreamState::Accumulating {
+                width,
+                layout,
+                data,
+                rows_pushed,
+                ..
+            } = self.stream
+            else {
+                return Err(at(JxlError::InvalidInput(
+                    "finish: no rows were pushed".into(),
+                )));
+            };
+
+            let encoded = match &self.mode {
+                JxlEncMode::Lossy(cfg) => cfg
+                    .encode(&data, width, rows_pushed, layout)
+                    .map_err(|e| at(JxlError::Encode(e.into_inner())))?,
+                JxlEncMode::Lossless(cfg) => cfg
+                    .encode(&data, width, rows_pushed, layout)
+                    .map_err(|e| at(JxlError::Encode(e.into_inner())))?,
+            };
+
+            Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
+                .with_mime_type("image/jxl")
+                .with_extension("jxl"))
+        }
     }
 
     // ── JxlFullFrameEncoder ──────────────────────────────────────────────
@@ -386,6 +473,7 @@ mod encoding {
             &mut self,
             pixels: PixelSlice<'_>,
             duration_ms: u32,
+            _stop: Option<&dyn Stop>,
         ) -> Result<(), At<JxlError>> {
             let layout = JxlEncoder::descriptor_to_layout(pixels.descriptor())?;
             let w = pixels.width();
@@ -407,7 +495,7 @@ mod encoding {
             Ok(())
         }
 
-        fn finish(self) -> Result<EncodeOutput, At<JxlError>> {
+        fn finish(self, _stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<JxlError>> {
             let layout = self
                 .layout
                 .ok_or_else(|| at(JxlError::InvalidInput("no frames pushed".into())))?;
@@ -681,9 +769,7 @@ mod decoding {
             sink: &mut dyn zc::decode::DecodeRowSink,
             preferred: &[PixelDescriptor],
         ) -> Result<OutputInfo, At<JxlError>> {
-            push_decoder_via_full_decode(self, data, sink, preferred, |e| {
-                at(JxlError::Sink(e))
-            })
+            push_decoder_via_full_decode(self, data, sink, preferred, |e| at(JxlError::Sink(e)))
         }
 
         fn full_frame_decoder(
@@ -914,7 +1000,10 @@ mod decoding {
             self.frames.as_ref().and_then(|f| f.loop_count)
         }
 
-        fn render_next_frame(&mut self) -> Result<Option<FullFrame<'_>>, At<JxlError>> {
+        fn render_next_frame(
+            &mut self,
+            _stop: Option<&dyn Stop>,
+        ) -> Result<Option<FullFrame<'_>>, At<JxlError>> {
             if self.frames.is_none() {
                 self.decode_all_frames()?;
             }
@@ -926,12 +1015,16 @@ mod decoding {
 
         fn render_next_frame_to_sink(
             &mut self,
+            stop: Option<&dyn Stop>,
             sink: &mut dyn zc::decode::DecodeRowSink,
         ) -> Result<Option<OutputInfo>, At<JxlError>> {
-            zc::decode::render_frame_to_sink_via_copy(self, sink)
+            zc::decode::render_frame_to_sink_via_copy(self, stop, sink)
         }
 
-        fn render_next_frame_owned(&mut self) -> Result<Option<OwnedFullFrame>, At<JxlError>> {
+        fn render_next_frame_owned(
+            &mut self,
+            _stop: Option<&dyn Stop>,
+        ) -> Result<Option<OwnedFullFrame>, At<JxlError>> {
             if self.frames.is_none() {
                 self.decode_all_frames()?;
             }
