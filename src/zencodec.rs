@@ -849,11 +849,7 @@ mod decoding {
 
                 let pixel_buf = build_pixel_data(&buf, width, height, &chosen);
 
-                frames.push_back(OwnedFullFrame::new(
-                    pixel_buf,
-                    duration_ms,
-                    frame_index,
-                ));
+                frames.push_back(OwnedFullFrame::new(pixel_buf, duration_ms, frame_index));
 
                 frame_index += 1;
 
