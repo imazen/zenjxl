@@ -136,6 +136,30 @@ fn transfer_to_cicp(tf: &JxlTransferFunction) -> Option<u8> {
     })
 }
 
+/// Returns true if CICP indicates HDR transfer (PQ/HLG) or wide gamut primaries
+/// (BT.2020/P3). These signals mean values outside [0, 1] may be intentional.
+fn is_hdr_or_wide_gamut(cicp: Option<(u8, u8, u8, bool)>) -> bool {
+    let Some((cp, tc, _, _)) = cicp else {
+        return false;
+    };
+    // PQ = 16, HLG = 18
+    let hdr_transfer = matches!(tc, 16 | 18);
+    // BT.2020 = 9, P3 = 11 | 12
+    let wide_gamut = matches!(cp, 9 | 11 | 12);
+    hdr_transfer || wide_gamut
+}
+
+/// Clamp all f32 values in a byte buffer to [0.0, 1.0].
+fn clamp_f32_buf(buf: &mut [u8]) {
+    for chunk in buf.chunks_exact_mut(4) {
+        let v = f32::from_ne_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        let clamped = v.clamp(0.0, 1.0);
+        if v != clamped {
+            chunk.copy_from_slice(&clamped.to_ne_bytes());
+        }
+    }
+}
+
 /// Check if a JXL color profile indicates grayscale.
 fn profile_is_grayscale(profile: &JxlColorProfile) -> bool {
     matches!(
@@ -473,6 +497,13 @@ pub fn decode(
             ));
         }
     };
+
+    // Clamp f32 output to [0.0, 1.0] for SDR / BT.709 content.
+    // Lossy JXL can produce values slightly outside range as compression artifacts.
+    // HDR (PQ/HLG) and wide gamut (BT.2020/P3) content is left unclamped.
+    if chosen.channel_type == ChannelType::F32 && !is_hdr_or_wide_gamut(cicp) {
+        clamp_f32_buf(&mut buf);
+    }
 
     let pixels = build_pixel_data(&buf, width, height, &chosen);
 
