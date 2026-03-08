@@ -422,7 +422,26 @@ pub fn decode(
     limits: Option<&JxlLimits>,
     preferred: &[PixelDescriptor],
 ) -> Result<JxlDecodeOutput, JxlError> {
+    decode_with_parallel(data, limits, preferred, None)
+}
+
+/// Decode a JXL image with explicit parallel control.
+///
+/// `parallel` overrides the decoder's default threading behavior:
+/// - `Some(true)` = enable parallel decoding
+/// - `Some(false)` = force single-threaded decoding
+/// - `None` = use decoder default (parallel when `threads` feature is enabled)
+pub fn decode_with_parallel(
+    data: &[u8],
+    limits: Option<&JxlLimits>,
+    preferred: &[PixelDescriptor],
+    parallel: Option<bool>,
+) -> Result<JxlDecodeOutput, JxlError> {
     let mut options = JxlDecoderOptions::default();
+
+    if let Some(p) = parallel {
+        options.parallel = p;
+    }
 
     if let Some(lim) = limits
         && let Some(max_px) = lim.max_pixels

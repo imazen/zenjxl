@@ -131,10 +131,12 @@ mod encoding {
                 preferred_max_threads,
             } => preferred_max_threads as usize,
             zc::ThreadingPolicy::Balanced => {
-                std::thread::available_parallelism().map_or(1, |n| (n.get() / 2).max(1))
+                // no_std: can't query available_parallelism; use 0 (auto) and
+                // let the encoder's rayon pool decide.
+                0
             }
             zc::ThreadingPolicy::Unlimited => 0, // 0 = auto
-            _ => 0, // future variants default to auto
+            _ => 0,                              // future variants default to auto
         }
     }
 
@@ -913,10 +915,9 @@ mod decoding {
     /// Returns `Some(false)` for single-threaded, `Some(true)` for explicitly
     /// multi-threaded, or `None` to keep the decoder default.
     fn policy_to_parallel(limits: &Option<ResourceLimits>) -> Option<bool> {
-        limits.as_ref().map(|l| match l.threading() {
-            zc::ThreadingPolicy::SingleThread => false,
-            _ => true,
-        })
+        limits
+            .as_ref()
+            .map(|l| !matches!(l.threading(), zc::ThreadingPolicy::SingleThread))
     }
 
     // ── Capabilities ────────────────────────────────────────────────────
@@ -1157,9 +1158,13 @@ mod decoding {
         fn decode(self) -> Result<DecodeOutput, At<JxlError>> {
             let native_limits = JxlDecodeJob::to_native_limits(&self.limits);
             let parallel = policy_to_parallel(&self.limits);
-            let result =
-                decode_with_parallel(&self.data, native_limits.as_ref(), &self.preferred, parallel)
-                    .map_err(at)?;
+            let result = decode_with_parallel(
+                &self.data,
+                native_limits.as_ref(),
+                &self.preferred,
+                parallel,
+            )
+            .map_err(at)?;
 
             let info = JxlDecodeJob::jxl_info_to_image_info(&result.info);
             Ok(DecodeOutput::new(result.pixels, info))
