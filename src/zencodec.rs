@@ -1585,4 +1585,70 @@ mod tests {
         // Should include RGB, RGBA, Gray, GrayAlpha across U8/U16/F32
         assert!(descs.len() >= 12);
     }
+
+    /// Encode with SingleThread threading policy and verify output is valid.
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encode_single_thread() {
+        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zc::{ResourceLimits, ThreadingPolicy};
+
+        let width = 16u32;
+        let height = 16u32;
+        let pixels: Vec<rgb::Rgb<u8>> = (0..width * height)
+            .map(|i| {
+                let v = (i % 256) as u8;
+                rgb::Rgb { r: v, g: v, b: v }
+            })
+            .collect();
+        let buf =
+            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, width, height).unwrap();
+
+        let limits = ResourceLimits::none().with_threading(ThreadingPolicy::SingleThread);
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let encoder = config.job().with_limits(limits).encoder().unwrap();
+        let output = encoder.encode(buf.as_slice().into()).unwrap();
+
+        assert!(!output.data().is_empty());
+        assert_eq!(output.format(), ImageFormat::Jxl);
+    }
+
+    /// Roundtrip encode+decode with SingleThread threading policy.
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    #[test]
+    fn roundtrip_single_thread() {
+        use zc::decode::{Decode, DecodeJob, DecoderConfig};
+        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zc::{ResourceLimits, ThreadingPolicy};
+
+        let width = 16u32;
+        let height = 16u32;
+        let pixels: Vec<rgb::Rgb<u8>> = (0..width * height)
+            .map(|i| {
+                let v = (i % 256) as u8;
+                rgb::Rgb { r: v, g: v, b: v }
+            })
+            .collect();
+        let buf =
+            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, width, height).unwrap();
+
+        let limits = ResourceLimits::none().with_threading(ThreadingPolicy::SingleThread);
+
+        // Encode with single thread
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let encoder = config.job().with_limits(limits.clone()).encoder().unwrap();
+        let output = encoder.encode(buf.as_slice().into()).unwrap();
+        assert!(!output.data().is_empty());
+
+        // Decode with single thread
+        let dec_config = JxlDecoderConfig::new();
+        let decoder = dec_config
+            .job()
+            .with_limits(limits)
+            .decoder(Cow::Borrowed(output.data()), &[])
+            .unwrap();
+        let decoded = decoder.decode().unwrap();
+        assert_eq!(decoded.width(), width);
+        assert_eq!(decoded.height(), height);
+    }
 }
