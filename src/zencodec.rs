@@ -1083,7 +1083,9 @@ mod decoding {
 
         fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<JxlError>> {
             let info = probe(data).map_err(at)?;
-            Ok(Self::jxl_info_to_image_info(&info))
+            let image_info = Self::jxl_info_to_image_info(&info)
+                .with_source_encoding_details(info);
+            Ok(image_info)
         }
 
         fn output_info(&self, data: &[u8]) -> Result<OutputInfo, At<JxlError>> {
@@ -1167,7 +1169,8 @@ mod decoding {
             .map_err(at)?;
 
             let info = JxlDecodeJob::jxl_info_to_image_info(&result.info);
-            Ok(DecodeOutput::new(result.pixels, info))
+            Ok(DecodeOutput::new(result.pixels, info)
+                .with_source_encoding_details(result.info))
         }
     }
 

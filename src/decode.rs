@@ -39,6 +39,13 @@ pub struct JxlInfo {
     pub is_gray: bool,
 }
 
+impl zc::SourceEncodingDetails for JxlInfo {
+    fn source_generic_quality(&self) -> Option<f32> {
+        // JXL headers don't expose the encoding quality/distance.
+        None
+    }
+}
+
 /// JXL decode output.
 #[derive(Debug)]
 pub struct JxlDecodeOutput {
