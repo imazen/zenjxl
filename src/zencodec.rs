@@ -118,6 +118,38 @@ mod encoding {
         whereat::at(e)
     }
 
+    /// Map a [`ThreadingPolicy`] to the jxl-encoder thread count parameter.
+    ///
+    /// - `0` = auto (use all available cores)
+    /// - `1` = single-threaded
+    /// - `N` = use N threads
+    fn policy_to_threads(policy: zc::ThreadingPolicy) -> usize {
+        match policy {
+            zc::ThreadingPolicy::SingleThread => 1,
+            zc::ThreadingPolicy::LimitOrSingle { max_threads } => max_threads as usize,
+            zc::ThreadingPolicy::LimitOrAny {
+                preferred_max_threads,
+            } => preferred_max_threads as usize,
+            zc::ThreadingPolicy::Balanced => {
+                std::thread::available_parallelism().map_or(1, |n| (n.get() / 2).max(1))
+            }
+            zc::ThreadingPolicy::Unlimited => 0, // 0 = auto
+            _ => 0, // future variants default to auto
+        }
+    }
+
+    /// Apply threading policy from [`ResourceLimits`] to a [`JxlEncMode`].
+    fn apply_threads(mode: &JxlEncMode, limits: &Option<ResourceLimits>) -> JxlEncMode {
+        let threads = limits
+            .as_ref()
+            .map(|l| policy_to_threads(l.threading()))
+            .unwrap_or(0);
+        match mode {
+            JxlEncMode::Lossy(cfg) => JxlEncMode::Lossy(cfg.clone().with_threads(threads)),
+            JxlEncMode::Lossless(cfg) => JxlEncMode::Lossless(cfg.clone().with_threads(threads)),
+        }
+    }
+
     // ── Capabilities ────────────────────────────────────────────────────
 
     static JXL_ENCODE_CAPS: EncodeCapabilities = EncodeCapabilities::new()
@@ -344,8 +376,9 @@ mod encoding {
         }
 
         fn encoder(self) -> Result<JxlEncoder<'a>, At<JxlError>> {
+            let mode = apply_threads(&self.config.mode, &self.limits);
             Ok(JxlEncoder {
-                mode: self.config.mode.clone(),
+                mode,
                 metadata: self.metadata,
                 policy: self.policy,
                 limits: self.limits,
@@ -355,8 +388,9 @@ mod encoding {
         }
 
         fn full_frame_encoder(self) -> Result<JxlFullFrameEncoder, At<JxlError>> {
+            let mode = apply_threads(&self.config.mode, &self.limits);
             Ok(JxlFullFrameEncoder::from_job(
-                self.config.mode.clone(),
+                mode,
                 self.metadata,
                 &self.policy,
                 self.limits,
@@ -865,13 +899,24 @@ mod decoding {
     use enough::Stop;
 
     use crate::decode::{
-        JxlInfo, JxlLimits, build_pixel_data, choose_pixel_format, decode, extract_color_info,
-        is_hdr_or_wide_gamut, probe,
+        JxlInfo, JxlLimits, build_pixel_data, choose_pixel_format, decode_with_parallel,
+        extract_color_info, is_hdr_or_wide_gamut, probe,
     };
 
     /// Helper to wrap a JxlError with location tracking.
     fn at(e: JxlError) -> At<JxlError> {
         whereat::at(e)
+    }
+
+    /// Determine the decoder `parallel` flag from a [`ThreadingPolicy`].
+    ///
+    /// Returns `Some(false)` for single-threaded, `Some(true)` for explicitly
+    /// multi-threaded, or `None` to keep the decoder default.
+    fn policy_to_parallel(limits: &Option<ResourceLimits>) -> Option<bool> {
+        limits.as_ref().map(|l| match l.threading() {
+            zc::ThreadingPolicy::SingleThread => false,
+            _ => true,
+        })
     }
 
     // ── Capabilities ────────────────────────────────────────────────────
@@ -1111,7 +1156,10 @@ mod decoding {
 
         fn decode(self) -> Result<DecodeOutput, At<JxlError>> {
             let native_limits = JxlDecodeJob::to_native_limits(&self.limits);
-            let result = decode(&self.data, native_limits.as_ref(), &self.preferred).map_err(at)?;
+            let parallel = policy_to_parallel(&self.limits);
+            let result =
+                decode_with_parallel(&self.data, native_limits.as_ref(), &self.preferred, parallel)
+                    .map_err(at)?;
 
             let info = JxlDecodeJob::jxl_info_to_image_info(&result.info);
             Ok(DecodeOutput::new(result.pixels, info))
@@ -1148,6 +1196,10 @@ mod decoding {
         /// Decode all frames up front.
         fn decode_all_frames(&mut self) -> Result<(), At<JxlError>> {
             let mut options = JxlDecoderOptions::default();
+
+            if let Some(p) = policy_to_parallel(&self.limits) {
+                options.parallel = p;
+            }
 
             if let Some(ref lim) = self.limits
                 && let Some(max_px) = lim.max_pixels
