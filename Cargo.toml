@@ -23,7 +23,7 @@ jxl = { path = "../zenjxl-decoder/jxl", package = "zenjxl-decoder", optional = t
 jxl-encoder = { path = "../jxl-encoder-rs/jxl_encoder", optional = true, default-features = false, features = ["std"] }
 
 [dev-dependencies]
-archmage = { version = "0.9", features = ["std"] }
+archmage = { version = "0.9.4", features = ["std"] }
 
 [features]
 default = ["encode", "decode"]
