@@ -16,8 +16,8 @@ rgb = { version = "0.8", default-features = false, features = ["as-bytes"] }
 imgref = "1.12"
 bytemuck = { version = "1.25", default-features = false }
 enough = "0.4"
-zencodec-types = { path = "../zencodec-types" }
-zenpixels = { version = "0.1", path = "../zenpixels/zenpixels", default-features = false, features = ["buffer"] }
+zc = { path = "../zencodec", package = "zencodec" }
+zenpixels = { version = "0.1", path = "../zenpixels/zenpixels", default-features = false }
 linear-srgb = "0.6.3"
 jxl = { path = "../zenjxl-decoder/jxl", package = "zenjxl-decoder", optional = true }
 jxl-encoder = { path = "../jxl-encoder-rs/jxl_encoder", optional = true, default-features = false, features = ["std"] }

@@ -108,7 +108,7 @@ mod encoding {
     use alloc::vec::Vec;
     use jxl_encoder::{AnimationFrame, AnimationParams, LosslessConfig, LossyConfig, PixelLayout};
     use zc::encode::{EncodeCapabilities, EncodeOutput, EncodePolicy};
-    use zc::{MetadataView, ResourceLimits, UnsupportedOperation};
+    use zc::{Metadata, ResourceLimits, UnsupportedOperation};
     use zenpixels::{ChannelLayout, ChannelType, PixelSlice};
 
     use enough::Stop;
@@ -162,7 +162,7 @@ mod encoding {
         .with_native_alpha(true)
         .with_native_16bit(true)
         .with_native_f32(true)
-        .with_row_level(true)
+        .with_push_rows(true)
         .with_animation(true)
         .with_effort_range(1, 10)
         .with_quality_range(0.0, 100.0)
@@ -171,7 +171,7 @@ mod encoding {
         .with_xmp(true)
         .with_enforces_max_pixels(true)
         .with_enforces_max_memory(true)
-        .with_cancel(true)
+        .with_stop(true)
         .with_threads_supported_range(1, u16::MAX);
 
     /// Supported pixel descriptors for encoding.
@@ -355,7 +355,7 @@ mod encoding {
         config: &'a JxlEncoderConfig,
         stop: Option<&'a dyn Stop>,
         limits: Option<ResourceLimits>,
-        metadata: Option<&'a MetadataView<'a>>,
+        metadata: Option<Metadata>,
         policy: EncodePolicy,
         loop_count: Option<u32>,
     }
@@ -375,8 +375,8 @@ mod encoding {
             self
         }
 
-        fn with_metadata(mut self, meta: &'a MetadataView<'a>) -> Self {
-            self.metadata = Some(meta);
+        fn with_metadata(mut self, meta: &Metadata) -> Self {
+            self.metadata = Some(meta.clone());
             self
         }
 
@@ -406,7 +406,7 @@ mod encoding {
             let mode = apply_threads(&self.config.mode, &self.limits);
             Ok(JxlFullFrameEncoder::from_job(
                 mode,
-                self.metadata,
+                self.metadata.as_ref(),
                 &self.policy,
                 self.limits,
                 self.loop_count,
@@ -438,7 +438,7 @@ mod encoding {
     /// [`finish()`](zc::encode::Encoder::finish).
     pub struct JxlEncoder<'a> {
         mode: JxlEncMode,
-        metadata: Option<&'a MetadataView<'a>>,
+        metadata: Option<Metadata>,
         policy: EncodePolicy,
         limits: Option<ResourceLimits>,
         stop: Option<&'a dyn Stop>,
@@ -475,27 +475,27 @@ mod encoding {
     }
 
     impl JxlEncoder<'_> {
-        /// Build jxl-encoder ImageMetadata from the zencodec MetadataView,
+        /// Build jxl-encoder ImageMetadata from the zencodec Metadata,
         /// respecting the EncodePolicy for what to embed.
         fn build_jxl_metadata(&self) -> Option<jxl_encoder::ImageMetadata<'_>> {
-            let meta = self.metadata?;
+            let meta = self.metadata.as_ref()?;
             let mut jxl_meta = jxl_encoder::ImageMetadata::new();
             let mut has_any = false;
 
             if self.policy.resolve_icc(true) {
-                if let Some(icc) = meta.icc_profile {
+                if let Some(ref icc) = meta.icc_profile {
                     jxl_meta = jxl_meta.with_icc_profile(icc);
                     has_any = true;
                 }
             }
             if self.policy.resolve_exif(true) {
-                if let Some(exif) = meta.exif {
+                if let Some(ref exif) = meta.exif {
                     jxl_meta = jxl_meta.with_exif(exif);
                     has_any = true;
                 }
             }
             if self.policy.resolve_xmp(true) {
-                if let Some(xmp) = meta.xmp {
+                if let Some(ref xmp) = meta.xmp {
                     jxl_meta = jxl_meta.with_xmp(xmp);
                     has_any = true;
                 }
@@ -727,7 +727,7 @@ mod encoding {
         /// Create from job state, copying metadata we need for container wrapping.
         fn from_job(
             mode: JxlEncMode,
-            metadata: Option<&MetadataView<'_>>,
+            metadata: Option<&Metadata>,
             policy: &EncodePolicy,
             limits: Option<ResourceLimits>,
             loop_count: Option<u32>,
@@ -736,12 +736,12 @@ mod encoding {
             // EXIF/XMP go in the container — copy them out now so we're 'static.
             let anim_meta = metadata.and_then(|meta| {
                 let exif = if policy.resolve_exif(true) {
-                    meta.exif.map(|b| b.to_vec())
+                    meta.exif.as_deref().map(|b| b.to_vec())
                 } else {
                     None
                 };
                 let xmp = if policy.resolve_xmp(true) {
-                    meta.xmp.map(|b| b.to_vec())
+                    meta.xmp.as_deref().map(|b| b.to_vec())
                 } else {
                     None
                 };
