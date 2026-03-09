@@ -160,7 +160,9 @@ mod encoding {
         .with_hdr(true)
         .with_native_gray(true)
         .with_native_alpha(true)
+        .with_native_16bit(true)
         .with_native_f32(true)
+        .with_row_level(true)
         .with_animation(true)
         .with_effort_range(1, 10)
         .with_quality_range(0.0, 100.0)
@@ -169,7 +171,8 @@ mod encoding {
         .with_xmp(true)
         .with_enforces_max_pixels(true)
         .with_enforces_max_memory(true)
-        .with_cancel(true);
+        .with_cancel(true)
+        .with_threads_supported_range(1, u16::MAX);
 
     /// Supported pixel descriptors for encoding.
     ///
@@ -211,7 +214,12 @@ mod encoding {
     #[derive(Clone, Debug)]
     pub struct JxlEncoderConfig {
         mode: JxlEncMode,
-        quality: Option<f32>,
+        /// The calibrated JXL-native quality (mapped from generic quality).
+        /// Used internally for distance calculation.
+        calibrated_quality: Option<f32>,
+        /// The original generic quality value (0-100, libjpeg-turbo scale).
+        /// Returned by `generic_quality()` for roundtrip fidelity.
+        generic_quality: Option<f32>,
         effort: Option<i32>,
         lossless: bool,
     }
@@ -221,7 +229,8 @@ mod encoding {
         pub fn new() -> Self {
             Self {
                 mode: JxlEncMode::Lossy(LossyConfig::new(1.0)),
-                quality: None,
+                calibrated_quality: None,
+                generic_quality: None,
                 effort: None,
                 lossless: false,
             }
@@ -245,7 +254,10 @@ mod encoding {
 
         /// Rebuild the lossy mode from current quality + effort state.
         fn rebuild_lossy(&mut self) {
-            let distance = self.quality.map(quality_to_distance).unwrap_or(1.0);
+            let distance = self
+                .calibrated_quality
+                .map(quality_to_distance)
+                .unwrap_or(1.0);
             let mut cfg = LossyConfig::new(distance);
             if let Some(e) = self.effort {
                 cfg = cfg.with_effort(e.clamp(1, 10) as u8);
@@ -286,7 +298,8 @@ mod encoding {
         }
 
         fn with_generic_quality(mut self, quality: f32) -> Self {
-            self.quality = Some(calibrated_jxl_quality(quality));
+            self.generic_quality = Some(quality);
+            self.calibrated_quality = Some(calibrated_jxl_quality(quality));
             if !self.lossless {
                 self.rebuild_lossy();
             }
@@ -312,7 +325,7 @@ mod encoding {
         }
 
         fn generic_quality(&self) -> Option<f32> {
-            self.quality
+            self.generic_quality
         }
 
         fn generic_effort(&self) -> Option<i32> {
@@ -932,7 +945,9 @@ mod decoding {
         .with_native_alpha(true)
         .with_animation(true)
         .with_cheap_probe(true)
-        .with_enforces_max_pixels(true);
+        .with_enforces_max_pixels(true)
+        .with_enforces_max_memory(true)
+        .with_threads_supported_range(1, u16::MAX);
 
     /// Supported pixel descriptors for decoding.
     ///
@@ -1083,8 +1098,7 @@ mod decoding {
 
         fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<JxlError>> {
             let info = probe(data).map_err(at)?;
-            let image_info = Self::jxl_info_to_image_info(&info)
-                .with_source_encoding_details(info);
+            let image_info = Self::jxl_info_to_image_info(&info).with_source_encoding_details(info);
             Ok(image_info)
         }
 
@@ -1133,12 +1147,15 @@ mod decoding {
             data: Cow<'a, [u8]>,
             preferred: &[PixelDescriptor],
         ) -> Result<JxlFullFrameDecoder, At<JxlError>> {
+            // Eagerly probe to populate image_info so info() never panics.
+            let info = probe(&data).map_err(at)?;
+            let image_info = Arc::new(Self::jxl_info_to_image_info(&info));
             Ok(JxlFullFrameDecoder {
                 data: data.into_owned(),
                 limits: self.limits,
                 preferred: preferred.to_vec(),
                 frames: None,
-                image_info: None,
+                image_info: Some(image_info),
                 current: None,
                 start_frame_index: self.start_frame_index,
             })
@@ -1169,8 +1186,7 @@ mod decoding {
             .map_err(at)?;
 
             let info = JxlDecodeJob::jxl_info_to_image_info(&result.info);
-            Ok(DecodeOutput::new(result.pixels, info)
-                .with_source_encoding_details(result.info))
+            Ok(DecodeOutput::new(result.pixels, info).with_source_encoding_details(result.info))
         }
     }
 
@@ -1471,10 +1487,17 @@ mod tests {
     #[test]
     fn quality_sets_correct_distance() {
         use zc::encode::EncoderConfig;
+        // Generic quality 90 is calibrated to JXL-native ~84.2,
+        // which maps to butteraugli distance via quality_to_distance().
         let config = JxlEncoderConfig::new().with_generic_quality(90.0);
-        // Quality 90 → distance 1.0 (visually lossless)
+        let calibrated = calibrated_jxl_quality(90.0);
+        let expected_distance = quality_to_distance(calibrated);
         let lossy = config.lossy_config().unwrap();
-        assert!((lossy.distance() - 1.0).abs() < 0.001);
+        assert!(
+            (lossy.distance() - expected_distance).abs() < 0.001,
+            "expected distance {expected_distance}, got {}",
+            lossy.distance()
+        );
     }
 
     #[cfg(all(feature = "encode", feature = "decode"))]
@@ -1608,8 +1631,17 @@ mod tests {
         assert!(caps.hdr());
         assert!(caps.native_gray());
         assert!(caps.native_alpha());
+        assert!(caps.native_16bit(), "native_16bit should be reported");
         assert!(caps.native_f32());
+        assert!(
+            caps.row_level(),
+            "row_level should be reported since push_rows/finish are implemented"
+        );
         assert!(caps.animation());
+        assert!(caps.enforces_max_pixels());
+        assert!(caps.enforces_max_memory());
+        assert!(caps.cancel());
+        assert_eq!(caps.threads_supported_range(), (1, u16::MAX));
     }
 
     #[cfg(feature = "decode")]
@@ -1626,6 +1658,12 @@ mod tests {
         assert!(caps.native_alpha());
         assert!(caps.animation());
         assert!(caps.cheap_probe());
+        assert!(caps.enforces_max_pixels());
+        assert!(
+            caps.enforces_max_memory(),
+            "enforces_max_memory should be reported"
+        );
+        assert_eq!(caps.threads_supported_range(), (1, u16::MAX));
     }
 
     #[cfg(feature = "encode")]
@@ -1710,5 +1748,80 @@ mod tests {
         let decoded = decoder.decode().unwrap();
         assert_eq!(decoded.width(), width);
         assert_eq!(decoded.height(), height);
+    }
+
+    /// Verify generic_quality() returns the original value, not the calibrated one.
+    #[cfg(feature = "encode")]
+    #[test]
+    fn generic_quality_roundtrips() {
+        use zc::encode::EncoderConfig;
+        for q in [0.0, 10.0, 25.0, 50.0, 75.0, 85.0, 90.0, 95.0, 100.0] {
+            let config = JxlEncoderConfig::new().with_generic_quality(q);
+            assert_eq!(
+                config.generic_quality(),
+                Some(q),
+                "generic_quality() should return original value {q}, not calibrated"
+            );
+        }
+    }
+
+    /// Verify calibrated quality is used internally for distance.
+    #[cfg(feature = "encode")]
+    #[test]
+    fn calibrated_quality_used_for_distance() {
+        use zc::encode::EncoderConfig;
+        // Generic quality 50 calibrates to ~48.5, which gives distance ~4.15
+        let config = JxlEncoderConfig::new().with_generic_quality(50.0);
+        let calibrated = calibrated_jxl_quality(50.0);
+        let expected_distance = quality_to_distance(calibrated);
+        let lossy = config.lossy_config().unwrap();
+        assert!(
+            (lossy.distance() - expected_distance).abs() < 0.01,
+            "distance should reflect calibrated quality, not raw generic quality"
+        );
+        // The calibrated distance should differ from non-calibrated
+        let naive_distance = quality_to_distance(50.0);
+        assert!(
+            (expected_distance - naive_distance).abs() > 0.01,
+            "calibration should change the distance (got same value)"
+        );
+    }
+
+    /// Verify info() works before render_next_frame is called.
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    #[test]
+    fn full_frame_decoder_info_before_render() {
+        use zc::decode::{DecodeJob, DecoderConfig, FullFrameDecoder};
+        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+
+        // Encode a minimal image.
+        let width = 4u32;
+        let height = 4u32;
+        let pixels: Vec<rgb::Rgb<u8>> = vec![
+            rgb::Rgb {
+                r: 128,
+                g: 64,
+                b: 32
+            };
+            16
+        ];
+        let buf =
+            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, width, height).unwrap();
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let encoder = config.job().encoder().unwrap();
+        let output = encoder.encode(buf.as_slice().into()).unwrap();
+
+        // Create a full frame decoder but do NOT call render_next_frame yet.
+        let dec_config = JxlDecoderConfig::new();
+        let ffd = dec_config
+            .job()
+            .full_frame_decoder(Cow::Borrowed(output.data()), &[])
+            .unwrap();
+
+        // info() should return valid data without panicking.
+        let info = ffd.info();
+        assert_eq!(info.width, width);
+        assert_eq!(info.height, height);
+        assert_eq!(info.format, ImageFormat::Jxl);
     }
 }
