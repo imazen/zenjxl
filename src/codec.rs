@@ -16,7 +16,7 @@
 //! | `FullFrameDecoder` | [`JxlFullFrameDecoder`] |
 
 use alloc::sync::Arc;
-use zc::ImageFormat;
+use zencodec::ImageFormat;
 use zenpixels::PixelDescriptor;
 
 use crate::error::JxlError;
@@ -107,8 +107,8 @@ mod encoding {
     use alloc::string::ToString;
     use alloc::vec::Vec;
     use jxl_encoder::{AnimationFrame, AnimationParams, LosslessConfig, LossyConfig, PixelLayout};
-    use zc::encode::{EncodeCapabilities, EncodeOutput, EncodePolicy};
-    use zc::{Metadata, ResourceLimits, UnsupportedOperation};
+    use zencodec::encode::{EncodeCapabilities, EncodeOutput, EncodePolicy};
+    use zencodec::{Metadata, ResourceLimits, UnsupportedOperation};
     use zenpixels::{ChannelLayout, ChannelType, PixelSlice};
 
     use enough::Stop;
@@ -123,19 +123,19 @@ mod encoding {
     /// - `0` = auto (use all available cores)
     /// - `1` = single-threaded
     /// - `N` = use N threads
-    fn policy_to_threads(policy: zc::ThreadingPolicy) -> usize {
+    fn policy_to_threads(policy: zencodec::ThreadingPolicy) -> usize {
         match policy {
-            zc::ThreadingPolicy::SingleThread => 1,
-            zc::ThreadingPolicy::LimitOrSingle { max_threads } => max_threads as usize,
-            zc::ThreadingPolicy::LimitOrAny {
+            zencodec::ThreadingPolicy::SingleThread => 1,
+            zencodec::ThreadingPolicy::LimitOrSingle { max_threads } => max_threads as usize,
+            zencodec::ThreadingPolicy::LimitOrAny {
                 preferred_max_threads,
             } => preferred_max_threads as usize,
-            zc::ThreadingPolicy::Balanced => {
+            zencodec::ThreadingPolicy::Balanced => {
                 // no_std: can't query available_parallelism; use 0 (auto) and
                 // let the encoder's rayon pool decide.
                 0
             }
-            zc::ThreadingPolicy::Unlimited => 0, // 0 = auto
+            zencodec::ThreadingPolicy::Unlimited => 0, // 0 = auto
             _ => 0,                              // future variants default to auto
         }
     }
@@ -210,7 +210,7 @@ mod encoding {
 
     /// JPEG XL encoder configuration.
     ///
-    /// Implements [`zc::encode::EncoderConfig`].
+    /// Implements [`zencodec::encode::EncoderConfig`].
     #[derive(Clone, Debug)]
     pub struct JxlEncoderConfig {
         mode: JxlEncMode,
@@ -281,7 +281,7 @@ mod encoding {
         }
     }
 
-    impl zc::encode::EncoderConfig for JxlEncoderConfig {
+    impl zencodec::encode::EncoderConfig for JxlEncoderConfig {
         type Error = At<JxlError>;
         type Job<'a> = JxlEncodeJob<'a>;
 
@@ -360,7 +360,7 @@ mod encoding {
         loop_count: Option<u32>,
     }
 
-    impl<'a> zc::encode::EncodeJob<'a> for JxlEncodeJob<'a> {
+    impl<'a> zencodec::encode::EncodeJob<'a> for JxlEncodeJob<'a> {
         type Error = At<JxlError>;
         type Enc = JxlEncoder<'a>;
         type FullFrameEnc = JxlFullFrameEncoder;
@@ -432,10 +432,10 @@ mod encoding {
 
     /// Single-image JPEG XL encoder.
     ///
-    /// Supports both one-shot encoding via [`encode()`](zc::encode::Encoder::encode)
+    /// Supports both one-shot encoding via [`encode()`](zencodec::encode::Encoder::encode)
     /// and incremental row-level encoding via
-    /// [`push_rows()`](zc::encode::Encoder::push_rows) +
-    /// [`finish()`](zc::encode::Encoder::finish).
+    /// [`push_rows()`](zencodec::encode::Encoder::push_rows) +
+    /// [`finish()`](zencodec::encode::Encoder::finish).
     pub struct JxlEncoder<'a> {
         mode: JxlEncMode,
         metadata: Option<Metadata>,
@@ -550,7 +550,7 @@ mod encoding {
         }
     }
 
-    impl zc::encode::Encoder for JxlEncoder<'_> {
+    impl zencodec::encode::Encoder for JxlEncoder<'_> {
         type Error = At<JxlError>;
 
         fn reject(op: UnsupportedOperation) -> At<JxlError> {
@@ -784,7 +784,7 @@ mod encoding {
         }
     }
 
-    impl zc::encode::FullFrameEncoder for JxlFullFrameEncoder {
+    impl zencodec::encode::FullFrameEncoder for JxlFullFrameEncoder {
         type Error = At<JxlError>;
 
         fn reject(op: UnsupportedOperation) -> At<JxlError> {
@@ -903,12 +903,12 @@ mod decoding {
         ExtraChannel, JxlDecoder as JxlRsDecoder, JxlDecoderOptions, JxlOutputBuffer,
         ProcessingResult,
     };
-    use zc::Unsupported;
-    use zc::decode::{
+    use zencodec::Unsupported;
+    use zencodec::decode::{
         DecodeCapabilities, DecodeOutput, OutputInfo, SinkError,
     };
-    use zc::{FullFrame, OwnedFullFrame};
-    use zc::{ImageInfo, ResourceLimits, UnsupportedOperation};
+    use zencodec::{FullFrame, OwnedFullFrame};
+    use zencodec::{ImageInfo, ResourceLimits, UnsupportedOperation};
     use zenpixels::Cicp;
 
     use enough::Stop;
@@ -930,7 +930,7 @@ mod decoding {
     fn policy_to_parallel(limits: &Option<ResourceLimits>) -> Option<bool> {
         limits
             .as_ref()
-            .map(|l| !matches!(l.threading(), zc::ThreadingPolicy::SingleThread))
+            .map(|l| !matches!(l.threading(), zencodec::ThreadingPolicy::SingleThread))
     }
 
     // ── Capabilities ────────────────────────────────────────────────────
@@ -974,7 +974,7 @@ mod decoding {
 
     /// JPEG XL decoder configuration.
     ///
-    /// Implements [`zc::decode::DecoderConfig`].
+    /// Implements [`zencodec::decode::DecoderConfig`].
     #[derive(Clone, Debug, Default)]
     pub struct JxlDecoderConfig {
         _priv: (),
@@ -986,7 +986,7 @@ mod decoding {
         }
     }
 
-    impl zc::decode::DecoderConfig for JxlDecoderConfig {
+    impl zencodec::decode::DecoderConfig for JxlDecoderConfig {
         type Error = At<JxlError>;
         type Job<'a> = JxlDecodeJob<'a>;
 
@@ -1028,7 +1028,7 @@ mod decoding {
                 .with_animation(info.has_animation);
 
             image_info =
-                image_info.with_orientation(zc::Orientation::from_exif(info.orientation as u16));
+                image_info.with_orientation(zencodec::Orientation::from_exif(info.orientation as u16));
 
             if let Some((cp, tc, mc, fr)) = info.cicp {
                 image_info = image_info.with_cicp(Cicp::new(cp, tc, mc, fr));
@@ -1075,7 +1075,7 @@ mod decoding {
         }
     }
 
-    impl<'a> zc::decode::DecodeJob<'a> for JxlDecodeJob<'a> {
+    impl<'a> zencodec::decode::DecodeJob<'a> for JxlDecodeJob<'a> {
         type Error = At<JxlError>;
         type Dec = JxlDecoder<'a>;
         type StreamDec = Unsupported<At<JxlError>>;
@@ -1136,10 +1136,10 @@ mod decoding {
         fn push_decoder(
             self,
             data: Cow<'a, [u8]>,
-            sink: &mut dyn zc::decode::DecodeRowSink,
+            sink: &mut dyn zencodec::decode::DecodeRowSink,
             preferred: &[PixelDescriptor],
         ) -> Result<OutputInfo, At<JxlError>> {
-            zc::helpers::copy_decode_to_sink(self, data, sink, preferred, |e| at(JxlError::Sink(e)))
+            zencodec::helpers::copy_decode_to_sink(self, data, sink, preferred, |e| at(JxlError::Sink(e)))
         }
 
         fn full_frame_decoder(
@@ -1171,7 +1171,7 @@ mod decoding {
         preferred: Vec<PixelDescriptor>,
     }
 
-    impl zc::decode::Decode for JxlDecoder<'_> {
+    impl zencodec::decode::Decode for JxlDecoder<'_> {
         type Error = At<JxlError>;
 
         fn decode(self) -> Result<DecodeOutput, At<JxlError>> {
@@ -1363,7 +1363,7 @@ mod decoding {
         }
     }
 
-    impl zc::decode::FullFrameDecoder for JxlFullFrameDecoder {
+    impl zencodec::decode::FullFrameDecoder for JxlFullFrameDecoder {
         type Error = At<JxlError>;
 
         fn wrap_sink_error(err: SinkError) -> At<JxlError> {
@@ -1400,9 +1400,9 @@ mod decoding {
         fn render_next_frame_to_sink(
             &mut self,
             stop: Option<&dyn Stop>,
-            sink: &mut dyn zc::decode::DecodeRowSink,
+            sink: &mut dyn zencodec::decode::DecodeRowSink,
         ) -> Result<Option<OutputInfo>, At<JxlError>> {
-            zc::helpers::copy_frame_to_sink(self, stop, sink)
+            zencodec::helpers::copy_frame_to_sink(self, stop, sink)
         }
 
         fn render_next_frame_owned(
@@ -1439,7 +1439,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_config_defaults() {
-        use zc::encode::EncoderConfig;
+        use zencodec::encode::EncoderConfig;
         let config = JxlEncoderConfig::new();
         assert_eq!(JxlEncoderConfig::format(), ImageFormat::Jxl);
         assert!(!JxlEncoderConfig::supported_descriptors().is_empty());
@@ -1451,7 +1451,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_config_quality_effort() {
-        use zc::encode::EncoderConfig;
+        use zencodec::encode::EncoderConfig;
         let config = JxlEncoderConfig::new()
             .with_generic_quality(85.0)
             .with_generic_effort(7);
@@ -1462,7 +1462,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_config_lossless() {
-        use zc::encode::EncoderConfig;
+        use zencodec::encode::EncoderConfig;
         let config = JxlEncoderConfig::new().with_lossless(true);
         assert_eq!(config.is_lossless(), Some(true));
         assert!(config.lossless_config().is_some());
@@ -1486,7 +1486,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn quality_sets_correct_distance() {
-        use zc::encode::EncoderConfig;
+        use zencodec::encode::EncoderConfig;
         // Generic quality 90 is calibrated to JXL-native ~84.2,
         // which maps to butteraugli distance via quality_to_distance().
         let config = JxlEncoderConfig::new().with_generic_quality(90.0);
@@ -1503,8 +1503,8 @@ mod tests {
     #[cfg(all(feature = "encode", feature = "decode"))]
     #[test]
     fn roundtrip_rgb8() {
-        use zc::decode::Decode;
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::decode::Decode;
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
         let width = 64u32;
         let height = 64u32;
@@ -1525,7 +1525,7 @@ mod tests {
         assert_eq!(output.format(), ImageFormat::Jxl);
 
         // Decode back
-        use zc::decode::{DecodeJob, DecoderConfig};
+        use zencodec::decode::{DecodeJob, DecoderConfig};
         let dec_config = JxlDecoderConfig::new();
         let decoder = dec_config
             .job()
@@ -1539,8 +1539,8 @@ mod tests {
     #[cfg(all(feature = "encode", feature = "decode"))]
     #[test]
     fn roundtrip_rgba8() {
-        use zc::decode::Decode;
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::decode::Decode;
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
         let width = 32u32;
         let height = 32u32;
@@ -1564,7 +1564,7 @@ mod tests {
 
         assert!(!output.data().is_empty());
 
-        use zc::decode::{DecodeJob, DecoderConfig};
+        use zencodec::decode::{DecodeJob, DecoderConfig};
         let dec_config = JxlDecoderConfig::new();
         let decoder = dec_config
             .job()
@@ -1578,12 +1578,12 @@ mod tests {
     #[cfg(feature = "decode")]
     #[test]
     fn probe_returns_info() {
-        use zc::decode::{DecodeJob, DecoderConfig};
+        use zencodec::decode::{DecodeJob, DecoderConfig};
 
         // Encode a minimal image to probe
         #[cfg(feature = "encode")]
         {
-            use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+            use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
             let pixels: Vec<rgb::Rgb<u8>> = vec![rgb::Rgb { r: 0, g: 0, b: 0 }; 4];
             let buf = zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, 2, 2).unwrap();
@@ -1604,8 +1604,8 @@ mod tests {
     #[cfg(feature = "decode")]
     #[test]
     fn streaming_decoder_unsupported() {
-        use zc::decode::{DecodeJob, DecoderConfig};
-        use zc::{CodecErrorExt, UnsupportedOperation};
+        use zencodec::decode::{DecodeJob, DecoderConfig};
+        use zencodec::{CodecErrorExt, UnsupportedOperation};
 
         let dec_config = JxlDecoderConfig::new();
         let job = dec_config.job();
@@ -1624,7 +1624,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn capabilities_correct() {
-        use zc::encode::EncoderConfig;
+        use zencodec::encode::EncoderConfig;
         let caps = JxlEncoderConfig::capabilities();
         assert!(caps.lossy());
         assert!(caps.lossless());
@@ -1647,7 +1647,7 @@ mod tests {
     #[cfg(feature = "decode")]
     #[test]
     fn decode_capabilities_correct() {
-        use zc::decode::DecoderConfig;
+        use zencodec::decode::DecoderConfig;
         let caps = JxlDecoderConfig::capabilities();
         assert!(caps.icc());
         assert!(caps.cicp());
@@ -1669,7 +1669,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encode_descriptors_cover_all_layouts() {
-        use zc::encode::EncoderConfig;
+        use zencodec::encode::EncoderConfig;
         let descs = JxlEncoderConfig::supported_descriptors();
         // Should include RGB, RGBA, BGRA, Gray, GrayAlpha across U8/U16/F32
         assert!(descs.len() >= 13);
@@ -1678,7 +1678,7 @@ mod tests {
     #[cfg(feature = "decode")]
     #[test]
     fn decode_descriptors_cover_all_layouts() {
-        use zc::decode::DecoderConfig;
+        use zencodec::decode::DecoderConfig;
         let descs = JxlDecoderConfig::supported_descriptors();
         // Should include RGB, RGBA, Gray, GrayAlpha across U8/U16/F32
         assert!(descs.len() >= 12);
@@ -1688,8 +1688,8 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encode_single_thread() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
-        use zc::{ResourceLimits, ThreadingPolicy};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::{ResourceLimits, ThreadingPolicy};
 
         let width = 16u32;
         let height = 16u32;
@@ -1715,9 +1715,9 @@ mod tests {
     #[cfg(all(feature = "encode", feature = "decode"))]
     #[test]
     fn roundtrip_single_thread() {
-        use zc::decode::{Decode, DecodeJob, DecoderConfig};
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
-        use zc::{ResourceLimits, ThreadingPolicy};
+        use zencodec::decode::{Decode, DecodeJob, DecoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::{ResourceLimits, ThreadingPolicy};
 
         let width = 16u32;
         let height = 16u32;
@@ -1754,7 +1754,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn generic_quality_roundtrips() {
-        use zc::encode::EncoderConfig;
+        use zencodec::encode::EncoderConfig;
         for q in [0.0, 10.0, 25.0, 50.0, 75.0, 85.0, 90.0, 95.0, 100.0] {
             let config = JxlEncoderConfig::new().with_generic_quality(q);
             assert_eq!(
@@ -1769,7 +1769,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn calibrated_quality_used_for_distance() {
-        use zc::encode::EncoderConfig;
+        use zencodec::encode::EncoderConfig;
         // Generic quality 50 calibrates to ~48.5, which gives distance ~4.15
         let config = JxlEncoderConfig::new().with_generic_quality(50.0);
         let calibrated = calibrated_jxl_quality(50.0);
@@ -1791,8 +1791,8 @@ mod tests {
     #[cfg(all(feature = "encode", feature = "decode"))]
     #[test]
     fn full_frame_decoder_info_before_render() {
-        use zc::decode::{DecodeJob, DecoderConfig, FullFrameDecoder};
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::decode::{DecodeJob, DecoderConfig, FullFrameDecoder};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
         // Encode a minimal image.
         let width = 4u32;

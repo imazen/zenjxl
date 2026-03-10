@@ -1,6 +1,6 @@
 //! JXL error types with location tracking via [`whereat::At`].
 
-use zc::UnsupportedOperation;
+use zencodec::UnsupportedOperation;
 
 /// Errors from JXL encode/decode operations.
 #[derive(Debug, thiserror::Error)]
@@ -38,5 +38,5 @@ pub enum JxlError {
 
     /// Decode row sink error.
     #[error("sink error: {0}")]
-    Sink(zc::decode::SinkError),
+    Sink(zencodec::decode::SinkError),
 }
