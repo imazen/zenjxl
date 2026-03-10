@@ -1024,8 +1024,15 @@ mod decoding {
         /// Convert native JxlInfo into zencodec ImageInfo.
         fn jxl_info_to_image_info(info: &JxlInfo) -> ImageInfo {
             let mut image_info = ImageInfo::new(info.width, info.height, ImageFormat::Jxl)
-                .with_alpha(info.has_alpha)
-                .with_animation(info.has_animation);
+                .with_alpha(info.has_alpha);
+
+            if info.has_animation {
+                image_info = image_info.with_sequence(zencodec::ImageSequence::Animation {
+                    frame_count: None,
+                    loop_count: None,
+                    random_access: true,
+                });
+            }
 
             image_info =
                 image_info.with_orientation(zencodec::Orientation::from_exif(info.orientation as u16));
