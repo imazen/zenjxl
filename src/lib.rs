@@ -1,4 +1,4 @@
-//! JPEG XL encoding and decoding with zencodec-types trait integration.
+//! JPEG XL encoding and decoding with zencodec trait integration.
 //!
 //! Wraps `jxl` (jxl-rs) for decoding and `jxl-encoder` for encoding.
 //! Both are feature-gated (`decode` and `encode` respectively).
@@ -32,7 +32,7 @@ pub use encode::{
     encode_rgb8_lossless, encode_rgba8, encode_rgba8_lossless,
 };
 
-// zencodec-types trait types
+// zencodec trait types
 #[cfg(all(feature = "zencodec", feature = "encode"))]
 pub use zencodec::{JxlEncodeJob, JxlEncoder, JxlEncoderConfig, JxlFullFrameEncoder};
 

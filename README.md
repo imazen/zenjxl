@@ -1,6 +1,6 @@
 # zenjxl
 
-JPEG XL encoding and decoding with `zencodec-types` trait integration.
+JPEG XL encoding and decoding with `zencodec` trait integration.
 
 Wraps [jxl-rs](https://github.com/libjxl/jxl-rs) for decoding and `jxl-encoder` for encoding. Both are feature-gated (`decode` and `encode`).
 
@@ -8,12 +8,12 @@ Wraps [jxl-rs](https://github.com/libjxl/jxl-rs) for decoding and `jxl-encoder` 
 
 - `decode` — JPEG XL decoding via jxl-rs
 - `encode` — JPEG XL encoding via jxl-encoder
-- `zencodec` — Enable zencodec-types trait integration
+- `zencodec` — Enable zencodec trait integration
 - `butteraugli-loop` — Perceptual quality tuning (requires `encode`)
 
-## zencodec-types integration
+## zencodec integration
 
-`JxlEncoderConfig` implements `zencodec_types::EncoderConfig` and `JxlDecoderConfig` implements `zencodec_types::DecoderConfig`, enabling use in the unified zen* codec pipeline.
+`JxlEncoderConfig` implements `zencodec::EncoderConfig` and `JxlDecoderConfig` implements `zencodec::DecoderConfig`, enabling use in the unified zen* codec pipeline.
 
 ## License
 

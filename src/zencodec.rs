@@ -1,10 +1,10 @@
-//! zencodec-types trait implementations for JPEG XL.
+//! zencodec trait implementations for JPEG XL.
 //!
 //! Thin adapter layer over the native `zenjxl` encode/decode API.
 //!
 //! # Trait mapping
 //!
-//! | zencodec-types | zenjxl adapter |
+//! | zencodec | zenjxl adapter |
 //! |----------------|----------------|
 //! | `EncoderConfig` | [`JxlEncoderConfig`] |
 //! | `EncodeJob<'a>` | [`JxlEncodeJob`] |
@@ -1021,7 +1021,7 @@ mod decoding {
     }
 
     impl JxlDecodeJob<'_> {
-        /// Convert native JxlInfo into zencodec-types ImageInfo.
+        /// Convert native JxlInfo into zencodec ImageInfo.
         fn jxl_info_to_image_info(info: &JxlInfo) -> ImageInfo {
             let mut image_info = ImageInfo::new(info.width, info.height, ImageFormat::Jxl)
                 .with_alpha(info.has_alpha)
