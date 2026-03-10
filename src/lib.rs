@@ -3,10 +3,10 @@
 //! Wraps `jxl` (jxl-rs) for decoding and `jxl-encoder` for encoding.
 //! Both are feature-gated (`decode` and `encode` respectively).
 //!
-//! # zencodec-types traits
+//! # zencodec traits
 //!
-//! [`JxlEncoderConfig`] implements [`zencodec_types::EncoderConfig`] (encode feature)
-//! and [`JxlDecoderConfig`] implements [`zencodec_types::DecoderConfig`] (decode feature).
+//! With the `zencodec` feature, `JxlEncoderConfig` implements `EncoderConfig` (encode feature)
+//! and `JxlDecoderConfig` implements `DecoderConfig` (decode feature).
 
 #![forbid(unsafe_code)]
 #![no_std]

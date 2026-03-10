@@ -905,7 +905,7 @@ mod decoding {
     };
     use zc::Unsupported;
     use zc::decode::{
-        DecodeCapabilities, DecodeOutput, OutputInfo, SinkError, push_decoder_via_full_decode,
+        DecodeCapabilities, DecodeOutput, OutputInfo, SinkError,
     };
     use zc::{FullFrame, OwnedFullFrame};
     use zc::{ImageInfo, ResourceLimits, UnsupportedOperation};
@@ -1139,7 +1139,7 @@ mod decoding {
             sink: &mut dyn zc::decode::DecodeRowSink,
             preferred: &[PixelDescriptor],
         ) -> Result<OutputInfo, At<JxlError>> {
-            push_decoder_via_full_decode(self, data, sink, preferred, |e| at(JxlError::Sink(e)))
+            zc::helpers::copy_decode_to_sink(self, data, sink, preferred, |e| at(JxlError::Sink(e)))
         }
 
         fn full_frame_decoder(
@@ -1402,7 +1402,7 @@ mod decoding {
             stop: Option<&dyn Stop>,
             sink: &mut dyn zc::decode::DecodeRowSink,
         ) -> Result<Option<OutputInfo>, At<JxlError>> {
-            zc::decode::render_frame_to_sink_via_copy(self, stop, sink)
+            zc::helpers::copy_frame_to_sink(self, stop, sink)
         }
 
         fn render_next_frame_owned(
@@ -1634,13 +1634,13 @@ mod tests {
         assert!(caps.native_16bit(), "native_16bit should be reported");
         assert!(caps.native_f32());
         assert!(
-            caps.row_level(),
-            "row_level should be reported since push_rows/finish are implemented"
+            caps.push_rows(),
+            "push_rows should be reported since push_rows/finish are implemented"
         );
         assert!(caps.animation());
         assert!(caps.enforces_max_pixels());
         assert!(caps.enforces_max_memory());
-        assert!(caps.cancel());
+        assert!(caps.stop());
         assert_eq!(caps.threads_supported_range(), (1, u16::MAX));
     }
 
