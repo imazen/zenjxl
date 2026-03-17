@@ -13,13 +13,13 @@
 
 extern crate alloc;
 
+#[cfg(feature = "zencodec")]
+mod codec;
 #[cfg(feature = "decode")]
 mod decode;
 #[cfg(feature = "encode")]
 mod encode;
 mod error;
-#[cfg(feature = "zencodec")]
-mod codec;
 
 pub use error::JxlError;
 

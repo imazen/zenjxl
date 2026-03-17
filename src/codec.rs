@@ -136,7 +136,7 @@ mod encoding {
                 0
             }
             zencodec::ThreadingPolicy::Unlimited => 0, // 0 = auto
-            _ => 0,                              // future variants default to auto
+            _ => 0,                                    // future variants default to auto
         }
     }
 
@@ -482,23 +482,23 @@ mod encoding {
             let mut jxl_meta = jxl_encoder::ImageMetadata::new();
             let mut has_any = false;
 
-            if self.policy.resolve_icc(true) {
-                if let Some(ref icc) = meta.icc_profile {
-                    jxl_meta = jxl_meta.with_icc_profile(icc);
-                    has_any = true;
-                }
+            if self.policy.resolve_icc(true)
+                && let Some(ref icc) = meta.icc_profile
+            {
+                jxl_meta = jxl_meta.with_icc_profile(icc);
+                has_any = true;
             }
-            if self.policy.resolve_exif(true) {
-                if let Some(ref exif) = meta.exif {
-                    jxl_meta = jxl_meta.with_exif(exif);
-                    has_any = true;
-                }
+            if self.policy.resolve_exif(true)
+                && let Some(ref exif) = meta.exif
+            {
+                jxl_meta = jxl_meta.with_exif(exif);
+                has_any = true;
             }
-            if self.policy.resolve_xmp(true) {
-                if let Some(ref xmp) = meta.xmp {
-                    jxl_meta = jxl_meta.with_xmp(xmp);
-                    has_any = true;
-                }
+            if self.policy.resolve_xmp(true)
+                && let Some(ref xmp) = meta.xmp
+            {
+                jxl_meta = jxl_meta.with_xmp(xmp);
+                has_any = true;
             }
 
             has_any.then_some(jxl_meta)
@@ -904,9 +904,7 @@ mod decoding {
         ProcessingResult,
     };
     use zencodec::Unsupported;
-    use zencodec::decode::{
-        DecodeCapabilities, DecodeOutput, OutputInfo, SinkError,
-    };
+    use zencodec::decode::{DecodeCapabilities, DecodeOutput, OutputInfo, SinkError};
     use zencodec::{FullFrame, OwnedFullFrame};
     use zencodec::{ImageInfo, ResourceLimits, UnsupportedOperation};
     use zenpixels::Cicp;
@@ -1034,8 +1032,8 @@ mod decoding {
                 });
             }
 
-            image_info =
-                image_info.with_orientation(zencodec::Orientation::from_exif(info.orientation as u16));
+            image_info = image_info
+                .with_orientation(zencodec::Orientation::from_exif(info.orientation as u16));
 
             if let Some((cp, tc, mc, fr)) = info.cicp {
                 image_info = image_info.with_cicp(Cicp::new(cp, tc, mc, fr));
@@ -1146,7 +1144,9 @@ mod decoding {
             sink: &mut dyn zencodec::decode::DecodeRowSink,
             preferred: &[PixelDescriptor],
         ) -> Result<OutputInfo, At<JxlError>> {
-            zencodec::helpers::copy_decode_to_sink(self, data, sink, preferred, |e| at(JxlError::Sink(e)))
+            zencodec::helpers::copy_decode_to_sink(self, data, sink, preferred, |e| {
+                at(JxlError::Sink(e))
+            })
         }
 
         fn full_frame_decoder(
