@@ -15,6 +15,8 @@ extern crate alloc;
 
 #[cfg(feature = "zencodec")]
 mod codec;
+#[cfg(feature = "encode")]
+pub mod container;
 #[cfg(feature = "decode")]
 mod decode;
 #[cfg(feature = "encode")]
@@ -36,7 +38,7 @@ pub use encode::{
 
 // zencodec trait types
 #[cfg(all(feature = "zencodec", feature = "encode"))]
-pub use codec::{JxlEncodeJob, JxlEncoder, JxlEncoderConfig, JxlFullFrameEncoder};
+pub use codec::{GainMapData, JxlEncodeJob, JxlEncoder, JxlEncoderConfig, JxlFullFrameEncoder};
 
 #[cfg(all(feature = "zencodec", feature = "decode"))]
 pub use codec::{JxlDecodeJob, JxlDecoder, JxlDecoderConfig, JxlFullFrameDecoder};

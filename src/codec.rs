@@ -208,6 +208,18 @@ mod encoding {
 
     // ── JxlEncoderConfig ────────────────────────────────────────────────
 
+    /// Pre-serialized gain map data for embedding in the JXL container.
+    ///
+    /// This holds the raw jhgm box payload (the output of
+    /// [`GainMapBundle::serialize()`]). Wrapped in `Arc` so `JxlEncoderConfig`
+    /// remains cheap to clone.
+    #[derive(Clone, Debug)]
+    pub struct GainMapData {
+        /// Serialized jhgm box payload (version + metadata + color_encoding +
+        /// alt_icc + gain map codestream).
+        pub jhgm_payload: Vec<u8>,
+    }
+
     /// JPEG XL encoder configuration.
     ///
     /// Implements [`zencodec::encode::EncoderConfig`].
@@ -222,6 +234,8 @@ mod encoding {
         generic_quality: Option<f32>,
         effort: Option<i32>,
         lossless: bool,
+        /// Optional gain map to embed as a jhgm box in the container.
+        gain_map: Option<Arc<GainMapData>>,
     }
 
     impl JxlEncoderConfig {
@@ -233,7 +247,38 @@ mod encoding {
                 generic_quality: None,
                 effort: None,
                 lossless: false,
+                gain_map: None,
             }
+        }
+
+        /// Attach a gain map for embedding in the output JXL container.
+        ///
+        /// The `jhgm_payload` is the serialized gain map bundle — the output
+        /// of [`GainMapBundle::serialize()`]. When set, the encoder wraps
+        /// the codestream in a JXL container and appends a `jhgm` box.
+        ///
+        /// # Example
+        ///
+        /// ```ignore
+        /// use zenjxl::GainMapBundle;
+        ///
+        /// let bundle = GainMapBundle {
+        ///     metadata: iso_metadata,
+        ///     color_encoding: None,
+        ///     alt_icc_compressed: None,
+        ///     gain_map_codestream: gain_map_jxl,
+        /// };
+        /// let config = JxlEncoderConfig::new()
+        ///     .with_gain_map(bundle.serialize());
+        /// ```
+        pub fn with_gain_map(mut self, jhgm_payload: Vec<u8>) -> Self {
+            self.gain_map = Some(Arc::new(GainMapData { jhgm_payload }));
+            self
+        }
+
+        /// Returns the gain map data if set.
+        pub fn gain_map(&self) -> Option<&GainMapData> {
+            self.gain_map.as_deref()
         }
 
         /// Access the underlying lossy config for codec-specific tuning.
@@ -399,6 +444,7 @@ mod encoding {
                 limits: self.limits,
                 stop: self.stop,
                 stream: StreamState::Empty,
+                gain_map: self.config.gain_map.clone(),
             })
         }
 
@@ -410,6 +456,7 @@ mod encoding {
                 &self.policy,
                 self.limits,
                 self.loop_count,
+                self.config.gain_map.clone(),
             ))
         }
     }
@@ -443,6 +490,7 @@ mod encoding {
         limits: Option<ResourceLimits>,
         stop: Option<&'a dyn Stop>,
         stream: StreamState,
+        gain_map: Option<Arc<GainMapData>>,
     }
 
     impl JxlEncoder<'_> {
@@ -548,6 +596,17 @@ mod encoding {
                 JxlEncMode::Lossless(cfg) => encode(cfg.encode_request(width, height, layout)),
             }
         }
+
+        /// If a gain map is configured, wrap the encoded JXL with a `jhgm` box.
+        ///
+        /// Bare codestreams are wrapped in a container first. Container-format
+        /// output gets the jhgm box appended.
+        fn maybe_attach_gain_map(&self, encoded: Vec<u8>) -> Vec<u8> {
+            match &self.gain_map {
+                Some(gm) => crate::container::append_gain_map_box(&encoded, &gm.jhgm_payload),
+                None => encoded,
+            }
+        }
     }
 
     impl zencodec::encode::Encoder for JxlEncoder<'_> {
@@ -566,6 +625,7 @@ mod encoding {
 
             let data = pixels.contiguous_bytes();
             let encoded = self.encode_with_metadata(&data, width, height, layout)?;
+            let encoded = self.maybe_attach_gain_map(encoded);
 
             Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                 .with_mime_type("image/jxl")
@@ -598,6 +658,7 @@ mod encoding {
                     }
                 }
                 let encoded = self.encode_with_metadata(&rgb, width, height, PixelLayout::Rgb8)?;
+                let encoded = self.maybe_attach_gain_map(encoded);
                 Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                     .with_mime_type("image/jxl")
                     .with_extension("jxl"))
@@ -616,6 +677,7 @@ mod encoding {
                 };
                 let encoded =
                     self.encode_with_metadata(&pixel_data, width, height, PixelLayout::Rgba8)?;
+                let encoded = self.maybe_attach_gain_map(encoded);
                 Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                     .with_mime_type("image/jxl")
                     .with_extension("jxl"))
@@ -679,6 +741,7 @@ mod encoding {
             self.check_limits(width, rows_pushed, bpp)?;
 
             let encoded = self.encode_with_metadata(data, width, rows_pushed, layout)?;
+            let encoded = self.maybe_attach_gain_map(encoded);
 
             Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                 .with_mime_type("image/jxl")
@@ -721,6 +784,7 @@ mod encoding {
         width: u32,
         height: u32,
         layout: Option<PixelLayout>,
+        gain_map: Option<Arc<GainMapData>>,
     }
 
     impl JxlFullFrameEncoder {
@@ -731,6 +795,7 @@ mod encoding {
             policy: &EncodePolicy,
             limits: Option<ResourceLimits>,
             loop_count: Option<u32>,
+            gain_map: Option<Arc<GainMapData>>,
         ) -> Self {
             // For animation, ICC is handled in the codestream by jxl-encoder.
             // EXIF/XMP go in the container — copy them out now so we're 'static.
@@ -763,24 +828,37 @@ mod encoding {
                 width: 0,
                 height: 0,
                 layout: None,
+                gain_map,
             }
         }
 
-        /// Wrap an encoded animation codestream with EXIF/XMP metadata boxes.
-        fn wrap_with_metadata(self, codestream: Vec<u8>) -> Vec<u8> {
-            let meta = match self.anim_meta {
-                Some(m) => m,
-                None => return codestream,
-            };
+        /// Wrap an encoded animation codestream with EXIF/XMP metadata boxes
+        /// and an optional gain map box.
+        fn wrap_with_metadata_and_gain_map(&self, codestream: Vec<u8>) -> Vec<u8> {
+            let has_meta = self
+                .anim_meta
+                .as_ref()
+                .is_some_and(|m| m.exif.is_some() || m.xmp.is_some());
+            let has_gain_map = self.gain_map.is_some();
 
-            let exif = meta.exif.as_deref();
-            let xmp = meta.xmp.as_deref();
-
-            if exif.is_none() && xmp.is_none() {
+            if !has_meta && !has_gain_map {
                 return codestream;
             }
 
-            jxl_encoder::container::wrap_in_container(&codestream, exif, xmp)
+            // Always need container format if we have metadata or gain map.
+            let exif = self.anim_meta.as_ref().and_then(|m| m.exif.as_deref());
+            let xmp = self.anim_meta.as_ref().and_then(|m| m.xmp.as_deref());
+
+            let wrapped = if has_meta {
+                jxl_encoder::container::wrap_in_container(&codestream, exif, xmp)
+            } else {
+                codestream
+            };
+
+            match &self.gain_map {
+                Some(gm) => crate::container::append_gain_map_box(&wrapped, &gm.jhgm_payload),
+                None => wrapped,
+            }
         }
     }
 
@@ -880,7 +958,7 @@ mod encoding {
                     .map_err(|e| at(JxlError::Encode(e.into_inner())))?,
             };
 
-            let encoded = self.wrap_with_metadata(encoded);
+            let encoded = self.wrap_with_metadata_and_gain_map(encoded);
 
             Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                 .with_mime_type("image/jxl")
@@ -1434,7 +1512,7 @@ mod decoding {
 // ── Re-exports ──────────────────────────────────────────────────────────────
 
 #[cfg(feature = "encode")]
-pub use encoding::{JxlEncodeJob, JxlEncoder, JxlEncoderConfig, JxlFullFrameEncoder};
+pub use encoding::{GainMapData, JxlEncodeJob, JxlEncoder, JxlEncoderConfig, JxlFullFrameEncoder};
 
 #[cfg(feature = "decode")]
 pub use decoding::{JxlDecodeJob, JxlDecoder, JxlDecoderConfig, JxlFullFrameDecoder};
