@@ -1914,4 +1914,158 @@ mod tests {
         assert_eq!(info.height, height);
         assert_eq!(info.format, ImageFormat::Jxl);
     }
+
+    /// Encode with gain map via zencodec trait → decode → verify gain map roundtrips.
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    #[test]
+    fn gain_map_roundtrip_via_trait() {
+        use crate::GainMapBundle;
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+
+        // Build a small base image.
+        let width = 8u32;
+        let height = 8u32;
+        let pixels: Vec<rgb::Rgb<u8>> = (0..width * height)
+            .map(|i| {
+                let v = (i % 256) as u8;
+                rgb::Rgb { r: v, g: v, b: v }
+            })
+            .collect();
+        let buf =
+            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, width, height).unwrap();
+
+        // Build a fake gain map bundle.
+        // The gain map codestream doesn't need to be valid JXL for this test —
+        // the decoder just stores the raw bytes without parsing them.
+        let fake_metadata = vec![0x01, 0x02, 0x03, 0x04];
+        let fake_gain_map_codestream = vec![0xFF, 0x0A, 0xDE, 0xAD, 0xBE, 0xEF];
+        let bundle = GainMapBundle {
+            metadata: fake_metadata.clone(),
+            color_encoding: None,
+            alt_icc_compressed: None,
+            gain_map_codestream: fake_gain_map_codestream.clone(),
+        };
+        let jhgm_payload = bundle.serialize();
+
+        // Encode with gain map attached.
+        let config = JxlEncoderConfig::new()
+            .with_lossless(true)
+            .with_gain_map(jhgm_payload);
+        let encoder = config.job().encoder().unwrap();
+        let output = encoder.encode(buf.as_slice().into()).unwrap();
+
+        // The output should be in container format (not bare codestream).
+        assert!(
+            crate::container::is_container(output.data()),
+            "output with gain map should be in container format"
+        );
+
+        // Decode with jxl-rs and verify gain map roundtripped.
+        let decode_result = crate::decode::decode(output.data(), None, &[]).unwrap();
+        let decoded_gm = decode_result
+            .gain_map
+            .expect("decoded output should contain a gain map");
+        assert_eq!(
+            decoded_gm.metadata, fake_metadata,
+            "gain map metadata should roundtrip"
+        );
+        assert_eq!(
+            decoded_gm.gain_map_codestream, fake_gain_map_codestream,
+            "gain map codestream should roundtrip"
+        );
+        assert!(
+            decoded_gm.color_encoding.is_none(),
+            "color_encoding should be None"
+        );
+        assert!(
+            decoded_gm.alt_icc_compressed.is_none(),
+            "alt_icc should be None"
+        );
+    }
+
+    /// Encode with gain map via native encode API → decode → verify gain map roundtrips.
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    #[test]
+    fn gain_map_roundtrip_native() {
+        use crate::GainMapBundle;
+        use imgref::Img;
+
+        // Build a small base image.
+        let width = 8u32;
+        let height = 8u32;
+        let pixels: Vec<rgb::Rgb<u8>> = (0..width * height)
+            .map(|i| {
+                let v = (i % 256) as u8;
+                rgb::Rgb { r: v, g: v, b: v }
+            })
+            .collect();
+        let img = Img::new(pixels, width as usize, height as usize);
+
+        // Encode losslessly (produces bare codestream).
+        let config = jxl_encoder::LosslessConfig::default();
+        let encoded = crate::encode::encode_rgb8_lossless(img.as_ref(), &config).unwrap();
+
+        // Build a gain map bundle and append it.
+        let bundle = GainMapBundle {
+            metadata: vec![0xAA, 0xBB],
+            color_encoding: Some(vec![0xCC, 0xDD]),
+            alt_icc_compressed: None,
+            gain_map_codestream: vec![0xFF, 0x0A, 0x01, 0x02],
+        };
+        let with_gm = crate::container::append_gain_map_box(&encoded, &bundle.serialize());
+
+        // Should now be container format.
+        assert!(crate::container::is_container(&with_gm));
+
+        // Decode and verify gain map.
+        let decode_result = crate::decode::decode(&with_gm, None, &[]).unwrap();
+        let decoded_gm = decode_result
+            .gain_map
+            .expect("decoded output should contain a gain map");
+        assert_eq!(decoded_gm.metadata, vec![0xAA, 0xBB]);
+        assert_eq!(decoded_gm.color_encoding, Some(vec![0xCC, 0xDD]));
+        assert!(decoded_gm.alt_icc_compressed.is_none());
+        assert_eq!(decoded_gm.gain_map_codestream, vec![0xFF, 0x0A, 0x01, 0x02]);
+    }
+
+    /// Encoding without gain map should not produce container format.
+    #[cfg(feature = "encode")]
+    #[test]
+    fn no_gain_map_stays_bare_codestream() {
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+
+        let width = 4u32;
+        let height = 4u32;
+        let pixels: Vec<rgb::Rgb<u8>> = vec![rgb::Rgb { r: 0, g: 0, b: 0 }; 16];
+        let buf =
+            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, width, height).unwrap();
+
+        // No gain map, no metadata → bare codestream.
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let encoder = config.job().encoder().unwrap();
+        let output = encoder.encode(buf.as_slice().into()).unwrap();
+
+        assert!(
+            !crate::container::is_container(output.data()),
+            "output without gain map should be a bare codestream"
+        );
+    }
+
+    /// GainMapBundle serialize→parse roundtrip (independent of encode/decode).
+    #[cfg(feature = "decode")]
+    #[test]
+    fn gain_map_bundle_serialize_parse_roundtrip() {
+        use crate::GainMapBundle;
+
+        let bundle = GainMapBundle {
+            metadata: vec![0x10, 0x20, 0x30],
+            color_encoding: Some(vec![0xAA, 0xBB]),
+            alt_icc_compressed: Some(vec![0xCC; 64]),
+            gain_map_codestream: vec![0xFF, 0x0A, 0x00, 0x01],
+        };
+
+        let serialized = bundle.serialize();
+        let parsed = GainMapBundle::parse(&serialized).unwrap();
+        assert_eq!(bundle, parsed);
+    }
 }
