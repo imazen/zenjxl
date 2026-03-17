@@ -1193,7 +1193,12 @@ mod decoding {
             .map_err(at)?;
 
             let info = JxlDecodeJob::jxl_info_to_image_info(&result.info);
-            Ok(DecodeOutput::new(result.pixels, info).with_source_encoding_details(result.info))
+            let mut output =
+                DecodeOutput::new(result.pixels, info).with_source_encoding_details(result.info);
+            if let Some(gm) = result.gain_map {
+                output = output.with_extras(gm);
+            }
+            Ok(output)
         }
     }
 

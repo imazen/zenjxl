@@ -6,8 +6,8 @@ use alloc::vec::Vec;
 use zenpixels::{ChannelLayout, ChannelType, PixelBuffer, PixelDescriptor};
 
 use jxl::api::{
-    ExtraChannel, JxlBitDepth, JxlColorEncoding, JxlColorProfile, JxlColorType, JxlDecoder,
-    JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat, ProcessingResult,
+    ExtraChannel, GainMapBundle, JxlBitDepth, JxlColorEncoding, JxlColorProfile, JxlColorType,
+    JxlDecoder, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat, ProcessingResult,
 };
 
 use crate::error::JxlError;
@@ -53,6 +53,11 @@ pub struct JxlDecodeOutput {
     pub pixels: PixelBuffer,
     /// Image metadata.
     pub info: JxlInfo,
+    /// HDR gain map bundle from `jhgm` container box (ISO 21496-1).
+    ///
+    /// Present when the JXL file contains a gain map for HDR/SDR adaptation.
+    /// The base image is HDR; the gain map maps HDR→SDR (inverse direction).
+    pub gain_map: Option<GainMapBundle>,
 }
 
 /// Decode limits for JXL operations.
@@ -518,7 +523,7 @@ pub fn decode_with_parallel(
     let mut buf = vec![0u8; buf_size];
 
     let output = JxlOutputBuffer::new(&mut buf, height, bytes_per_row);
-    let _decoder = match decoder
+    let mut final_decoder = match decoder
         .process(&mut input, &mut [output])
         .map_err(map_err)?
     {
@@ -529,6 +534,9 @@ pub fn decode_with_parallel(
             ));
         }
     };
+
+    // Extract gain map bundle (jhgm box) if present
+    let gain_map = final_decoder.take_gain_map();
 
     // Clamp f32 output to [0.0, 1.0] for SDR / BT.709 content.
     // Lossy JXL can produce values slightly outside range as compression artifacts.
@@ -553,6 +561,7 @@ pub fn decode_with_parallel(
             cicp,
             is_gray,
         },
+        gain_map,
     })
 }
 
