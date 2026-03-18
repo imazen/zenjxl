@@ -1121,6 +1121,14 @@ mod decoding {
                 image_info = image_info.with_icc_profile(icc.clone());
             }
 
+            if let Some(ref exif) = info.exif {
+                image_info = image_info.with_exif(exif.clone());
+            }
+
+            if let Some(ref xmp) = info.xmp {
+                image_info = image_info.with_xmp(xmp.clone());
+            }
+
             image_info
         }
 
@@ -1382,6 +1390,10 @@ mod decoding {
                 orientation,
                 cicp,
                 is_gray,
+                // EXIF/XMP not yet available — container boxes may follow the codestream.
+                // They'll be extracted after all frames are decoded.
+                exif: None,
+                xmp: None,
             };
             let image_info = Arc::new(JxlDecodeJob::jxl_info_to_image_info(&jxl_info));
 
@@ -2067,5 +2079,211 @@ mod tests {
         let serialized = bundle.serialize();
         let parsed = GainMapBundle::parse(&serialized).unwrap();
         assert_eq!(bundle, parsed);
+    }
+
+    // ── EXIF / XMP metadata roundtrip tests ────────────────────────────
+
+    /// Encode with EXIF → decode → verify EXIF bytes roundtrip through JxlInfo.
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    #[test]
+    fn exif_roundtrip() {
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+
+        let width = 8u32;
+        let height = 8u32;
+        let pixels: Vec<rgb::Rgb<u8>> = vec![rgb::Rgb { r: 0, g: 0, b: 0 }; 64];
+        let buf =
+            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, width, height).unwrap();
+
+        // Minimal EXIF blob (starts with byte order marker, just enough to be recognizable)
+        let exif_data: &[u8] = b"MM\x00\x2a\x00\x00\x00\x08\x00\x00";
+        let meta = zencodec::Metadata::none().with_exif(exif_data);
+
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let encoder = config.job().with_metadata(&meta).encoder().unwrap();
+        let output = encoder.encode(buf.as_slice().into()).unwrap();
+
+        // Output must be container format (EXIF is stored in a container box).
+        assert!(
+            crate::container::is_container(output.data()),
+            "output with EXIF should be in container format"
+        );
+
+        // Decode and verify EXIF roundtripped.
+        let result = crate::decode::decode(output.data(), None, &[]).unwrap();
+        let decoded_exif = result
+            .info
+            .exif
+            .expect("decoded output should contain EXIF");
+        assert_eq!(
+            decoded_exif, exif_data,
+            "EXIF data should roundtrip exactly"
+        );
+    }
+
+    /// Encode with XMP → decode → verify XMP bytes roundtrip through JxlInfo.
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    #[test]
+    fn xmp_roundtrip() {
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+
+        let width = 8u32;
+        let height = 8u32;
+        let pixels: Vec<rgb::Rgb<u8>> = vec![rgb::Rgb { r: 0, g: 0, b: 0 }; 64];
+        let buf =
+            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, width, height).unwrap();
+
+        let xmp_data: &[u8] = b"<?xml version=\"1.0\"?><x:xmpmeta xmlns:x=\"adobe:ns:meta/\"/>";
+        let meta = zencodec::Metadata::none().with_xmp(xmp_data);
+
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let encoder = config.job().with_metadata(&meta).encoder().unwrap();
+        let output = encoder.encode(buf.as_slice().into()).unwrap();
+
+        assert!(
+            crate::container::is_container(output.data()),
+            "output with XMP should be in container format"
+        );
+
+        let result = crate::decode::decode(output.data(), None, &[]).unwrap();
+        let decoded_xmp = result.info.xmp.expect("decoded output should contain XMP");
+        assert_eq!(
+            decoded_xmp.as_slice(),
+            xmp_data,
+            "XMP data should roundtrip exactly"
+        );
+    }
+
+    /// Encode with both EXIF and XMP → decode → verify both roundtrip.
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    #[test]
+    fn exif_and_xmp_roundtrip() {
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+
+        let width = 4u32;
+        let height = 4u32;
+        let pixels: Vec<rgb::Rgb<u8>> = vec![rgb::Rgb { r: 0, g: 0, b: 0 }; 16];
+        let buf =
+            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, width, height).unwrap();
+
+        let exif_data: &[u8] = b"MM\x00\x2a\x00\x00\x00\x08\x00\x01";
+        let xmp_data: &[u8] = b"<xmp>test</xmp>";
+        let meta = zencodec::Metadata::none()
+            .with_exif(exif_data)
+            .with_xmp(xmp_data);
+
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let encoder = config.job().with_metadata(&meta).encoder().unwrap();
+        let output = encoder.encode(buf.as_slice().into()).unwrap();
+
+        let result = crate::decode::decode(output.data(), None, &[]).unwrap();
+        assert_eq!(
+            result.info.exif.as_deref(),
+            Some(exif_data),
+            "EXIF should roundtrip"
+        );
+        assert_eq!(
+            result.info.xmp.as_deref(),
+            Some(xmp_data),
+            "XMP should roundtrip"
+        );
+    }
+
+    /// Bare codestream (no container) should return None for EXIF/XMP.
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    #[test]
+    fn bare_codestream_no_metadata() {
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+
+        let width = 4u32;
+        let height = 4u32;
+        let pixels: Vec<rgb::Rgb<u8>> = vec![rgb::Rgb { r: 0, g: 0, b: 0 }; 16];
+        let buf =
+            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, width, height).unwrap();
+
+        // No metadata → bare codestream.
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let encoder = config.job().encoder().unwrap();
+        let output = encoder.encode(buf.as_slice().into()).unwrap();
+
+        // Confirm it's a bare codestream.
+        assert!(!crate::container::is_container(output.data()));
+
+        let result = crate::decode::decode(output.data(), None, &[]).unwrap();
+        assert!(
+            result.info.exif.is_none(),
+            "bare codestream should have no EXIF"
+        );
+        assert!(
+            result.info.xmp.is_none(),
+            "bare codestream should have no XMP"
+        );
+    }
+
+    /// ICC profile roundtrip (encode with structured sRGB → decode → verify ICC present).
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    #[test]
+    fn icc_from_structured_color() {
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+
+        let width = 4u32;
+        let height = 4u32;
+        let pixels: Vec<rgb::Rgb<u8>> = vec![rgb::Rgb { r: 0, g: 0, b: 0 }; 16];
+        let buf =
+            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, width, height).unwrap();
+
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let encoder = config.job().encoder().unwrap();
+        let output = encoder.encode(buf.as_slice().into()).unwrap();
+
+        let result = crate::decode::decode(output.data(), None, &[]).unwrap();
+        // JXL with structured sRGB color should synthesize an ICC profile.
+        assert!(
+            result.info.icc_profile.is_some(),
+            "sRGB image should have a synthesized ICC profile"
+        );
+    }
+
+    /// EXIF/XMP wired through zencodec ImageInfo in the trait-based decode path.
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    #[test]
+    fn exif_xmp_in_image_info() {
+        use zencodec::decode::{Decode, DecodeJob, DecoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+
+        let width = 8u32;
+        let height = 8u32;
+        let pixels: Vec<rgb::Rgb<u8>> = vec![rgb::Rgb { r: 0, g: 0, b: 0 }; 64];
+        let buf =
+            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, width, height).unwrap();
+
+        let exif_data: &[u8] = b"MM\x00\x2a\x00\x00\x00\x08\x00\x00";
+        let xmp_data: &[u8] = b"<xmp>hi</xmp>";
+        let meta = zencodec::Metadata::none()
+            .with_exif(exif_data)
+            .with_xmp(xmp_data);
+
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let encoder = config.job().with_metadata(&meta).encoder().unwrap();
+        let output = encoder.encode(buf.as_slice().into()).unwrap();
+
+        // Decode via zencodec trait path.
+        let dec_config = JxlDecoderConfig::new();
+        let decoder = dec_config
+            .job()
+            .decoder(Cow::Borrowed(output.data()), &[])
+            .unwrap();
+        let decoded = decoder.decode().unwrap();
+        let info = decoded.info();
+        assert_eq!(
+            info.embedded_metadata.exif.as_deref(),
+            Some(exif_data),
+            "EXIF should be accessible via ImageInfo"
+        );
+        assert_eq!(
+            info.embedded_metadata.xmp.as_deref(),
+            Some(xmp_data),
+            "XMP should be accessible via ImageInfo"
+        );
     }
 }

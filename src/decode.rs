@@ -37,6 +37,12 @@ pub struct JxlInfo {
     pub cicp: Option<(u8, u8, u8, bool)>,
     /// Whether the image's color encoding is grayscale.
     pub is_gray: bool,
+    /// Raw EXIF data from the `Exif` container box (TIFF header offset stripped).
+    /// `None` for bare codestreams or files without an `Exif` box.
+    pub exif: Option<Vec<u8>>,
+    /// Raw XMP data from the `xml ` container box.
+    /// `None` for bare codestreams or files without an `xml ` box.
+    pub xmp: Option<Vec<u8>>,
 }
 
 impl zencodec::SourceEncodingDetails for JxlInfo {
@@ -421,6 +427,10 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, JxlError> {
         orientation,
         cicp,
         is_gray,
+        // Probing only parses headers; EXIF/XMP are in trailing container
+        // boxes and require full decode to access.
+        exif: None,
+        xmp: None,
     })
 }
 
@@ -538,6 +548,10 @@ pub fn decode_with_parallel(
     // Extract gain map bundle (jhgm box) if present
     let gain_map = final_decoder.take_gain_map();
 
+    // Extract EXIF and XMP metadata from container boxes
+    let exif = final_decoder.take_exif();
+    let xmp = final_decoder.take_xmp();
+
     // Clamp f32 output to [0.0, 1.0] for SDR / BT.709 content.
     // Lossy JXL can produce values slightly outside range as compression artifacts.
     // HDR (PQ/HLG) and wide gamut (BT.2020/P3) content is left unclamped.
@@ -560,6 +574,8 @@ pub fn decode_with_parallel(
             orientation,
             cicp,
             is_gray,
+            exif,
+            xmp,
         },
         gain_map,
     })
