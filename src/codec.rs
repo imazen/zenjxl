@@ -1357,6 +1357,8 @@ mod decoding {
             let orientation = basic_info.orientation as u8;
             let is_gray = crate::decode::profile_is_grayscale(decoder.embedded_color_profile());
             let num_extra = basic_info.extra_channels.len();
+            let extra_channels = crate::decode::convert_extra_channels(&basic_info.extra_channels);
+            let preview_size = basic_info.preview_size.map(|(w, h)| (w as u32, h as u32));
 
             let (icc_profile, cicp) = extract_color_info(decoder.embedded_color_profile());
 
@@ -1394,6 +1396,8 @@ mod decoding {
                 // They'll be extracted after all frames are decoded.
                 exif: None,
                 xmp: None,
+                extra_channels,
+                preview_size,
             };
             let image_info = Arc::new(JxlDecodeJob::jxl_info_to_image_info(&jxl_info));
 

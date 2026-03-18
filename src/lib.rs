@@ -26,7 +26,10 @@ mod error;
 pub use error::JxlError;
 
 #[cfg(feature = "decode")]
-pub use decode::{JxlDecodeOutput, JxlInfo, JxlLimits, decode, decode_with_parallel, probe};
+pub use decode::{
+    JxlDecodeOutput, JxlExtraChannelInfo, JxlExtraChannelType, JxlInfo, JxlLimits, decode,
+    decode_with_parallel, probe,
+};
 #[cfg(feature = "decode")]
 pub use jxl::api::GainMapBundle;
 

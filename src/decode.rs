@@ -5,12 +5,78 @@ use alloc::vec::Vec;
 
 use zenpixels::{ChannelLayout, ChannelType, PixelBuffer, PixelDescriptor};
 
+use alloc::string::String;
+
 use jxl::api::{
     ExtraChannel, GainMapBundle, JxlBitDepth, JxlColorEncoding, JxlColorProfile, JxlColorType,
     JxlDecoder, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat, ProcessingResult,
 };
 
 use crate::error::JxlError;
+
+/// Semantic type of a JXL extra channel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum JxlExtraChannelType {
+    /// Alpha / transparency channel.
+    Alpha,
+    /// Depth map.
+    Depth,
+    /// Spot color (CMYK-style or custom ink).
+    SpotColor,
+    /// Selection mask for compositing.
+    SelectionMask,
+    /// Key (black) channel, typically for CMYK.
+    Black,
+    /// Color filter array (Bayer pattern for raw sensors).
+    Cfa,
+    /// Thermal / infrared data.
+    Thermal,
+    /// Optional channel (decoder may ignore).
+    Optional,
+    /// Unrecognized or reserved channel type.
+    Unknown(u32),
+}
+
+impl JxlExtraChannelType {
+    fn from_jxl(ec: &ExtraChannel) -> Self {
+        match ec {
+            ExtraChannel::Alpha => Self::Alpha,
+            ExtraChannel::Depth => Self::Depth,
+            ExtraChannel::SpotColor => Self::SpotColor,
+            ExtraChannel::SelectionMask => Self::SelectionMask,
+            ExtraChannel::Black => Self::Black,
+            ExtraChannel::CFA => Self::Cfa,
+            ExtraChannel::Thermal => Self::Thermal,
+            ExtraChannel::Optional => Self::Optional,
+            ExtraChannel::Unknown => Self::Unknown(15),
+            // Reserved variants map to Unknown with their discriminant
+            ExtraChannel::Reserved0 => Self::Unknown(7),
+            ExtraChannel::Reserved1 => Self::Unknown(8),
+            ExtraChannel::Reserved2 => Self::Unknown(9),
+            ExtraChannel::Reserved3 => Self::Unknown(10),
+            ExtraChannel::Reserved4 => Self::Unknown(11),
+            ExtraChannel::Reserved5 => Self::Unknown(12),
+            ExtraChannel::Reserved6 => Self::Unknown(13),
+            ExtraChannel::Reserved7 => Self::Unknown(14),
+        }
+    }
+}
+
+/// Metadata for a single JXL extra channel.
+#[derive(Clone, Debug)]
+pub struct JxlExtraChannelInfo {
+    /// Semantic type of this channel.
+    pub channel_type: JxlExtraChannelType,
+    /// Bits per sample for this channel.
+    pub bits_per_sample: u8,
+    /// Channel name, if the encoder provided one. `None` when unnamed.
+    pub name: Option<String>,
+    /// Whether alpha is premultiplied (only meaningful for Alpha channels).
+    pub alpha_associated: bool,
+    /// Dimensional shift (0 = full resolution, 1 = half, 2 = quarter, 3 = eighth).
+    pub dim_shift: u8,
+}
 
 /// JXL image metadata from probing.
 #[derive(Clone, Debug)]
@@ -43,6 +109,13 @@ pub struct JxlInfo {
     /// Raw XMP data from the `xml ` container box.
     /// `None` for bare codestreams or files without an `xml ` box.
     pub xmp: Option<Vec<u8>>,
+    /// Extra channels beyond the color channels (alpha, depth, spot color, etc.).
+    pub extra_channels: Vec<JxlExtraChannelInfo>,
+    /// Preview image dimensions `(width, height)`, if the file contains a preview frame.
+    ///
+    /// JXL files can embed a small preview image for quick thumbnailing.
+    /// `None` when no preview is present.
+    pub preview_size: Option<(u32, u32)>,
 }
 
 impl zencodec::SourceEncodingDetails for JxlInfo {
@@ -389,6 +462,26 @@ fn build_chosen(
     }
 }
 
+/// Convert jxl-rs extra channel info to our public type.
+pub(crate) fn convert_extra_channels(
+    channels: &[jxl::api::JxlExtraChannel],
+) -> Vec<JxlExtraChannelInfo> {
+    channels
+        .iter()
+        .map(|ec| JxlExtraChannelInfo {
+            channel_type: JxlExtraChannelType::from_jxl(&ec.ec_type),
+            bits_per_sample: ec.bits_per_sample as u8,
+            name: if ec.name.is_empty() {
+                None
+            } else {
+                Some(ec.name.clone())
+            },
+            alpha_associated: ec.alpha_associated,
+            dim_shift: ec.dim_shift as u8,
+        })
+        .collect()
+}
+
 /// Probe JXL metadata without decoding pixels.
 pub fn probe(data: &[u8]) -> Result<JxlInfo, JxlError> {
     let options = JxlDecoderOptions::default();
@@ -417,6 +510,9 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, JxlError> {
     let (icc_profile, cicp) = extract_color_info(decoder.embedded_color_profile());
     let is_gray = profile_is_grayscale(decoder.embedded_color_profile());
 
+    let extra_channels = convert_extra_channels(&info.extra_channels);
+    let preview_size = info.preview_size.map(|(w, h)| (w as u32, h as u32));
+
     Ok(JxlInfo {
         width: width as u32,
         height: height as u32,
@@ -431,6 +527,8 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, JxlError> {
         // boxes and require full decode to access.
         exif: None,
         xmp: None,
+        extra_channels,
+        preview_size,
     })
 }
 
@@ -499,6 +597,8 @@ pub fn decode_with_parallel(
     let (icc_profile, cicp) = extract_color_info(decoder.embedded_color_profile());
 
     let num_extra = info.extra_channels.len();
+    let extra_channels = convert_extra_channels(&info.extra_channels);
+    let preview_size = info.preview_size.map(|(w, h)| (w as u32, h as u32));
 
     // Choose output format based on native properties and caller preferences
     let chosen = choose_pixel_format(jxl_bit_depth, has_alpha, is_gray, num_extra, preferred);
@@ -576,6 +676,8 @@ pub fn decode_with_parallel(
             is_gray,
             exif,
             xmp,
+            extra_channels,
+            preview_size,
         },
         gain_map,
     })
@@ -742,5 +844,163 @@ pub(crate) fn build_pixel_data(
                 .collect();
             PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use super::*;
+
+    /// Helper: read a test file from the zenjxl-decoder resource directory.
+    fn read_jxl_test_file(name: &str) -> Vec<u8> {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenjxl-decoder/jxl/resources/test")
+            .join(name);
+        std::fs::read(&path).unwrap_or_else(|e| {
+            panic!("failed to read test file {}: {}", path.display(), e);
+        })
+    }
+
+    #[test]
+    fn extra_channel_alpha_from_rgba_image() {
+        // 3x3a has an alpha channel
+        let data = read_jxl_test_file("3x3a_srgb_lossless.jxl");
+        let info = probe(&data).unwrap();
+
+        assert!(info.has_alpha);
+        assert_eq!(info.extra_channels.len(), 1);
+
+        let alpha = &info.extra_channels[0];
+        assert_eq!(alpha.channel_type, JxlExtraChannelType::Alpha);
+        assert!(alpha.bits_per_sample > 0);
+        assert_eq!(alpha.dim_shift, 0); // full resolution alpha
+    }
+
+    #[test]
+    fn extra_channel_enumeration_multi_channel() {
+        let data = read_jxl_test_file("extra_channels.jxl");
+        let info = probe(&data).unwrap();
+
+        // This file should have extra channels
+        assert!(
+            !info.extra_channels.is_empty(),
+            "extra_channels.jxl should have extra channels"
+        );
+
+        // Verify all channels have valid metadata
+        for ec in &info.extra_channels {
+            assert!(ec.bits_per_sample > 0 && ec.bits_per_sample <= 32);
+            assert!(ec.dim_shift <= 3);
+        }
+    }
+
+    #[test]
+    fn no_extra_channels_for_rgb_image() {
+        let data = read_jxl_test_file("3x3_srgb_lossless.jxl");
+        let info = probe(&data).unwrap();
+
+        // RGB-only image: no alpha, no extra channels
+        assert!(!info.has_alpha);
+        assert!(
+            info.extra_channels.is_empty(),
+            "RGB image should have no extra channels"
+        );
+    }
+
+    #[test]
+    fn channel_type_mapping_covers_known_types() {
+        // Verify the mapping function handles all ExtraChannel variants without panic
+        let variants = [
+            ExtraChannel::Alpha,
+            ExtraChannel::Depth,
+            ExtraChannel::SpotColor,
+            ExtraChannel::SelectionMask,
+            ExtraChannel::Black,
+            ExtraChannel::CFA,
+            ExtraChannel::Thermal,
+            ExtraChannel::Optional,
+            ExtraChannel::Unknown,
+            ExtraChannel::Reserved0,
+            ExtraChannel::Reserved1,
+            ExtraChannel::Reserved2,
+            ExtraChannel::Reserved3,
+            ExtraChannel::Reserved4,
+            ExtraChannel::Reserved5,
+            ExtraChannel::Reserved6,
+            ExtraChannel::Reserved7,
+        ];
+
+        for variant in &variants {
+            let mapped = JxlExtraChannelType::from_jxl(variant);
+            // Just verify it doesn't panic and returns something sensible
+            match variant {
+                ExtraChannel::Alpha => assert_eq!(mapped, JxlExtraChannelType::Alpha),
+                ExtraChannel::Depth => assert_eq!(mapped, JxlExtraChannelType::Depth),
+                ExtraChannel::SpotColor => assert_eq!(mapped, JxlExtraChannelType::SpotColor),
+                ExtraChannel::SelectionMask => {
+                    assert_eq!(mapped, JxlExtraChannelType::SelectionMask)
+                }
+                ExtraChannel::Black => assert_eq!(mapped, JxlExtraChannelType::Black),
+                ExtraChannel::CFA => assert_eq!(mapped, JxlExtraChannelType::Cfa),
+                ExtraChannel::Thermal => assert_eq!(mapped, JxlExtraChannelType::Thermal),
+                ExtraChannel::Optional => assert_eq!(mapped, JxlExtraChannelType::Optional),
+                _ => {
+                    // Reserved and Unknown map to Unknown(n)
+                    assert!(
+                        matches!(mapped, JxlExtraChannelType::Unknown(_)),
+                        "expected Unknown for {variant:?}, got {mapped:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn preview_detected_when_present() {
+        let data = read_jxl_test_file("with_preview.jxl");
+        let info = probe(&data).unwrap();
+
+        let (pw, ph) = info
+            .preview_size
+            .expect("expected preview_size for with_preview.jxl");
+        assert!(pw > 0 && ph > 0, "preview dimensions should be positive");
+    }
+
+    #[test]
+    fn no_preview_for_regular_image() {
+        let data = read_jxl_test_file("basic.jxl");
+        let info = probe(&data).unwrap();
+
+        assert!(
+            info.preview_size.is_none(),
+            "basic.jxl should not have a preview"
+        );
+    }
+
+    #[test]
+    fn extra_channels_survive_full_decode() {
+        // Verify extra_channels are also populated after full decode, not just probe
+        let data = read_jxl_test_file("3x3a_srgb_lossless.jxl");
+        let output = decode(&data, None, &[]).unwrap();
+
+        assert_eq!(output.info.extra_channels.len(), 1);
+        assert_eq!(
+            output.info.extra_channels[0].channel_type,
+            JxlExtraChannelType::Alpha
+        );
+    }
+
+    #[test]
+    fn preview_size_survives_full_decode() {
+        let data = read_jxl_test_file("with_preview.jxl");
+        let output = decode(&data, None, &[]).unwrap();
+
+        let (pw, ph) = output
+            .info
+            .preview_size
+            .expect("preview_size should be set after full decode");
+        assert!(pw > 0 && ph > 0);
     }
 }
