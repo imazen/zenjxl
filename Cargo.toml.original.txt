@@ -21,10 +21,9 @@ zenpixels = { version = "0.1", path = "../zenpixels/zenpixels", default-features
 linear-srgb = "0.6.3"
 jxl = { path = "../zenjxl-decoder/jxl", package = "zenjxl-decoder", optional = true }
 jxl-encoder = { path = "../jxl-encoder-rs/jxl_encoder", optional = true, default-features = false, features = ["std"] }
-zennode = { path = "../zennode/zennode", default-features = false, features = ["derive"], optional = true }
 
 [dev-dependencies]
-archmage = { version = "0.9.9", features = ["std"] }
+archmage = { version = "0.9.12", features = ["std"] }
 
 [features]
 default = ["encode", "decode"]
@@ -33,5 +32,3 @@ encode = ["dep:jxl-encoder"]
 butteraugli-loop = ["encode", "jxl-encoder/butteraugli-loop"]
 # Enable zencodec trait integration
 zencodec = []
-# Enable zennode node definitions
-zennode = ["dep:zennode", "encode"]
