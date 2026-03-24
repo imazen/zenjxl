@@ -7,7 +7,7 @@
 //! | zencodec | zenjxl adapter |
 //! |----------------|----------------|
 //! | `EncoderConfig` | [`JxlEncoderConfig`] |
-//! | `EncodeJob<'a>` | [`JxlEncodeJob`] |
+//! | `EncodeJob` | [`JxlEncodeJob`] |
 //! | `Encoder` | [`JxlEncoder`] |
 //! | `FullFrameEncoder` | [`JxlFullFrameEncoder`] |
 //! | `DecoderConfig` | [`JxlDecoderConfig`] |
@@ -328,7 +328,7 @@ mod encoding {
 
     impl zencodec::encode::EncoderConfig for JxlEncoderConfig {
         type Error = At<JxlError>;
-        type Job<'a> = JxlEncodeJob<'a>;
+        type Job = JxlEncodeJob;
 
         fn format() -> ImageFormat {
             ImageFormat::Jxl
@@ -381,7 +381,7 @@ mod encoding {
             Some(self.lossless)
         }
 
-        fn job(&self) -> JxlEncodeJob<'_> {
+        fn job(self) -> JxlEncodeJob {
             JxlEncodeJob {
                 config: self,
                 stop: None,
@@ -396,21 +396,21 @@ mod encoding {
     // ── JxlEncodeJob ────────────────────────────────────────────────────
 
     /// Per-operation encode job for JPEG XL.
-    pub struct JxlEncodeJob<'a> {
-        config: &'a JxlEncoderConfig,
-        stop: Option<&'a dyn Stop>,
+    pub struct JxlEncodeJob {
+        config: JxlEncoderConfig,
+        stop: Option<zencodec::StopToken>,
         limits: Option<ResourceLimits>,
         metadata: Option<Metadata>,
         policy: EncodePolicy,
         loop_count: Option<u32>,
     }
 
-    impl<'a> zencodec::encode::EncodeJob<'a> for JxlEncodeJob<'a> {
+    impl zencodec::encode::EncodeJob for JxlEncodeJob {
         type Error = At<JxlError>;
-        type Enc = JxlEncoder<'a>;
+        type Enc = JxlEncoder;
         type FullFrameEnc = JxlFullFrameEncoder;
 
-        fn with_stop(mut self, stop: &'a dyn Stop) -> Self {
+        fn with_stop(mut self, stop: zencodec::StopToken) -> Self {
             self.stop = Some(stop);
             self
         }
@@ -435,7 +435,7 @@ mod encoding {
             self
         }
 
-        fn encoder(self) -> Result<JxlEncoder<'a>, At<JxlError>> {
+        fn encoder(self) -> Result<JxlEncoder, At<JxlError>> {
             let mode = apply_threads(&self.config.mode, &self.limits);
             Ok(JxlEncoder {
                 mode,
@@ -483,17 +483,17 @@ mod encoding {
     /// and incremental row-level encoding via
     /// [`push_rows()`](zencodec::encode::Encoder::push_rows) +
     /// [`finish()`](zencodec::encode::Encoder::finish).
-    pub struct JxlEncoder<'a> {
+    pub struct JxlEncoder {
         mode: JxlEncMode,
         metadata: Option<Metadata>,
         policy: EncodePolicy,
         limits: Option<ResourceLimits>,
-        stop: Option<&'a dyn Stop>,
+        stop: Option<zencodec::StopToken>,
         stream: StreamState,
         gain_map: Option<Arc<GainMapData>>,
     }
 
-    impl JxlEncoder<'_> {
+    impl JxlEncoder {
         /// Map a PixelDescriptor to the jxl-encoder PixelLayout.
         fn descriptor_to_layout(desc: PixelDescriptor) -> Result<PixelLayout, At<JxlError>> {
             let layout = desc.layout();
@@ -522,7 +522,7 @@ mod encoding {
         }
     }
 
-    impl JxlEncoder<'_> {
+    impl JxlEncoder {
         /// Build jxl-encoder ImageMetadata from the zencodec Metadata,
         /// respecting the EncodePolicy for what to embed.
         fn build_jxl_metadata(&self) -> Option<jxl_encoder::ImageMetadata<'_>> {
@@ -582,7 +582,7 @@ mod encoding {
                 } else {
                     req
                 };
-                let req = if let Some(stop) = self.stop {
+                let req = if let Some(ref stop) = self.stop {
                     req.with_stop(stop)
                 } else {
                     req
@@ -609,7 +609,7 @@ mod encoding {
         }
     }
 
-    impl zencodec::encode::Encoder for JxlEncoder<'_> {
+    impl zencodec::encode::Encoder for JxlEncoder {
         type Error = At<JxlError>;
 
         fn reject(op: UnsupportedOperation) -> At<JxlError> {
@@ -1083,6 +1083,7 @@ mod decoding {
                 limits: None,
                 _stop: None,
                 start_frame_index: 0,
+                _marker: core::marker::PhantomData,
             }
         }
     }
@@ -1092,8 +1093,9 @@ mod decoding {
     /// Per-operation decode job for JPEG XL.
     pub struct JxlDecodeJob<'a> {
         limits: Option<ResourceLimits>,
-        _stop: Option<&'a dyn Stop>,
+        _stop: Option<zencodec::StopToken>,
         start_frame_index: u32,
+        _marker: core::marker::PhantomData<&'a ()>,
     }
 
     impl JxlDecodeJob<'_> {
@@ -1172,7 +1174,7 @@ mod decoding {
         type StreamDec = Unsupported<At<JxlError>>;
         type FullFrameDec = JxlFullFrameDecoder;
 
-        fn with_stop(mut self, stop: &'a dyn Stop) -> Self {
+        fn with_stop(mut self, stop: zencodec::StopToken) -> Self {
             self._stop = Some(stop);
             self
         }
