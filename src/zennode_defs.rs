@@ -15,32 +15,54 @@ use zennode::*;
 ///
 /// Exposes all key JXL encoding parameters with RIAPI querystring support.
 /// Convert to [`JxlEncoderConfig`](crate::JxlEncoderConfig) via
-/// [`to_encoder_config()`](EncodeJxl::to_encoder_config) (requires the
+/// [`to_encoder_config()`](EncodeJxl::to_encoder_config) or overlay onto
+/// an existing config with [`apply()`](EncodeJxl::apply) (both require the
 /// `zencodec` and `encode` features).
 ///
-/// **RIAPI**: `?jxl.d=1.0&jxl.e=7` or `?jxl.q=85&jxl.e=7`
+/// **RIAPI**: `?jxl.d=1.0&jxl.effort=7` or `?jxl.q=85&jxl.effort=7`
 ///
-/// When `quality` is >= 0, it takes priority over `distance` and goes through
-/// the calibrated quality-to-distance mapping. When `quality` is negative
-/// (the default -1), `distance` is used directly.
+/// Quality has three tiers of specificity:
+/// - `quality` (generic, 0-100): uniform quality across all codecs
+/// - `jxl_quality` / `jxl.q` (codec-specific, 0-100): JXL-native quality
+/// - `distance` / `jxl.d` (raw, 0-25): direct butteraugli distance
+///
+/// When multiple are set, the most specific wins (distance > jxl_quality > quality).
+/// When `lossless` is true, all quality/distance params are ignored.
 #[derive(Node, Clone, Debug)]
 #[node(id = "zenjxl.encode", group = Encode, role = Encode)]
-#[node(tags("jxl", "jpeg-xl", "encode", "lossy", "lossless", "hdr"))]
+#[node(tags("jxl", "jpeg-xl", "encode", "lossy", "lossless", "hdr", "codec"))]
 pub struct EncodeJxl {
+    /// Generic quality 0-100 (mapped via `with_generic_quality` at execution time).
+    ///
+    /// When set (>= 0), this value is passed through zencodec's
+    /// `with_generic_quality()` which maps it to the codec's native
+    /// quality scale. Use this for uniform quality across all codecs.
+    /// Overridden by `jxl_quality` or `distance` when those are also set.
+    #[param(range(0..=100), default = -1, step = 1)]
+    #[param(unit = "", section = "Quality", label = "Quality")]
+    #[kv("quality")]
+    pub quality: i32,
+
+    /// Codec-specific JXL perceptual quality (0 = lowest, 100 = highest).
+    ///
+    /// Mapped internally to butteraugli distance via the calibrated
+    /// quality-to-distance curve. Higher values produce larger files
+    /// with better visual quality. When set (>= 0), takes precedence
+    /// over the generic `quality` field. Ignored when `lossless` is true.
+    #[param(range(0.0..=100.0), default = -1.0, identity = 75.0, step = 1.0)]
+    #[param(unit = "", section = "Quality", label = "JXL Quality")]
+    #[kv("jxl.quality", "jxl.q")]
+    pub jxl_quality: f32,
+
     /// Butteraugli distance (0.0 = mathematically lossless, 1.0 = visually lossless).
-    #[param(range(0.0..=25.0), default = 1.0, step = 0.1)]
+    ///
+    /// Direct control over the perceptual distortion target.
+    /// Lower values produce larger files with better quality.
+    /// Ignored when `lossless` is true.
+    #[param(range(0.0..=25.0), default = 1.0, identity = 1.0, step = 0.1)]
     #[param(unit = "butteraugli", section = "Quality")]
     #[kv("jxl.distance", "jxl.d")]
     pub distance: f32,
-
-    /// Calibrated quality on a 0-100 scale (like libjpeg-turbo).
-    ///
-    /// When >= 0, overrides `distance` and goes through the calibrated
-    /// quality-to-distance curve. Set to -1 to use `distance` directly.
-    #[param(range(-1.0..=100.0), default = -1.0, identity = -1.0, step = 1.0)]
-    #[param(section = "Quality", label = "Quality (calibrated)")]
-    #[kv("jxl.quality", "jxl.q")]
-    pub quality: f32,
 
     /// Enable lossless encoding (Modular mode, distance ignored).
     #[param(default = false)]
@@ -64,8 +86,9 @@ pub struct EncodeJxl {
 impl Default for EncodeJxl {
     fn default() -> Self {
         Self {
+            quality: -1,
+            jxl_quality: -1.0,
             distance: 1.0,
-            quality: -1.0,
             lossless: false,
             effort: 7,
             noise: false,
@@ -75,31 +98,51 @@ impl Default for EncodeJxl {
 
 #[cfg(all(feature = "zencodec", feature = "encode"))]
 impl EncodeJxl {
-    /// Convert this node into a [`JxlEncoderConfig`](crate::JxlEncoderConfig).
+    /// Apply this node's explicitly-set params on top of an existing config.
     ///
-    /// If `quality` >= 0, it takes priority and goes through the calibrated
-    /// quality-to-distance mapping via `with_generic_quality`. Otherwise,
-    /// `distance` is used directly via `with_distance`.
-    pub fn to_encoder_config(&self) -> crate::JxlEncoderConfig {
-        use zencodec::encode::EncoderConfig;
+    /// Fields at their default/sentinel value are skipped, so this acts as
+    /// an overlay — only params the user explicitly set take effect.
+    ///
+    /// Application order (most specific wins):
+    /// 1. `lossless` — switches to modular mode
+    /// 2. `quality` (generic) — calibrated mapping through `quality_to_distance`
+    /// 3. `jxl_quality` (codec-specific) — also through calibrated mapping
+    /// 4. `effort` — only applied if changed from default 7
+    /// 5. `noise` — only applied if true
+    pub fn apply(&self, mut config: crate::JxlEncoderConfig) -> crate::JxlEncoderConfig {
+        use zencodec::encode::EncoderConfig as _;
 
-        let mut config = crate::JxlEncoderConfig::new();
-
+        // Lossless first (changes internal mode)
         if self.lossless {
             config = config.with_lossless(true);
-        } else if self.quality >= 0.0 {
-            config = config.with_generic_quality(self.quality);
-        } else {
-            config = config.with_distance(self.distance);
         }
-
-        config = config.with_generic_effort(self.effort);
-
+        // Generic quality (calibrated mapping through quality_to_distance)
+        if self.quality >= 0 {
+            config = config.with_generic_quality(self.quality as f32);
+        }
+        // Codec-specific quality override (JXL native quality, also
+        // mapped through quality_to_distance via with_generic_quality)
+        if self.jxl_quality >= 0.0 {
+            config = config.with_generic_quality(self.jxl_quality);
+        }
+        // Effort (only apply if changed from default 7)
+        if self.effort != 7 {
+            config = config.with_generic_effort(self.effort.clamp(1, 10));
+        }
+        // Noise synthesis
         if self.noise {
             config = config.with_noise(true);
         }
-
         config
+    }
+
+    /// Build a config from scratch using only this node's params.
+    ///
+    /// If `quality` >= 0 or `jxl_quality` >= 0, it goes through the calibrated
+    /// quality-to-distance mapping via `with_generic_quality`. Otherwise,
+    /// `distance` is used directly via `with_distance`.
+    pub fn to_encoder_config(&self) -> crate::JxlEncoderConfig {
+        self.apply(crate::JxlEncoderConfig::new())
     }
 }
 
@@ -119,7 +162,7 @@ impl EncodeJxl {
 /// these parameters are exposed for future use and pipeline metadata.
 #[derive(Node, Clone, Debug)]
 #[node(id = "zenjxl.decode", group = Decode, role = Decode)]
-#[node(tags("jxl", "jpeg-xl", "decode"))]
+#[node(tags("jxl", "jpeg-xl", "decode", "codec"))]
 pub struct DecodeJxl {
     /// Whether to apply EXIF orientation during decoding.
     #[param(default = true)]
@@ -158,9 +201,22 @@ impl DecodeJxl {
     }
 }
 
+// ── Registration ────────────────────────────────────────────────────────────
+
+/// Register all JPEG XL zennode definitions with a registry.
+pub fn register(registry: &mut NodeRegistry) {
+    registry.register(&ENCODE_JXL_NODE);
+    registry.register(&DECODE_JXL_NODE);
+}
+
+/// All JPEG XL zennode definitions.
+pub static ALL: &[&dyn NodeDef] = &[&ENCODE_JXL_NODE, &DECODE_JXL_NODE];
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Encode tests ────────────────────────────────────────────────────
 
     #[test]
     fn encode_schema_basics() {
@@ -174,20 +230,28 @@ mod tests {
         assert!(schema.tags.contains(&"lossy"));
         assert!(schema.tags.contains(&"lossless"));
         assert!(schema.tags.contains(&"hdr"));
+        assert!(schema.tags.contains(&"codec"));
+    }
 
-        let param_names: alloc::vec::Vec<&str> = schema.params.iter().map(|p| p.name).collect();
-        assert!(param_names.contains(&"distance"));
-        assert!(param_names.contains(&"quality"));
-        assert!(param_names.contains(&"lossless"));
-        assert!(param_names.contains(&"effort"));
-        assert!(param_names.contains(&"noise"));
+    #[test]
+    fn encode_param_count_and_names() {
+        let schema = ENCODE_JXL_NODE.schema();
+        let names: alloc::vec::Vec<&str> = schema.params.iter().map(|p| p.name).collect();
+        assert!(names.contains(&"quality"));
+        assert!(names.contains(&"jxl_quality"));
+        assert!(names.contains(&"distance"));
+        assert!(names.contains(&"lossless"));
+        assert!(names.contains(&"effort"));
+        assert!(names.contains(&"noise"));
+        assert_eq!(names.len(), 6);
     }
 
     #[test]
     fn encode_defaults() {
         let node = ENCODE_JXL_NODE.create_default().unwrap();
+        assert_eq!(node.get_param("quality"), Some(ParamValue::I32(-1)));
+        assert_eq!(node.get_param("jxl_quality"), Some(ParamValue::F32(-1.0)));
         assert_eq!(node.get_param("distance"), Some(ParamValue::F32(1.0)));
-        assert_eq!(node.get_param("quality"), Some(ParamValue::F32(-1.0)));
         assert_eq!(node.get_param("lossless"), Some(ParamValue::Bool(false)));
         assert_eq!(node.get_param("effort"), Some(ParamValue::I32(7)));
         assert_eq!(node.get_param("noise"), Some(ParamValue::Bool(false)));
@@ -203,10 +267,28 @@ mod tests {
     }
 
     #[test]
-    fn encode_kv_quality() {
+    fn encode_kv_jxl_quality() {
         let mut kv = KvPairs::from_querystring("jxl.q=85");
         let node = ENCODE_JXL_NODE.from_kv(&mut kv).unwrap().unwrap();
-        assert_eq!(node.get_param("quality"), Some(ParamValue::F32(85.0)));
+        assert_eq!(node.get_param("jxl_quality"), Some(ParamValue::F32(85.0)));
+        assert_eq!(kv.unconsumed().count(), 0);
+    }
+
+    #[test]
+    fn encode_kv_generic_quality() {
+        let mut kv = KvPairs::from_querystring("quality=80");
+        let node = ENCODE_JXL_NODE.from_kv(&mut kv).unwrap().unwrap();
+        assert_eq!(node.get_param("quality"), Some(ParamValue::I32(80)));
+        // jxl_quality remains unset
+        assert_eq!(node.get_param("jxl_quality"), Some(ParamValue::F32(-1.0)));
+    }
+
+    #[test]
+    fn encode_kv_both_qualities() {
+        let mut kv = KvPairs::from_querystring("quality=80&jxl.quality=90");
+        let node = ENCODE_JXL_NODE.from_kv(&mut kv).unwrap().unwrap();
+        assert_eq!(node.get_param("quality"), Some(ParamValue::I32(80)));
+        assert_eq!(node.get_param("jxl_quality"), Some(ParamValue::F32(90.0)));
         assert_eq!(kv.unconsumed().count(), 0);
     }
 
@@ -229,12 +311,108 @@ mod tests {
     fn encode_downcast() {
         let node = ENCODE_JXL_NODE.create_default().unwrap();
         let enc = node.as_any().downcast_ref::<EncodeJxl>().unwrap();
+        assert_eq!(enc.quality, -1);
+        assert!((enc.jxl_quality - (-1.0)).abs() < f32::EPSILON);
         assert_eq!(enc.distance, 1.0);
-        assert_eq!(enc.quality, -1.0);
         assert!(!enc.lossless);
         assert_eq!(enc.effort, 7);
         assert!(!enc.noise);
     }
+
+    #[test]
+    fn encode_json_round_trip() {
+        let mut params = ParamMap::new();
+        params.insert("quality".into(), ParamValue::I32(80));
+        params.insert("jxl_quality".into(), ParamValue::F32(92.0));
+        params.insert("distance".into(), ParamValue::F32(0.3));
+        params.insert("lossless".into(), ParamValue::Bool(true));
+        params.insert("effort".into(), ParamValue::I32(5));
+        params.insert("noise".into(), ParamValue::Bool(true));
+
+        let node = ENCODE_JXL_NODE.create(&params).unwrap();
+        assert_eq!(node.get_param("quality"), Some(ParamValue::I32(80)));
+        assert_eq!(node.get_param("jxl_quality"), Some(ParamValue::F32(92.0)));
+        assert_eq!(node.get_param("distance"), Some(ParamValue::F32(0.3)));
+        assert_eq!(node.get_param("lossless"), Some(ParamValue::Bool(true)));
+        assert_eq!(node.get_param("effort"), Some(ParamValue::I32(5)));
+        assert_eq!(node.get_param("noise"), Some(ParamValue::Bool(true)));
+
+        // Round-trip
+        let exported = node.to_params();
+        let node2 = ENCODE_JXL_NODE.create(&exported).unwrap();
+        assert_eq!(node2.get_param("quality"), Some(ParamValue::I32(80)));
+        assert_eq!(node2.get_param("jxl_quality"), Some(ParamValue::F32(92.0)));
+        assert_eq!(node2.get_param("distance"), Some(ParamValue::F32(0.3)));
+        assert_eq!(node2.get_param("lossless"), Some(ParamValue::Bool(true)));
+        assert_eq!(node2.get_param("effort"), Some(ParamValue::I32(5)));
+        assert_eq!(node2.get_param("noise"), Some(ParamValue::Bool(true)));
+    }
+
+    // ── Encode + zencodec tests ─────────────────────────────────────────
+
+    #[cfg(all(feature = "zencodec", feature = "encode"))]
+    #[test]
+    fn to_encoder_config_defaults() {
+        let node = EncodeJxl::default();
+        let _config = node.to_encoder_config();
+    }
+
+    #[cfg(all(feature = "zencodec", feature = "encode"))]
+    #[test]
+    fn apply_generic_quality() {
+        let mut node = EncodeJxl::default();
+        node.quality = 80;
+        let config = node.to_encoder_config();
+        let q = zencodec::encode::EncoderConfig::generic_quality(&config);
+        assert!(q.is_some());
+    }
+
+    #[cfg(all(feature = "zencodec", feature = "encode"))]
+    #[test]
+    fn apply_codec_specific_overrides() {
+        let mut node = EncodeJxl::default();
+        node.quality = 50;
+        node.jxl_quality = 90.0;
+        let config = node.to_encoder_config();
+        // jxl_quality applied after quality, so 90.0 is effective
+        let q = zencodec::encode::EncoderConfig::generic_quality(&config);
+        assert!(q.is_some());
+    }
+
+    #[cfg(all(feature = "zencodec", feature = "encode"))]
+    #[test]
+    fn apply_preserves_existing() {
+        use zencodec::encode::EncoderConfig as _;
+        let base = crate::JxlEncoderConfig::new().with_generic_effort(5);
+        let node = EncodeJxl::default();
+        let config = node.apply(base);
+        // Effort should still be 5 (defaults don't override)
+        let e = zencodec::encode::EncoderConfig::generic_effort(&config);
+        assert_eq!(e, Some(5));
+    }
+
+    #[cfg(all(feature = "zencodec", feature = "encode"))]
+    #[test]
+    fn apply_lossless() {
+        let mut node = EncodeJxl::default();
+        node.lossless = true;
+        let config = node.to_encoder_config();
+        let lossless = zencodec::encode::EncoderConfig::is_lossless(&config);
+        assert_eq!(lossless, Some(true));
+    }
+
+    #[cfg(all(feature = "zencodec", feature = "encode"))]
+    #[test]
+    fn apply_effort_and_quality() {
+        let mut node = EncodeJxl::default();
+        node.effort = 3;
+        node.quality = 75;
+        let config = node.to_encoder_config();
+        let e = zencodec::encode::EncoderConfig::generic_effort(&config);
+        assert_eq!(e, Some(3));
+    }
+
+    // ── Decode tests ────────────────────────────────────────────────────
 
     #[test]
     fn decode_schema_basics() {
@@ -245,6 +423,7 @@ mod tests {
         assert!(schema.tags.contains(&"jxl"));
         assert!(schema.tags.contains(&"jpeg-xl"));
         assert!(schema.tags.contains(&"decode"));
+        assert!(schema.tags.contains(&"codec"));
 
         let param_names: alloc::vec::Vec<&str> = schema.params.iter().map(|p| p.name).collect();
         assert!(param_names.contains(&"adjust_orientation"));
@@ -299,5 +478,30 @@ mod tests {
         let dec = node.as_any().downcast_ref::<DecodeJxl>().unwrap();
         assert!(dec.adjust_orientation);
         assert_eq!(dec.intensity_target, 0.0);
+    }
+
+    // ── Registry integration ────────────────────────────────────────────
+
+    #[test]
+    fn registry_integration() {
+        let mut registry = NodeRegistry::new();
+        register(&mut registry);
+        assert!(registry.get("zenjxl.encode").is_some());
+        assert!(registry.get("zenjxl.decode").is_some());
+
+        // jxl.quality triggers codec-specific path
+        let result = registry.from_querystring("jxl.quality=80&jxl.effort=5");
+        assert_eq!(result.instances.len(), 1);
+        assert_eq!(result.instances[0].schema().id, "zenjxl.encode");
+
+        // generic quality also triggers the encode node
+        let result2 = registry.from_querystring("quality=80");
+        assert_eq!(result2.instances.len(), 1);
+        assert_eq!(result2.instances[0].schema().id, "zenjxl.encode");
+
+        // jxl.orient triggers the decode node
+        let result3 = registry.from_querystring("jxl.orient=false");
+        assert_eq!(result3.instances.len(), 1);
+        assert_eq!(result3.instances[0].schema().id, "zenjxl.decode");
     }
 }
