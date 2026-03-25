@@ -122,6 +122,29 @@ pub struct JxlInfo {
     /// modular pathway, which is the lossless encoding mode in JPEG XL.
     /// This is exposed as `!basic_info.uses_original_profile` from jxl-rs.
     pub xyb_encoded: bool,
+    /// Peak display luminance the content was mastered for, in nits (cd/m²).
+    ///
+    /// Default is 255.0 (SDR). Higher values (e.g. 4000, 10000) indicate HDR content.
+    /// From the JXL codestream `ToneMapping.intensity_target`.
+    pub intensity_target: f32,
+    /// Minimum display luminance in nits. Default is 0.0.
+    ///
+    /// From the JXL codestream `ToneMapping.min_nits`.
+    pub min_nits: f32,
+    /// Whether `linear_below` is relative to `intensity_target` (true) or absolute nits (false).
+    ///
+    /// From the JXL codestream `ToneMapping.relative_to_max_display`.
+    pub relative_to_max_display: bool,
+    /// Below this value, the transfer function is linear rather than the signaled TF.
+    ///
+    /// Interpretation depends on `relative_to_max_display`. Default is 0.0.
+    /// From the JXL codestream `ToneMapping.linear_below`.
+    pub linear_below: f32,
+    /// Intrinsic display size `(width, height)`, if different from coded dimensions.
+    ///
+    /// When present, the image should be rendered at this size rather than
+    /// `(width, height)`. `None` when the coded size is the intended display size.
+    pub intrinsic_size: Option<(u32, u32)>,
 }
 
 impl zencodec::SourceEncodingDetails for JxlInfo {
@@ -529,6 +552,8 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, JxlError> {
 
     let extra_channels = convert_extra_channels(&info.extra_channels);
     let preview_size = info.preview_size.map(|(w, h)| (w as u32, h as u32));
+    let intrinsic_size = info.intrinsic_size.map(|(w, h)| (w as u32, h as u32));
+    let tm = &info.tone_mapping;
 
     Ok(JxlInfo {
         width: width as u32,
@@ -547,6 +572,11 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, JxlError> {
         extra_channels,
         preview_size,
         xyb_encoded,
+        intensity_target: tm.intensity_target,
+        min_nits: tm.min_nits,
+        relative_to_max_display: tm.relative_to_max_display,
+        linear_below: tm.linear_below,
+        intrinsic_size,
     })
 }
 
@@ -618,6 +648,11 @@ pub fn decode_with_parallel(
     let xyb_encoded = !info.uses_original_profile;
     let extra_channels = convert_extra_channels(&info.extra_channels);
     let preview_size = info.preview_size.map(|(w, h)| (w as u32, h as u32));
+    let intrinsic_size = info.intrinsic_size.map(|(w, h)| (w as u32, h as u32));
+    let intensity_target = info.tone_mapping.intensity_target;
+    let min_nits = info.tone_mapping.min_nits;
+    let relative_to_max_display = info.tone_mapping.relative_to_max_display;
+    let linear_below = info.tone_mapping.linear_below;
 
     // Choose output format based on native properties and caller preferences
     let chosen = choose_pixel_format(jxl_bit_depth, has_alpha, is_gray, num_extra, preferred);
@@ -698,6 +733,11 @@ pub fn decode_with_parallel(
             extra_channels,
             preview_size,
             xyb_encoded,
+            intensity_target,
+            min_nits,
+            relative_to_max_display,
+            linear_below,
+            intrinsic_size,
         },
         gain_map,
     })

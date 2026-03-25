@@ -1417,6 +1417,11 @@ mod decoding {
             let xyb_encoded = !basic_info.uses_original_profile;
             let extra_channels = crate::decode::convert_extra_channels(&basic_info.extra_channels);
             let preview_size = basic_info.preview_size.map(|(w, h)| (w as u32, h as u32));
+            let intrinsic_size = basic_info.intrinsic_size.map(|(w, h)| (w as u32, h as u32));
+            let intensity_target = basic_info.tone_mapping.intensity_target;
+            let min_nits = basic_info.tone_mapping.min_nits;
+            let relative_to_max_display = basic_info.tone_mapping.relative_to_max_display;
+            let linear_below = basic_info.tone_mapping.linear_below;
 
             let (icc_profile, cicp) = extract_color_info(decoder.embedded_color_profile());
 
@@ -1529,6 +1534,11 @@ mod decoding {
                 extra_channels,
                 preview_size,
                 xyb_encoded,
+                intensity_target,
+                min_nits,
+                relative_to_max_display,
+                linear_below,
+                intrinsic_size,
             };
             let image_info = Arc::new(JxlDecodeJob::apply_policy(
                 JxlDecodeJob::jxl_info_to_image_info(&jxl_info),
