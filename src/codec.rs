@@ -9,11 +9,11 @@
 //! | `EncoderConfig` | [`JxlEncoderConfig`] |
 //! | `EncodeJob` | [`JxlEncodeJob`] |
 //! | `Encoder` | [`JxlEncoder`] |
-//! | `FullFrameEncoder` | [`JxlFullFrameEncoder`] |
+//! | `AnimationFrameEncoder` | [`JxlAnimationFrameEncoder`] |
 //! | `DecoderConfig` | [`JxlDecoderConfig`] |
 //! | `DecodeJob<'a>` | [`JxlDecodeJob`] |
 //! | `Decode` | [`JxlDecoder`] |
-//! | `FullFrameDecoder` | [`JxlFullFrameDecoder`] |
+//! | `AnimationFrameDecoder` | [`JxlAnimationFrameDecoder`] |
 
 use alloc::sync::Arc;
 use zencodec::ImageFormat;
@@ -408,7 +408,7 @@ mod encoding {
     impl zencodec::encode::EncodeJob for JxlEncodeJob {
         type Error = At<JxlError>;
         type Enc = JxlEncoder;
-        type FullFrameEnc = JxlFullFrameEncoder;
+        type AnimationFrameEnc = JxlAnimationFrameEncoder;
 
         fn with_stop(mut self, stop: zencodec::StopToken) -> Self {
             self.stop = Some(stop);
@@ -448,9 +448,9 @@ mod encoding {
             })
         }
 
-        fn full_frame_encoder(self) -> Result<JxlFullFrameEncoder, At<JxlError>> {
+        fn animation_frame_encoder(self) -> Result<JxlAnimationFrameEncoder, At<JxlError>> {
             let mode = apply_threads(&self.config.mode, &self.limits);
-            Ok(JxlFullFrameEncoder::from_job(
+            Ok(JxlAnimationFrameEncoder::from_job(
                 mode,
                 self.metadata.as_ref(),
                 &self.policy,
@@ -749,7 +749,7 @@ mod encoding {
         }
     }
 
-    // ── JxlFullFrameEncoder ──────────────────────────────────────────────
+    // ── JxlAnimationFrameEncoder ──────────────────────────────────────────────
 
     /// Owned metadata for animation encoding (must be `'static` per trait bounds).
     struct OwnedAnimMeta {
@@ -770,7 +770,7 @@ mod encoding {
     /// ICC profiles are embedded in the JXL codestream image header, not
     /// in container boxes, so they cannot be wrapped via `wrap_in_container`.
     /// Single-frame encoding supports ICC via `EncodeRequest::with_metadata`.
-    pub struct JxlFullFrameEncoder {
+    pub struct JxlAnimationFrameEncoder {
         mode: JxlEncMode,
         anim_meta: Option<OwnedAnimMeta>,
         limits: Option<ResourceLimits>,
@@ -787,7 +787,7 @@ mod encoding {
         gain_map: Option<Arc<GainMapData>>,
     }
 
-    impl JxlFullFrameEncoder {
+    impl JxlAnimationFrameEncoder {
         /// Create from job state, copying metadata we need for container wrapping.
         fn from_job(
             mode: JxlEncMode,
@@ -862,7 +862,7 @@ mod encoding {
         }
     }
 
-    impl zencodec::encode::FullFrameEncoder for JxlFullFrameEncoder {
+    impl zencodec::encode::AnimationFrameEncoder for JxlAnimationFrameEncoder {
         type Error = At<JxlError>;
 
         fn reject(op: UnsupportedOperation) -> At<JxlError> {
@@ -983,7 +983,7 @@ mod decoding {
     };
     use zencodec::Unsupported;
     use zencodec::decode::{DecodeCapabilities, DecodeOutput, OutputInfo, SinkError};
-    use zencodec::{FullFrame, OwnedFullFrame};
+    use zencodec::{AnimationFrame, OwnedAnimationFrame};
     use zencodec::{ImageInfo, ResourceLimits, UnsupportedOperation};
     use zenpixels::Cicp;
 
@@ -1172,7 +1172,7 @@ mod decoding {
         type Error = At<JxlError>;
         type Dec = JxlDecoder<'a>;
         type StreamDec = Unsupported<At<JxlError>>;
-        type FullFrameDec = JxlFullFrameDecoder;
+        type AnimationFrameDec = JxlAnimationFrameDecoder;
 
         fn with_stop(mut self, stop: zencodec::StopToken) -> Self {
             self._stop = Some(stop);
@@ -1237,15 +1237,15 @@ mod decoding {
             })
         }
 
-        fn full_frame_decoder(
+        fn animation_frame_decoder(
             self,
             data: Cow<'a, [u8]>,
             preferred: &[PixelDescriptor],
-        ) -> Result<JxlFullFrameDecoder, At<JxlError>> {
+        ) -> Result<JxlAnimationFrameDecoder, At<JxlError>> {
             // Eagerly probe to populate image_info so info() never panics.
             let info = probe(&data).map_err(at)?;
             let image_info = Arc::new(Self::jxl_info_to_image_info(&info));
-            Ok(JxlFullFrameDecoder {
+            Ok(JxlAnimationFrameDecoder {
                 data: data.into_owned(),
                 limits: self.limits,
                 preferred: preferred.to_vec(),
@@ -1290,14 +1290,14 @@ mod decoding {
         }
     }
 
-    // ── JxlFullFrameDecoder ──────────────────────────────────────────────
+    // ── JxlAnimationFrameDecoder ──────────────────────────────────────────────
 
     /// Animation JPEG XL decoder (fully composited frames).
     ///
     /// Decodes all frames eagerly on first call to `render_next_frame()` — the
     /// jxl-rs decoder handles blending/disposal internally, producing
     /// fully composited frames.
-    pub struct JxlFullFrameDecoder {
+    pub struct JxlAnimationFrameDecoder {
         data: Vec<u8>,
         limits: Option<ResourceLimits>,
         preferred: Vec<PixelDescriptor>,
@@ -1306,17 +1306,17 @@ mod decoding {
         /// Image info, set after decoding.
         image_info: Option<Arc<ImageInfo>>,
         /// Current frame for borrowed access via `render_next_frame`.
-        current: Option<OwnedFullFrame>,
+        current: Option<OwnedAnimationFrame>,
         /// Number of displayed frames to skip from the front.
         start_frame_index: u32,
     }
 
     struct DecodedFrames {
-        frames: VecDeque<OwnedFullFrame>,
+        frames: VecDeque<OwnedAnimationFrame>,
         loop_count: Option<u32>,
     }
 
-    impl JxlFullFrameDecoder {
+    impl JxlAnimationFrameDecoder {
         /// Decode all frames up front.
         fn decode_all_frames(&mut self) -> Result<(), At<JxlError>> {
             let mut options = JxlDecoderOptions::default();
@@ -1453,7 +1453,11 @@ mod decoding {
                         crate::decode::clamp_f32_buf(&mut buf);
                     }
                     let pixel_buf = build_pixel_data(&buf, width, height, &chosen);
-                    frames.push_back(OwnedFullFrame::new(pixel_buf, duration_ms, frame_index));
+                    frames.push_back(OwnedAnimationFrame::new(
+                        pixel_buf,
+                        duration_ms,
+                        frame_index,
+                    ));
                 }
 
                 frame_index += 1;
@@ -1471,7 +1475,7 @@ mod decoding {
         }
     }
 
-    impl zencodec::decode::FullFrameDecoder for JxlFullFrameDecoder {
+    impl zencodec::decode::AnimationFrameDecoder for JxlAnimationFrameDecoder {
         type Error = At<JxlError>;
 
         fn wrap_sink_error(err: SinkError) -> At<JxlError> {
@@ -1495,14 +1499,14 @@ mod decoding {
         fn render_next_frame(
             &mut self,
             _stop: Option<&dyn Stop>,
-        ) -> Result<Option<FullFrame<'_>>, At<JxlError>> {
+        ) -> Result<Option<AnimationFrame<'_>>, At<JxlError>> {
             if self.frames.is_none() {
                 self.decode_all_frames()?;
             }
 
             let decoded = self.frames.as_mut().unwrap();
             self.current = decoded.frames.pop_front();
-            Ok(self.current.as_ref().map(|f| f.as_full_frame()))
+            Ok(self.current.as_ref().map(|f| f.as_animation_frame()))
         }
 
         fn render_next_frame_to_sink(
@@ -1516,7 +1520,7 @@ mod decoding {
         fn render_next_frame_owned(
             &mut self,
             _stop: Option<&dyn Stop>,
-        ) -> Result<Option<OwnedFullFrame>, At<JxlError>> {
+        ) -> Result<Option<OwnedAnimationFrame>, At<JxlError>> {
             if self.frames.is_none() {
                 self.decode_all_frames()?;
             }
@@ -1530,10 +1534,12 @@ mod decoding {
 // ── Re-exports ──────────────────────────────────────────────────────────────
 
 #[cfg(feature = "encode")]
-pub use encoding::{GainMapData, JxlEncodeJob, JxlEncoder, JxlEncoderConfig, JxlFullFrameEncoder};
+pub use encoding::{
+    GainMapData, JxlAnimationFrameEncoder, JxlEncodeJob, JxlEncoder, JxlEncoderConfig,
+};
 
 #[cfg(feature = "decode")]
-pub use decoding::{JxlDecodeJob, JxlDecoder, JxlDecoderConfig, JxlFullFrameDecoder};
+pub use decoding::{JxlAnimationFrameDecoder, JxlDecodeJob, JxlDecoder, JxlDecoderConfig};
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
@@ -1898,8 +1904,8 @@ mod tests {
     /// Verify info() works before render_next_frame is called.
     #[cfg(all(feature = "encode", feature = "decode"))]
     #[test]
-    fn full_frame_decoder_info_before_render() {
-        use zencodec::decode::{DecodeJob, DecoderConfig, FullFrameDecoder};
+    fn animation_frame_decoder_info_before_render() {
+        use zencodec::decode::{AnimationFrameDecoder, DecodeJob, DecoderConfig};
         use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
         // Encode a minimal image.
@@ -1923,7 +1929,7 @@ mod tests {
         let dec_config = JxlDecoderConfig::new();
         let ffd = dec_config
             .job()
-            .full_frame_decoder(Cow::Borrowed(output.data()), &[])
+            .animation_frame_decoder(Cow::Borrowed(output.data()), &[])
             .unwrap();
 
         // info() should return valid data without panicking.

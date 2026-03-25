@@ -41,10 +41,12 @@ pub use encode::{
 
 // zencodec trait types
 #[cfg(all(feature = "zencodec", feature = "encode"))]
-pub use codec::{GainMapData, JxlEncodeJob, JxlEncoder, JxlEncoderConfig, JxlFullFrameEncoder};
+pub use codec::{
+    GainMapData, JxlAnimationFrameEncoder, JxlEncodeJob, JxlEncoder, JxlEncoderConfig,
+};
 
 #[cfg(all(feature = "zencodec", feature = "decode"))]
-pub use codec::{JxlDecodeJob, JxlDecoder, JxlDecoderConfig, JxlFullFrameDecoder};
+pub use codec::{JxlAnimationFrameDecoder, JxlDecodeJob, JxlDecoder, JxlDecoderConfig};
 
 // Re-export encoder config types for callers.
 #[cfg(feature = "encode")]
