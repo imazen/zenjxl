@@ -241,8 +241,13 @@ mod encoding {
         /// The original generic quality value (0-100, libjpeg-turbo scale).
         /// Returned by `generic_quality()` for roundtrip fidelity.
         generic_quality: Option<f32>,
+        /// Explicit butteraugli distance override. When set, bypasses the
+        /// quality-to-distance calibration curve.
+        distance_override: Option<f32>,
         effort: Option<i32>,
         lossless: bool,
+        /// Enable noise synthesis in lossy mode.
+        noise: bool,
         /// Optional gain map to embed as a jhgm box in the container.
         gain_map: Option<Arc<GainMapData>>,
     }
@@ -254,8 +259,10 @@ mod encoding {
                 mode: JxlEncMode::Lossy(LossyConfig::new(1.0)),
                 calibrated_quality: None,
                 generic_quality: None,
+                distance_override: None,
                 effort: None,
                 lossless: false,
+                noise: false,
                 gain_map: None,
             }
         }
@@ -290,6 +297,34 @@ mod encoding {
             self.gain_map.as_deref()
         }
 
+        /// Set the butteraugli distance directly, bypassing calibration.
+        ///
+        /// This overrides any quality set via [`with_generic_quality`]. Valid
+        /// range is 0.0 (mathematically lossless) to 25.0 (very low quality).
+        /// A distance of 1.0 is visually lossless for most content.
+        pub fn with_distance(mut self, distance: f32) -> Self {
+            self.distance_override = Some(distance.clamp(0.0, 25.0));
+            // Clear quality-based state since distance takes priority
+            self.calibrated_quality = None;
+            self.generic_quality = None;
+            if !self.lossless {
+                self.rebuild_lossy();
+            }
+            self
+        }
+
+        /// Enable or disable noise synthesis for lossy encoding.
+        ///
+        /// When enabled, the encoder synthesizes film-grain-like noise to
+        /// mask compression artifacts at low bitrates.
+        pub fn with_noise(mut self, enable: bool) -> Self {
+            self.noise = enable;
+            if !self.lossless {
+                self.rebuild_lossy();
+            }
+            self
+        }
+
         /// Access the underlying lossy config for codec-specific tuning.
         pub fn lossy_config(&self) -> Option<&LossyConfig> {
             match &self.mode {
@@ -306,15 +341,18 @@ mod encoding {
             }
         }
 
-        /// Rebuild the lossy mode from current quality + effort state.
+        /// Rebuild the lossy mode from current quality/distance + effort + noise state.
         fn rebuild_lossy(&mut self) {
             let distance = self
-                .calibrated_quality
-                .map(quality_to_distance)
+                .distance_override
+                .or_else(|| self.calibrated_quality.map(quality_to_distance))
                 .unwrap_or(1.0);
             let mut cfg = LossyConfig::new(distance);
             if let Some(e) = self.effort {
                 cfg = cfg.with_effort(e.clamp(1, 10) as u8);
+            }
+            if self.noise {
+                cfg = cfg.with_noise(true);
             }
             self.mode = JxlEncMode::Lossy(cfg);
         }
@@ -1035,7 +1073,14 @@ mod decoding {
         .with_cheap_probe(true)
         .with_enforces_max_pixels(true)
         .with_enforces_max_memory(true)
-        .with_threads_supported_range(1, if cfg!(feature = "threads") { u16::MAX } else { 1 });
+        .with_threads_supported_range(
+            1,
+            if cfg!(feature = "threads") {
+                u16::MAX
+            } else {
+                1
+            },
+        );
 
     /// Supported pixel descriptors for decoding.
     ///
@@ -1859,7 +1904,11 @@ mod tests {
             caps.enforces_max_memory(),
             "enforces_max_memory should be reported"
         );
-        let expected_max = if cfg!(feature = "threads") { u16::MAX } else { 1 };
+        let expected_max = if cfg!(feature = "threads") {
+            u16::MAX
+        } else {
+            1
+        };
         assert_eq!(caps.threads_supported_range(), (1, expected_max));
         assert!(caps.exif());
         assert!(caps.xmp());
