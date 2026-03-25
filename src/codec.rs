@@ -420,8 +420,8 @@ mod encoding {
             self
         }
 
-        fn with_metadata(mut self, meta: &Metadata) -> Self {
-            self.metadata = Some(meta.clone());
+        fn with_metadata(mut self, meta: Metadata) -> Self {
+            self.metadata = Some(meta);
             self
         }
 
@@ -2106,7 +2106,7 @@ mod tests {
         let meta = zencodec::Metadata::none().with_exif(exif_data);
 
         let config = JxlEncoderConfig::new().with_lossless(true);
-        let encoder = config.job().with_metadata(&meta).encoder().unwrap();
+        let encoder = config.job().with_metadata(meta).encoder().unwrap();
         let output = encoder.encode(buf.as_slice().into()).unwrap();
 
         // Output must be container format (EXIF is stored in a container box).
@@ -2143,7 +2143,7 @@ mod tests {
         let meta = zencodec::Metadata::none().with_xmp(xmp_data);
 
         let config = JxlEncoderConfig::new().with_lossless(true);
-        let encoder = config.job().with_metadata(&meta).encoder().unwrap();
+        let encoder = config.job().with_metadata(meta).encoder().unwrap();
         let output = encoder.encode(buf.as_slice().into()).unwrap();
 
         assert!(
@@ -2179,7 +2179,7 @@ mod tests {
             .with_xmp(xmp_data);
 
         let config = JxlEncoderConfig::new().with_lossless(true);
-        let encoder = config.job().with_metadata(&meta).encoder().unwrap();
+        let encoder = config.job().with_metadata(meta).encoder().unwrap();
         let output = encoder.encode(buf.as_slice().into()).unwrap();
 
         let result = crate::decode::decode(output.data(), None, &[]).unwrap();
@@ -2270,7 +2270,7 @@ mod tests {
             .with_xmp(xmp_data);
 
         let config = JxlEncoderConfig::new().with_lossless(true);
-        let encoder = config.job().with_metadata(&meta).encoder().unwrap();
+        let encoder = config.job().with_metadata(meta).encoder().unwrap();
         let output = encoder.encode(buf.as_slice().into()).unwrap();
 
         // Decode via zencodec trait path.

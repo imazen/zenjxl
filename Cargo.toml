@@ -17,8 +17,8 @@ imgref = "1.12"
 bytemuck = { version = "1.25", default-features = false }
 enough = "0.4"
 zencodec = { path = "../zencodec" }
-zenpixels = { version = "0.1", path = "../zenpixels/zenpixels", default-features = false }
-linear-srgb = "0.6.3"
+zenpixels = { version = "0.2.0", path = "../zenpixels/zenpixels", default-features = false }
+linear-srgb = { path = "/home/lilith/work/zen/linear-srgb/." }
 jxl = { path = "../zenjxl-decoder/jxl", package = "zenjxl-decoder", optional = true }
 jxl-encoder = { path = "../jxl-encoder-rs/jxl_encoder", optional = true, default-features = false, features = ["std"] }
 
