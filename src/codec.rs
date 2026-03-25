@@ -15,12 +15,17 @@
 //! | `Decode` | [`JxlDecoder`] |
 //! | `AnimationFrameDecoder` | [`JxlAnimationFrameDecoder`] |
 
+#[cfg(any(feature = "encode", feature = "decode"))]
 use alloc::sync::Arc;
+#[cfg(any(feature = "encode", feature = "decode"))]
 use zencodec::ImageFormat;
+#[cfg(any(feature = "encode", feature = "decode"))]
 use zenpixels::PixelDescriptor;
 
+#[cfg(any(feature = "encode", feature = "decode"))]
 use crate::error::JxlError;
 
+#[cfg(any(feature = "encode", feature = "decode"))]
 type At<E> = whereat::At<E>;
 
 /// Convert quality on 0–100 scale to JXL butteraugli distance.
@@ -29,6 +34,7 @@ type At<E> = whereat::At<E>;
 /// - 90–100 → distance 0.0–1.0  (perceptually lossless zone)
 /// - 70–90  → distance 1.0–2.0  (high quality)
 /// - 0–70   → distance 2.0–9.0  (lower quality)
+#[cfg(feature = "encode")]
 fn quality_to_distance(quality: f32) -> f32 {
     let q = quality.clamp(0.0, 100.0);
     if q >= 100.0 {
@@ -47,6 +53,7 @@ fn quality_to_distance(quality: f32) -> f32 {
 /// Calibrated on CID22-512 corpus (209 images) to produce the same median
 /// SSIMULACRA2 as libjpeg-turbo at each quality level. The native quality
 /// is then mapped to Butteraugli distance by [`quality_to_distance`].
+#[cfg(feature = "encode")]
 fn calibrated_jxl_quality(generic_q: f32) -> f32 {
     let clamped = generic_q.clamp(0.0, 100.0);
     const TABLE: &[(f32, f32)] = &[
@@ -81,6 +88,7 @@ fn calibrated_jxl_quality(generic_q: f32) -> f32 {
 }
 
 /// Piecewise linear interpolation with clamping at table bounds.
+#[cfg(feature = "encode")]
 fn interp_quality(table: &[(f32, f32)], x: f32) -> f32 {
     if x <= table[0].0 {
         return table[0].1;
@@ -1562,9 +1570,13 @@ pub use decoding::{JxlAnimationFrameDecoder, JxlDecodeJob, JxlDecoder, JxlDecode
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(feature = "encode", feature = "decode"))]
     use super::*;
+    #[cfg(any(feature = "encode", feature = "decode"))]
     use alloc::borrow::Cow;
+    #[cfg(feature = "encode")]
     use alloc::vec;
+    #[cfg(any(feature = "encode", feature = "decode"))]
     use alloc::vec::Vec;
 
     #[cfg(feature = "encode")]
@@ -1772,6 +1784,7 @@ mod tests {
         assert!(caps.enforces_max_pixels());
         assert!(caps.enforces_max_memory());
         assert!(caps.stop());
+        assert!(caps.gain_map());
         assert_eq!(caps.threads_supported_range(), (1, u16::MAX));
     }
 
@@ -1794,7 +1807,10 @@ mod tests {
             caps.enforces_max_memory(),
             "enforces_max_memory should be reported"
         );
-        assert_eq!(caps.threads_supported_range(), (1, u16::MAX));
+        assert_eq!(caps.threads_supported_range(), (1, 2));
+        assert!(caps.exif());
+        assert!(caps.xmp());
+        assert!(caps.gain_map());
     }
 
     #[cfg(feature = "encode")]
@@ -1865,7 +1881,7 @@ mod tests {
 
         // Encode with single thread
         let config = JxlEncoderConfig::new().with_lossless(true);
-        let encoder = config.job().with_limits(limits.clone()).encoder().unwrap();
+        let encoder = config.job().with_limits(limits).encoder().unwrap();
         let output = encoder.encode(buf.as_slice().into()).unwrap();
         assert!(!output.data().is_empty());
 

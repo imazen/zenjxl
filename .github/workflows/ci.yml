@@ -24,18 +24,42 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest, windows-11-arm]
     steps:
       - uses: actions/checkout@v6
+      - name: Clone sibling path deps
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/imazen/zenjxl-decoder.git ../zenjxl-decoder
+          git clone --depth 1 https://github.com/imazen/jxl-encoder.git ../jxl-encoder-rs
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build (no default features)
+      # Feature permutations
+      - name: Check (no default features)
         run: cargo check --no-default-features
       - name: Test (no default features)
         run: cargo test --no-default-features
+      - name: Check (zencodec only)
+        run: cargo check --no-default-features --features zencodec
+      - name: Test (zencodec only)
+        run: cargo test --no-default-features --features zencodec
+      - name: Check (decode only)
+        run: cargo check --no-default-features --features decode
+      - name: Test (decode only)
+        run: cargo test --no-default-features --features decode
+      - name: Check (encode only)
+        run: cargo check --no-default-features --features encode
+      - name: Test (encode only)
+        run: cargo test --no-default-features --features encode
+      - name: Test (all features)
+        run: cargo test --all-features
 
   i686:
     name: Test (i686 cross)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Clone sibling path deps
+        run: |
+          git clone --depth 1 https://github.com/imazen/zenjxl-decoder.git ../zenjxl-decoder
+          git clone --depth 1 https://github.com/imazen/jxl-encoder.git ../jxl-encoder-rs
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: i686-unknown-linux-gnu
@@ -43,19 +67,25 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: cross-i686
-      - name: Test (i686)
+      - name: Test (i686, no default features)
         run: cross test --target i686-unknown-linux-gnu --no-default-features
+      - name: Test (i686, all features)
+        run: cross test --target i686-unknown-linux-gnu --all-features
 
   wasm:
     name: WASM
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Clone sibling path deps
+        run: |
+          git clone --depth 1 https://github.com/imazen/zenjxl-decoder.git ../zenjxl-decoder
+          git clone --depth 1 https://github.com/imazen/jxl-encoder.git ../jxl-encoder-rs
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip1
       - uses: Swatinem/rust-cache@v2
-      - name: Check WASM
+      - name: Check WASM (no default features)
         run: cargo check --target wasm32-wasip1 --no-default-features
 
   clippy:
@@ -63,12 +93,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Clone sibling path deps
+        run: |
+          git clone --depth 1 https://github.com/imazen/zenjxl-decoder.git ../zenjxl-decoder
+          git clone --depth 1 https://github.com/imazen/jxl-encoder.git ../jxl-encoder-rs
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Clippy
+      - name: Clippy (no default features)
         run: cargo clippy --no-default-features --all-targets -- -D warnings
+      - name: Clippy (zencodec only)
+        run: cargo clippy --no-default-features --features zencodec --all-targets -- -D warnings
+      - name: Clippy (decode only)
+        run: cargo clippy --no-default-features --features decode --all-targets -- -D warnings
+      - name: Clippy (encode only)
+        run: cargo clippy --no-default-features --features encode --all-targets -- -D warnings
+      - name: Clippy (all features)
+        run: cargo clippy --all-features --all-targets -- -D warnings
 
   fmt:
     name: Format
@@ -86,22 +128,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Clone sibling path deps
+        run: |
+          git clone --depth 1 https://github.com/imazen/zenjxl-decoder.git ../zenjxl-decoder
+          git clone --depth 1 https://github.com/imazen/jxl-encoder.git ../jxl-encoder-rs
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
-      - name: Check MSRV
+      - name: Check MSRV (no default features)
         run: cargo hack check --rust-version --no-default-features
+      - name: Check MSRV (all features)
+        run: cargo hack check --rust-version --all-features
 
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Clone sibling path deps
+        run: |
+          git clone --depth 1 https://github.com/imazen/zenjxl-decoder.git ../zenjxl-decoder
+          git clone --depth 1 https://github.com/imazen/jxl-encoder.git ../jxl-encoder-rs
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: Swatinem/rust-cache@v2
       - name: Generate coverage
-        run: cargo llvm-cov --no-default-features --lcov --output-path lcov.info
+        run: cargo llvm-cov --all-features --lcov --output-path lcov.info
       - name: Upload coverage
         uses: codecov/codecov-action@v5
         with:
