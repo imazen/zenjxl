@@ -28,84 +28,8 @@ use crate::error::JxlError;
 #[cfg(any(feature = "encode", feature = "decode"))]
 type At<E> = whereat::At<E>;
 
-/// Convert quality on 0–100 scale to JXL butteraugli distance.
-///
-/// Matches the jxl-encoder's own `percent_to_distance` piecewise mapping:
-/// - 90–100 → distance 0.0–1.0  (perceptually lossless zone)
-/// - 70–90  → distance 1.0–2.0  (high quality)
-/// - 0–70   → distance 2.0–9.0  (lower quality)
 #[cfg(feature = "encode")]
-fn quality_to_distance(quality: f32) -> f32 {
-    let q = quality.clamp(0.0, 100.0);
-    if q >= 100.0 {
-        0.0
-    } else if q >= 90.0 {
-        (100.0 - q) / 10.0
-    } else if q >= 70.0 {
-        1.0 + (90.0 - q) / 20.0
-    } else {
-        2.0 + (70.0 - q) / 10.0
-    }
-}
-
-/// Map generic quality (libjpeg-turbo scale) to JXL native quality.
-///
-/// Calibrated on CID22-512 corpus (209 images) to produce the same median
-/// SSIMULACRA2 as libjpeg-turbo at each quality level. The native quality
-/// is then mapped to Butteraugli distance by [`quality_to_distance`].
-#[cfg(feature = "encode")]
-fn calibrated_jxl_quality(generic_q: f32) -> f32 {
-    let clamped = generic_q.clamp(0.0, 100.0);
-    const TABLE: &[(f32, f32)] = &[
-        (5.0, 5.0),
-        (10.0, 5.0),
-        (15.0, 5.0),
-        (20.0, 5.0),
-        (25.0, 9.3),
-        (30.0, 22.7),
-        (35.0, 33.0),
-        (40.0, 38.8),
-        (45.0, 43.8),
-        (50.0, 48.5),
-        (55.0, 51.9),
-        (60.0, 55.1),
-        (65.0, 58.0),
-        (70.0, 61.3),
-        (72.0, 63.2),
-        (75.0, 65.5),
-        (78.0, 67.9),
-        (80.0, 69.1),
-        (82.0, 71.8),
-        (85.0, 76.1),
-        (87.0, 79.3),
-        (90.0, 84.2),
-        (92.0, 86.9),
-        (95.0, 91.2),
-        (97.0, 92.8),
-        (99.0, 93.8),
-    ];
-    interp_quality(TABLE, clamped)
-}
-
-/// Piecewise linear interpolation with clamping at table bounds.
-#[cfg(feature = "encode")]
-fn interp_quality(table: &[(f32, f32)], x: f32) -> f32 {
-    if x <= table[0].0 {
-        return table[0].1;
-    }
-    if x >= table[table.len() - 1].0 {
-        return table[table.len() - 1].1;
-    }
-    for i in 1..table.len() {
-        if x <= table[i].0 {
-            let (x0, y0) = table[i - 1];
-            let (x1, y1) = table[i];
-            let t = (x - x0) / (x1 - x0);
-            return y0 + t * (y1 - y0);
-        }
-    }
-    table[table.len() - 1].1
-}
+use jxl_encoder::{calibrated_jxl_quality, quality_to_distance};
 
 // ── Encoding ────────────────────────────────────────────────────────────────
 
@@ -660,7 +584,7 @@ mod encoding {
         /// output gets the jhgm box appended.
         fn maybe_attach_gain_map(&self, encoded: Vec<u8>) -> Vec<u8> {
             match &self.gain_map {
-                Some(gm) => crate::container::append_gain_map_box(&encoded, &gm.jhgm_payload),
+                Some(gm) => jxl_encoder::container::append_gain_map_box(&encoded, &gm.jhgm_payload),
                 None => encoded,
             }
         }
@@ -917,7 +841,7 @@ mod encoding {
             };
 
             match &self.gain_map {
-                Some(gm) => crate::container::append_gain_map_box(&wrapped, &gm.jhgm_payload),
+                Some(gm) => jxl_encoder::container::append_gain_map_box(&wrapped, &gm.jhgm_payload),
                 None => wrapped,
             }
         }
@@ -1432,8 +1356,7 @@ mod decoding {
         fn decode(self) -> Result<DecodeOutput, At<JxlError>> {
             let native_limits = JxlDecodeJob::to_native_limits(&self.limits);
             let parallel = policy_to_parallel(&self.limits);
-            let stop_arc: Option<Arc<dyn Stop>> =
-                self.stop.map(|s| Arc::new(s) as Arc<dyn Stop>);
+            let stop_arc: Option<Arc<dyn Stop>> = self.stop.map(|s| Arc::new(s) as Arc<dyn Stop>);
             let result = decode_with_options(
                 &self.data,
                 native_limits.as_ref(),
@@ -1780,20 +1703,6 @@ mod tests {
         assert_eq!(config.is_lossless(), Some(true));
         assert!(config.lossless_config().is_some());
         assert!(config.lossy_config().is_none());
-    }
-
-    #[cfg(feature = "encode")]
-    #[test]
-    fn quality_mapping_matches_jxl_encoder() {
-        // Verify our piecewise mapping matches jxl-encoder's percent_to_distance.
-        assert_eq!(quality_to_distance(100.0), 0.0);
-        assert_eq!(quality_to_distance(90.0), 1.0); // visually lossless
-        assert_eq!(quality_to_distance(80.0), 1.5);
-        assert_eq!(quality_to_distance(70.0), 2.0);
-        assert_eq!(quality_to_distance(50.0), 4.0);
-        assert_eq!(quality_to_distance(0.0), 9.0);
-        // Clamped above 100
-        assert_eq!(quality_to_distance(110.0), 0.0);
     }
 
     #[cfg(feature = "encode")]
@@ -2188,7 +2097,7 @@ mod tests {
 
         // The output should be in container format (not bare codestream).
         assert!(
-            crate::container::is_container(output.data()),
+            jxl_encoder::container::is_container(output.data()),
             "output with gain map should be in container format"
         );
 
@@ -2235,7 +2144,8 @@ mod tests {
 
         // Encode losslessly (produces bare codestream).
         let config = jxl_encoder::LosslessConfig::default();
-        let encoded = crate::encode::encode_rgb8_lossless(img.as_ref(), &config).unwrap();
+        let encoded =
+            jxl_encoder::convenience::encode_rgb8_lossless(img.as_ref(), &config).unwrap();
 
         // Build a gain map bundle and append it.
         let bundle = GainMapBundle {
@@ -2244,10 +2154,10 @@ mod tests {
             alt_icc_compressed: None,
             gain_map_codestream: vec![0xFF, 0x0A, 0x01, 0x02],
         };
-        let with_gm = crate::container::append_gain_map_box(&encoded, &bundle.serialize());
+        let with_gm = jxl_encoder::container::append_gain_map_box(&encoded, &bundle.serialize());
 
         // Should now be container format.
-        assert!(crate::container::is_container(&with_gm));
+        assert!(jxl_encoder::container::is_container(&with_gm));
 
         // Decode and verify gain map.
         let decode_result = crate::decode::decode(&with_gm, None, &[]).unwrap();
@@ -2278,7 +2188,7 @@ mod tests {
         let output = encoder.encode(buf.as_slice().into()).unwrap();
 
         assert!(
-            !crate::container::is_container(output.data()),
+            !jxl_encoder::container::is_container(output.data()),
             "output without gain map should be a bare codestream"
         );
     }
@@ -2325,7 +2235,7 @@ mod tests {
 
         // Output must be container format (EXIF is stored in a container box).
         assert!(
-            crate::container::is_container(output.data()),
+            jxl_encoder::container::is_container(output.data()),
             "output with EXIF should be in container format"
         );
 
@@ -2361,7 +2271,7 @@ mod tests {
         let output = encoder.encode(buf.as_slice().into()).unwrap();
 
         assert!(
-            crate::container::is_container(output.data()),
+            jxl_encoder::container::is_container(output.data()),
             "output with XMP should be in container format"
         );
 
@@ -2427,7 +2337,7 @@ mod tests {
         let output = encoder.encode(buf.as_slice().into()).unwrap();
 
         // Confirm it's a bare codestream.
-        assert!(!crate::container::is_container(output.data()));
+        assert!(!jxl_encoder::container::is_container(output.data()));
 
         let result = crate::decode::decode(output.data(), None, &[]).unwrap();
         assert!(

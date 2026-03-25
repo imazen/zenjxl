@@ -15,13 +15,12 @@ thiserror = { version = "2.0.18", default-features = false }
 whereat = "0.1.4"
 rgb = { version = "0.8.53", default-features = false, features = ["as-bytes"] }
 imgref = "1.12.0"
-bytemuck = { version = "1.25.0", default-features = false }
 enough = "0.4.2"
 zencodec = { version = "0.1.1" }
 zenpixels = { version = "0.2.0", default-features = false, features = ["rgb"] }
 linear-srgb = "0.6.5"
 jxl = { path = "../zenjxl-decoder/jxl", package = "zenjxl-decoder", optional = true }
-jxl-encoder = { path = "../jxl-encoder-rs/jxl_encoder", optional = true, default-features = false, features = ["std"] }
+jxl-encoder = { path = "../jxl-encoder-rs/jxl_encoder", optional = true, default-features = false, features = ["std", "convenience"] }
 zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 
 [dev-dependencies]

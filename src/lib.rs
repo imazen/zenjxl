@@ -15,12 +15,8 @@ extern crate alloc;
 
 #[cfg(feature = "zencodec")]
 mod codec;
-#[cfg(feature = "encode")]
-pub mod container;
 #[cfg(feature = "decode")]
 mod decode;
-#[cfg(feature = "encode")]
-mod encode;
 mod error;
 #[cfg(feature = "zennode")]
 pub mod zennode_defs;
@@ -36,7 +32,7 @@ pub use decode::{
 pub use jxl::api::GainMapBundle;
 
 #[cfg(feature = "encode")]
-pub use encode::{
+pub use jxl_encoder::convenience::{
     encode_bgra8, encode_bgra8_lossless, encode_gray8, encode_gray8_lossless, encode_rgb8,
     encode_rgb8_lossless, encode_rgba8, encode_rgba8_lossless,
 };
@@ -53,3 +49,9 @@ pub use codec::{JxlAnimationFrameDecoder, JxlDecodeJob, JxlDecoder, JxlDecoderCo
 // Re-export encoder config types for callers.
 #[cfg(feature = "encode")]
 pub use jxl_encoder::{LosslessConfig, LossyConfig, PixelLayout};
+
+// Re-export container utilities and quality mapping.
+#[cfg(feature = "encode")]
+pub use jxl_encoder::container::{append_gain_map_box, is_bare_codestream, is_container};
+#[cfg(feature = "encode")]
+pub use jxl_encoder::{calibrated_jxl_quality, quality_to_distance};
