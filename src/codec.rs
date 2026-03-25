@@ -169,6 +169,7 @@ mod encoding {
         .with_icc(true)
         .with_exif(true)
         .with_xmp(true)
+        .with_gain_map(true)
         .with_enforces_max_pixels(true)
         .with_enforces_max_memory(true)
         .with_stop(true)
@@ -1015,6 +1016,9 @@ mod decoding {
         .with_icc(true)
         .with_cicp(true)
         .with_hdr(true)
+        .with_exif(true)
+        .with_xmp(true)
+        .with_gain_map(true)
         .with_native_gray(true)
         .with_native_16bit(true)
         .with_native_f32(true)
@@ -1023,7 +1027,7 @@ mod decoding {
         .with_cheap_probe(true)
         .with_enforces_max_pixels(true)
         .with_enforces_max_memory(true)
-        .with_threads_supported_range(1, u16::MAX);
+        .with_threads_supported_range(1, 2);
 
     /// Supported pixel descriptors for decoding.
     ///
@@ -1081,7 +1085,6 @@ mod decoding {
         fn job(&self) -> JxlDecodeJob<'_> {
             JxlDecodeJob {
                 limits: None,
-                _stop: None,
                 start_frame_index: 0,
                 _marker: core::marker::PhantomData,
             }
@@ -1093,7 +1096,6 @@ mod decoding {
     /// Per-operation decode job for JPEG XL.
     pub struct JxlDecodeJob<'a> {
         limits: Option<ResourceLimits>,
-        _stop: Option<zencodec::StopToken>,
         start_frame_index: u32,
         _marker: core::marker::PhantomData<&'a ()>,
     }
@@ -1102,7 +1104,14 @@ mod decoding {
         /// Convert native JxlInfo into zencodec ImageInfo.
         fn jxl_info_to_image_info(info: &JxlInfo) -> ImageInfo {
             let mut image_info = ImageInfo::new(info.width, info.height, ImageFormat::Jxl)
-                .with_alpha(info.has_alpha);
+                .with_alpha(info.has_alpha)
+                .with_bit_depth(info.bit_depth.unwrap_or(8))
+                .with_channel_count(match (info.is_gray, info.has_alpha) {
+                    (true, false) => 1,
+                    (true, true) => 2,
+                    (false, false) => 3,
+                    (false, true) => 4,
+                });
 
             if info.has_animation {
                 image_info = image_info.with_sequence(zencodec::ImageSequence::Animation {
@@ -1174,8 +1183,9 @@ mod decoding {
         type StreamDec = Unsupported<At<JxlError>>;
         type AnimationFrameDec = JxlAnimationFrameDecoder;
 
-        fn with_stop(mut self, stop: zencodec::StopToken) -> Self {
-            self._stop = Some(stop);
+        fn with_stop(self, _stop: zencodec::StopToken) -> Self {
+            // The jxl-rs decoder does not support cooperative cancellation.
+            // Required by trait but intentionally a no-op.
             self
         }
 
@@ -1384,25 +1394,6 @@ mod decoding {
 
             let bytes_per_row = width * channels * bytes_per_sample;
 
-            let jxl_info = JxlInfo {
-                width: width as u32,
-                height: height as u32,
-                has_alpha,
-                has_animation,
-                bit_depth: Some(bit_depth_u8),
-                icc_profile,
-                orientation,
-                cicp,
-                is_gray,
-                // EXIF/XMP not yet available — container boxes may follow the codestream.
-                // They'll be extracted after all frames are decoded.
-                exif: None,
-                xmp: None,
-                extra_channels,
-                preview_size,
-            };
-            let image_info = Arc::new(JxlDecodeJob::jxl_info_to_image_info(&jxl_info));
-
             let is_f32 = matches!(
                 chosen.pixel_format.color_data_format,
                 Some(jxl::api::JxlDataFormat::F32 { .. })
@@ -1413,6 +1404,8 @@ mod decoding {
 
             let mut frames = VecDeque::new();
             let mut frame_index = 0u32;
+            // Track the final decoder so we can extract EXIF/XMP after the loop.
+            let mut final_decoder = None;
 
             loop {
                 // Advance to frame info
@@ -1463,10 +1456,34 @@ mod decoding {
                 frame_index += 1;
 
                 if !next_decoder.has_more_frames() {
+                    final_decoder = Some(next_decoder);
                     break;
                 }
                 decoder = next_decoder;
             }
+
+            // Extract EXIF and XMP metadata from container boxes.
+            // These may appear after the codestream, so they're only
+            // available after all frames have been decoded.
+            let exif = final_decoder.as_mut().and_then(|d| d.take_exif());
+            let xmp = final_decoder.as_mut().and_then(|d| d.take_xmp());
+
+            let jxl_info = JxlInfo {
+                width: width as u32,
+                height: height as u32,
+                has_alpha,
+                has_animation,
+                bit_depth: Some(bit_depth_u8),
+                icc_profile,
+                orientation,
+                cicp,
+                is_gray,
+                exif,
+                xmp,
+                extra_channels,
+                preview_size,
+            };
+            let image_info = Arc::new(JxlDecodeJob::jxl_info_to_image_info(&jxl_info));
 
             self.image_info = Some(image_info);
             self.frames = Some(DecodedFrames { frames, loop_count });
