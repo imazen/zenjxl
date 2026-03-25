@@ -16,9 +16,9 @@ rgb = { version = "0.8", default-features = false, features = ["as-bytes"] }
 imgref = "1.12"
 bytemuck = { version = "1.25", default-features = false }
 enough = "0.4"
-zencodec = { path = "../zencodec" }
-zenpixels = { version = "0.2.0", path = "../zenpixels/zenpixels", default-features = false }
-linear-srgb = { path = "/home/lilith/work/zen/linear-srgb/." }
+zencodec = { version = "0.1.0" }
+zenpixels = { version = "0.2.0", default-features = false }
+linear-srgb = "0.6.4"
 jxl = { path = "../zenjxl-decoder/jxl", package = "zenjxl-decoder", optional = true }
 jxl-encoder = { path = "../jxl-encoder-rs/jxl_encoder", optional = true, default-features = false, features = ["std"] }
 
