@@ -29,6 +29,7 @@ archmage = { version = "0.9.12", features = ["std"] }
 [features]
 default = ["encode", "decode"]
 decode = ["dep:jxl"]
+threads = ["decode", "jxl/threads"]
 encode = ["dep:jxl-encoder"]
 butteraugli-loop = ["encode", "jxl-encoder/butteraugli-loop"]
 # Enable zencodec trait integration

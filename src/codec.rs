@@ -1035,7 +1035,7 @@ mod decoding {
         .with_cheap_probe(true)
         .with_enforces_max_pixels(true)
         .with_enforces_max_memory(true)
-        .with_threads_supported_range(1, 2);
+        .with_threads_supported_range(1, if cfg!(feature = "threads") { u16::MAX } else { 1 });
 
     /// Supported pixel descriptors for decoding.
     ///
@@ -1849,7 +1849,8 @@ mod tests {
             caps.enforces_max_memory(),
             "enforces_max_memory should be reported"
         );
-        assert_eq!(caps.threads_supported_range(), (1, 2));
+        let expected_max = if cfg!(feature = "threads") { u16::MAX } else { 1 };
+        assert_eq!(caps.threads_supported_range(), (1, expected_max));
         assert!(caps.exif());
         assert!(caps.xmp());
         assert!(caps.gain_map());
