@@ -180,7 +180,7 @@ mod encoding {
         .with_gain_map(true)
         .with_enforces_max_pixels(true)
         .with_enforces_max_memory(true)
-        .with_stop(true)
+        .with_stop(false)
         .with_threads_supported_range(1, u16::MAX);
 
     /// Supported pixel descriptors for encoding.
@@ -613,6 +613,16 @@ mod encoding {
             Ok(())
         }
 
+        /// Check encoded output size against `max_output_bytes`.
+        fn check_encoded_output_size(&self, encoded: &[u8]) -> Result<(), At<JxlError>> {
+            if let Some(ref limits) = self.limits {
+                limits
+                    .check_output_size(encoded.len() as u64)
+                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+            }
+            Ok(())
+        }
+
         /// Encode pixel data using the encode_request API with metadata + stop support.
         fn encode_with_metadata(
             &self,
@@ -673,6 +683,7 @@ mod encoding {
             let data = pixels.contiguous_bytes();
             let encoded = self.encode_with_metadata(&data, width, height, layout)?;
             let encoded = self.maybe_attach_gain_map(encoded);
+            self.check_encoded_output_size(&encoded)?;
 
             Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                 .with_mime_type("image/jxl")
@@ -706,6 +717,7 @@ mod encoding {
                 }
                 let encoded = self.encode_with_metadata(&rgb, width, height, PixelLayout::Rgb8)?;
                 let encoded = self.maybe_attach_gain_map(encoded);
+                self.check_encoded_output_size(&encoded)?;
                 Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                     .with_mime_type("image/jxl")
                     .with_extension("jxl"))
@@ -725,6 +737,7 @@ mod encoding {
                 let encoded =
                     self.encode_with_metadata(&pixel_data, width, height, PixelLayout::Rgba8)?;
                 let encoded = self.maybe_attach_gain_map(encoded);
+                self.check_encoded_output_size(&encoded)?;
                 Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                     .with_mime_type("image/jxl")
                     .with_extension("jxl"))
@@ -789,6 +802,7 @@ mod encoding {
 
             let encoded = self.encode_with_metadata(data, width, rows_pushed, layout)?;
             let encoded = self.maybe_attach_gain_map(encoded);
+            self.check_encoded_output_size(&encoded)?;
 
             Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                 .with_mime_type("image/jxl")
@@ -1024,6 +1038,8 @@ mod decoding {
     use alloc::vec;
     use alloc::vec::Vec;
 
+    use alloc::string::ToString;
+
     use jxl::api::{
         ExtraChannel, JxlDecoder as JxlRsDecoder, JxlDecoderOptions, JxlOutputBuffer,
         ProcessingResult,
@@ -1037,7 +1053,7 @@ mod decoding {
     use enough::Stop;
 
     use crate::decode::{
-        JxlInfo, JxlLimits, build_pixel_data, choose_pixel_format, decode_with_parallel,
+        JxlInfo, JxlLimits, build_pixel_data, choose_pixel_format, decode_with_options,
         extract_color_info, is_hdr_or_wide_gamut, probe,
     };
 
@@ -1073,6 +1089,8 @@ mod decoding {
         .with_cheap_probe(true)
         .with_enforces_max_pixels(true)
         .with_enforces_max_memory(true)
+        .with_enforces_max_input_bytes(true)
+        .with_stop(true)
         .with_threads_supported_range(
             1,
             if cfg!(feature = "threads") {
@@ -1139,6 +1157,7 @@ mod decoding {
             JxlDecodeJob {
                 limits: None,
                 policy: DecodePolicy::none(),
+                stop: None,
                 start_frame_index: 0,
                 _marker: core::marker::PhantomData,
             }
@@ -1151,6 +1170,7 @@ mod decoding {
     pub struct JxlDecodeJob<'a> {
         limits: Option<ResourceLimits>,
         policy: DecodePolicy,
+        stop: Option<zencodec::StopToken>,
         start_frame_index: u32,
         _marker: core::marker::PhantomData<&'a ()>,
     }
@@ -1253,9 +1273,8 @@ mod decoding {
         type StreamDec = Unsupported<At<JxlError>>;
         type AnimationFrameDec = JxlAnimationFrameDecoder;
 
-        fn with_stop(self, _stop: zencodec::StopToken) -> Self {
-            // The jxl-rs decoder does not support cooperative cancellation.
-            // Required by trait but intentionally a no-op.
+        fn with_stop(mut self, stop: zencodec::StopToken) -> Self {
+            self.stop = Some(stop);
             self
         }
 
@@ -1275,13 +1294,37 @@ mod decoding {
         }
 
         fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<JxlError>> {
+            // Enforce input size limit.
+            if let Some(ref limits) = self.limits {
+                limits
+                    .check_input_size(data.len() as u64)
+                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+            }
             let info = probe(data).map_err(at)?;
+            // Enforce dimension limits after probing the header.
+            if let Some(ref limits) = self.limits {
+                limits
+                    .check_dimensions(info.width, info.height)
+                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+            }
             let image_info = Self::jxl_info_to_image_info(&info).with_source_encoding_details(info);
             Ok(Self::apply_policy(image_info, &self.policy))
         }
 
         fn output_info(&self, data: &[u8]) -> Result<OutputInfo, At<JxlError>> {
+            // Enforce input size limit.
+            if let Some(ref limits) = self.limits {
+                limits
+                    .check_input_size(data.len() as u64)
+                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+            }
             let info = probe(data).map_err(at)?;
+            // Enforce dimension limits after probing the header.
+            if let Some(ref limits) = self.limits {
+                limits
+                    .check_dimensions(info.width, info.height)
+                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+            }
             let native_desc = Self::native_descriptor(&info);
             Ok(
                 OutputInfo::full_decode(info.width, info.height, native_desc)
@@ -1294,10 +1337,17 @@ mod decoding {
             data: Cow<'a, [u8]>,
             preferred: &[PixelDescriptor],
         ) -> Result<JxlDecoder<'a>, At<JxlError>> {
+            // Enforce input size limit before decoding.
+            if let Some(ref limits) = self.limits {
+                limits
+                    .check_input_size(data.len() as u64)
+                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+            }
             Ok(JxlDecoder {
                 data,
                 limits: self.limits,
                 policy: self.policy,
+                stop: self.stop,
                 preferred: preferred.to_vec(),
             })
         }
@@ -1333,8 +1383,20 @@ mod decoding {
                     UnsupportedOperation::AnimationDecode,
                 )));
             }
+            // Enforce input size limit before decoding.
+            if let Some(ref limits) = self.limits {
+                limits
+                    .check_input_size(data.len() as u64)
+                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+            }
             // Eagerly probe to populate image_info so info() never panics.
             let info = probe(&data).map_err(at)?;
+            // Enforce dimension limits after probing the header.
+            if let Some(ref limits) = self.limits {
+                limits
+                    .check_dimensions(info.width, info.height)
+                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+            }
             let image_info = Arc::new(Self::apply_policy(
                 Self::jxl_info_to_image_info(&info),
                 &self.policy,
@@ -1343,6 +1405,7 @@ mod decoding {
                 data: data.into_owned(),
                 limits: self.limits,
                 policy: self.policy,
+                stop: self.stop,
                 preferred: preferred.to_vec(),
                 frames: None,
                 image_info: Some(image_info),
@@ -1359,6 +1422,7 @@ mod decoding {
         data: Cow<'a, [u8]>,
         limits: Option<ResourceLimits>,
         policy: DecodePolicy,
+        stop: Option<zencodec::StopToken>,
         preferred: Vec<PixelDescriptor>,
     }
 
@@ -1368,11 +1432,14 @@ mod decoding {
         fn decode(self) -> Result<DecodeOutput, At<JxlError>> {
             let native_limits = JxlDecodeJob::to_native_limits(&self.limits);
             let parallel = policy_to_parallel(&self.limits);
-            let result = decode_with_parallel(
+            let stop_arc: Option<Arc<dyn Stop>> =
+                self.stop.map(|s| Arc::new(s) as Arc<dyn Stop>);
+            let result = decode_with_options(
                 &self.data,
                 native_limits.as_ref(),
                 &self.preferred,
                 parallel,
+                stop_arc,
             )
             .map_err(at)?;
 
@@ -1400,6 +1467,7 @@ mod decoding {
         data: Vec<u8>,
         limits: Option<ResourceLimits>,
         policy: DecodePolicy,
+        stop: Option<zencodec::StopToken>,
         preferred: Vec<PixelDescriptor>,
         /// Pre-decoded frames (lazily populated on first render_next_frame call).
         frames: Option<DecodedFrames>,
@@ -1429,6 +1497,11 @@ mod decoding {
                 && let Some(max_px) = lim.max_pixels
             {
                 options.limits.max_pixels = Some(max_px as usize);
+            }
+
+            // Forward stop token for cooperative cancellation.
+            if let Some(ref stop) = self.stop {
+                options.stop = Arc::new(stop.clone());
             }
 
             let decoder = JxlRsDecoder::new(options);

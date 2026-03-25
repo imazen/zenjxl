@@ -30,7 +30,7 @@ pub use error::JxlError;
 #[cfg(feature = "decode")]
 pub use decode::{
     JxlDecodeOutput, JxlExtraChannelInfo, JxlExtraChannelType, JxlInfo, JxlLimits, decode,
-    decode_with_parallel, probe,
+    decode_with_options, decode_with_parallel, probe,
 };
 #[cfg(feature = "decode")]
 pub use jxl::api::GainMapBundle;

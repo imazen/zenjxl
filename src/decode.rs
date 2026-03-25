@@ -605,6 +605,25 @@ pub fn decode_with_parallel(
     preferred: &[PixelDescriptor],
     parallel: Option<bool>,
 ) -> Result<JxlDecodeOutput, JxlError> {
+    decode_with_options(data, limits, preferred, parallel, None)
+}
+
+/// Decode a JXL image with explicit parallel control and optional stop token.
+///
+/// `parallel` overrides the decoder's default threading behavior:
+/// - `Some(true)` = enable parallel decoding
+/// - `Some(false)` = force single-threaded decoding
+/// - `None` = use decoder default (parallel when `threads` feature is enabled)
+///
+/// `stop` provides cooperative cancellation — the decoder checks the token
+/// periodically and aborts early if signalled.
+pub fn decode_with_options(
+    data: &[u8],
+    limits: Option<&JxlLimits>,
+    preferred: &[PixelDescriptor],
+    parallel: Option<bool>,
+    stop: Option<alloc::sync::Arc<dyn enough::Stop>>,
+) -> Result<JxlDecodeOutput, JxlError> {
     let mut options = JxlDecoderOptions::default();
 
     if let Some(p) = parallel {
@@ -615,6 +634,11 @@ pub fn decode_with_parallel(
         && let Some(max_px) = lim.max_pixels
     {
         options.limits.max_pixels = Some(max_px as usize);
+    }
+
+    // Forward stop token for cooperative cancellation.
+    if let Some(stop) = stop {
+        options.stop = stop;
     }
 
     let decoder = JxlDecoder::new(options);
