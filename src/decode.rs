@@ -711,7 +711,7 @@ pub(crate) fn build_pixel_data(
                     b: c[2],
                 })
                 .collect();
-            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
+            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
         }
         (ChannelType::U8, JxlColorType::Rgba) => {
             let pixels: Vec<Rgba<u8>> = buf
@@ -723,11 +723,11 @@ pub(crate) fn build_pixel_data(
                     a: c[3],
                 })
                 .collect();
-            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
+            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
         }
         (ChannelType::U8, JxlColorType::Grayscale) => {
             let pixels: Vec<Gray<u8>> = buf.iter().map(|&v| Gray::new(v)).collect();
-            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
+            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
         }
         (ChannelType::U8, JxlColorType::GrayscaleAlpha) => {
             // GrayAlpha lacks bytemuck NoUninit, use from_vec with raw bytes
@@ -743,7 +743,7 @@ pub(crate) fn build_pixel_data(
                     a: c[3],
                 })
                 .collect();
-            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
+            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
         }
         (ChannelType::U8, JxlColorType::Bgr) => {
             // No Bgr pixel type, convert to Rgb
@@ -755,7 +755,7 @@ pub(crate) fn build_pixel_data(
                     b: c[0],
                 })
                 .collect();
-            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
+            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
         }
 
         // ── u16 variants ─────────────────────────────────────────────
@@ -768,7 +768,7 @@ pub(crate) fn build_pixel_data(
                     b: u16::from_ne_bytes([c[4], c[5]]),
                 })
                 .collect();
-            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
+            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
         }
         (ChannelType::U16, JxlColorType::Rgba) => {
             let pixels: Vec<Rgba<u16>> = buf
@@ -780,14 +780,14 @@ pub(crate) fn build_pixel_data(
                     a: u16::from_ne_bytes([c[6], c[7]]),
                 })
                 .collect();
-            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
+            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
         }
         (ChannelType::U16, JxlColorType::Grayscale) => {
             let pixels: Vec<Gray<u16>> = buf
                 .chunks_exact(2)
                 .map(|c| Gray::new(u16::from_ne_bytes([c[0], c[1]])))
                 .collect();
-            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
+            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
         }
         (ChannelType::U16, JxlColorType::GrayscaleAlpha) => {
             // GrayAlpha lacks bytemuck NoUninit, use from_vec with raw bytes
@@ -804,7 +804,7 @@ pub(crate) fn build_pixel_data(
                     b: f32::from_ne_bytes([c[8], c[9], c[10], c[11]]),
                 })
                 .collect();
-            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
+            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
         }
         (ChannelType::F32, JxlColorType::Rgba) => {
             let pixels: Vec<Rgba<f32>> = buf
@@ -816,14 +816,14 @@ pub(crate) fn build_pixel_data(
                     a: f32::from_ne_bytes([c[12], c[13], c[14], c[15]]),
                 })
                 .collect();
-            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
+            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
         }
         (ChannelType::F32, JxlColorType::Grayscale) => {
             let pixels: Vec<Gray<f32>> = buf
                 .chunks_exact(4)
                 .map(|c| Gray::new(f32::from_ne_bytes([c[0], c[1], c[2], c[3]])))
                 .collect();
-            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
+            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
         }
         (ChannelType::F32, JxlColorType::GrayscaleAlpha) => {
             // GrayAlpha lacks bytemuck NoUninit, use from_vec with raw bytes
@@ -842,7 +842,7 @@ pub(crate) fn build_pixel_data(
                     a: c[3],
                 })
                 .collect();
-            PixelBuffer::from_pixels(pixels, w, h).unwrap().into()
+            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
         }
     }
 }

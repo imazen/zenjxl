@@ -588,7 +588,7 @@ mod encoding {
                     req
                 };
                 req.encode(data)
-                    .map_err(|e| at(JxlError::Encode(e.into_inner())))
+                    .map_err(|e| at(JxlError::Encode(e.decompose().0)))
             };
 
             match &self.mode {
@@ -952,10 +952,10 @@ mod encoding {
             let encoded = match &self.mode {
                 JxlEncMode::Lossy(cfg) => cfg
                     .encode_animation(self.width, self.height, layout, &animation, &anim_frames)
-                    .map_err(|e| at(JxlError::Encode(e.into_inner())))?,
+                    .map_err(|e| at(JxlError::Encode(e.decompose().0)))?,
                 JxlEncMode::Lossless(cfg) => cfg
                     .encode_animation(self.width, self.height, layout, &animation, &anim_frames)
-                    .map_err(|e| at(JxlError::Encode(e.into_inner())))?,
+                    .map_err(|e| at(JxlError::Encode(e.decompose().0)))?,
             };
 
             let encoded = self.wrap_with_metadata_and_gain_map(encoded);

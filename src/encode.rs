@@ -15,7 +15,7 @@ pub fn encode_rgb8(img: ImgRef<Rgb<u8>>, config: &LossyConfig) -> Result<Vec<u8>
     let bytes: &[u8] = bytemuck::cast_slice(&buf);
     let data = config
         .encode(bytes, w as u32, h as u32, PixelLayout::Rgb8)
-        .map_err(|e| e.into_inner())?;
+        .map_err(|e| e.decompose().0)?;
     Ok(data)
 }
 
@@ -25,7 +25,7 @@ pub fn encode_rgba8(img: ImgRef<Rgba<u8>>, config: &LossyConfig) -> Result<Vec<u
     let bytes: &[u8] = bytemuck::cast_slice(&buf);
     let data = config
         .encode(bytes, w as u32, h as u32, PixelLayout::Rgba8)
-        .map_err(|e| e.into_inner())?;
+        .map_err(|e| e.decompose().0)?;
     Ok(data)
 }
 
@@ -35,7 +35,7 @@ pub fn encode_gray8(img: ImgRef<Gray<u8>>, config: &LossyConfig) -> Result<Vec<u
     let bytes = gray_to_rgb_bytes(&buf);
     let data = config
         .encode(&bytes, w as u32, h as u32, PixelLayout::Rgb8)
-        .map_err(|e| e.into_inner())?;
+        .map_err(|e| e.decompose().0)?;
     Ok(data)
 }
 
@@ -48,7 +48,7 @@ pub fn encode_rgb8_lossless(
     let bytes: &[u8] = bytemuck::cast_slice(&buf);
     let data = config
         .encode(bytes, w as u32, h as u32, PixelLayout::Rgb8)
-        .map_err(|e| e.into_inner())?;
+        .map_err(|e| e.decompose().0)?;
     Ok(data)
 }
 
@@ -61,7 +61,7 @@ pub fn encode_rgba8_lossless(
     let bytes: &[u8] = bytemuck::cast_slice(&buf);
     let data = config
         .encode(bytes, w as u32, h as u32, PixelLayout::Rgba8)
-        .map_err(|e| e.into_inner())?;
+        .map_err(|e| e.decompose().0)?;
     Ok(data)
 }
 
@@ -71,7 +71,7 @@ pub fn encode_bgra8(img: ImgRef<BGRA<u8>>, config: &LossyConfig) -> Result<Vec<u
     let bytes: &[u8] = bytemuck::cast_slice(&buf);
     let data = config
         .encode(bytes, w as u32, h as u32, PixelLayout::Bgra8)
-        .map_err(|e| e.into_inner())?;
+        .map_err(|e| e.decompose().0)?;
     Ok(data)
 }
 
@@ -84,7 +84,7 @@ pub fn encode_bgra8_lossless(
     let bytes: &[u8] = bytemuck::cast_slice(&buf);
     let data = config
         .encode(bytes, w as u32, h as u32, PixelLayout::Bgra8)
-        .map_err(|e| e.into_inner())?;
+        .map_err(|e| e.decompose().0)?;
     Ok(data)
 }
 
@@ -97,7 +97,7 @@ pub fn encode_gray8_lossless(
     let bytes: &[u8] = bytemuck::cast_slice(&buf);
     let data = config
         .encode(bytes, w as u32, h as u32, PixelLayout::Gray8)
-        .map_err(|e| e.into_inner())?;
+        .map_err(|e| e.decompose().0)?;
     Ok(data)
 }
 
