@@ -991,7 +991,7 @@ mod decoding {
         ProcessingResult,
     };
     use zencodec::Unsupported;
-    use zencodec::decode::{DecodeCapabilities, DecodeOutput, OutputInfo, SinkError};
+    use zencodec::decode::{DecodeCapabilities, DecodeOutput, DecodePolicy, OutputInfo, SinkError};
     use zencodec::{AnimationFrame, OwnedAnimationFrame};
     use zencodec::{ImageInfo, ResourceLimits, UnsupportedOperation};
     use zenpixels::Cicp;
@@ -1093,6 +1093,7 @@ mod decoding {
         fn job(&self) -> JxlDecodeJob<'_> {
             JxlDecodeJob {
                 limits: None,
+                policy: DecodePolicy::none(),
                 start_frame_index: 0,
                 _marker: core::marker::PhantomData,
             }
@@ -1104,11 +1105,27 @@ mod decoding {
     /// Per-operation decode job for JPEG XL.
     pub struct JxlDecodeJob<'a> {
         limits: Option<ResourceLimits>,
+        policy: DecodePolicy,
         start_frame_index: u32,
         _marker: core::marker::PhantomData<&'a ()>,
     }
 
     impl JxlDecodeJob<'_> {
+        /// Strip metadata fields from an `ImageInfo` according to the decode policy.
+        fn apply_policy(info: ImageInfo, policy: &DecodePolicy) -> ImageInfo {
+            let mut info = info;
+            if !policy.resolve_icc(true) {
+                info.source_color.icc_profile = None;
+            }
+            if !policy.resolve_exif(true) {
+                info.embedded_metadata.exif = None;
+            }
+            if !policy.resolve_xmp(true) {
+                info.embedded_metadata.xmp = None;
+            }
+            info
+        }
+
         /// Convert native JxlInfo into zencodec ImageInfo.
         fn jxl_info_to_image_info(info: &JxlInfo) -> ImageInfo {
             let mut image_info = ImageInfo::new(info.width, info.height, ImageFormat::Jxl)
@@ -1207,10 +1224,15 @@ mod decoding {
             self
         }
 
+        fn with_policy(mut self, policy: DecodePolicy) -> Self {
+            self.policy = policy;
+            self
+        }
+
         fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<JxlError>> {
             let info = probe(data).map_err(at)?;
             let image_info = Self::jxl_info_to_image_info(&info).with_source_encoding_details(info);
-            Ok(image_info)
+            Ok(Self::apply_policy(image_info, &self.policy))
         }
 
         fn output_info(&self, data: &[u8]) -> Result<OutputInfo, At<JxlError>> {
@@ -1230,6 +1252,7 @@ mod decoding {
             Ok(JxlDecoder {
                 data,
                 limits: self.limits,
+                policy: self.policy,
                 preferred: preferred.to_vec(),
             })
         }
@@ -1260,12 +1283,21 @@ mod decoding {
             data: Cow<'a, [u8]>,
             preferred: &[PixelDescriptor],
         ) -> Result<JxlAnimationFrameDecoder, At<JxlError>> {
+            if !self.policy.resolve_animation(true) {
+                return Err(at(JxlError::UnsupportedOperation(
+                    UnsupportedOperation::AnimationDecode,
+                )));
+            }
             // Eagerly probe to populate image_info so info() never panics.
             let info = probe(&data).map_err(at)?;
-            let image_info = Arc::new(Self::jxl_info_to_image_info(&info));
+            let image_info = Arc::new(Self::apply_policy(
+                Self::jxl_info_to_image_info(&info),
+                &self.policy,
+            ));
             Ok(JxlAnimationFrameDecoder {
                 data: data.into_owned(),
                 limits: self.limits,
+                policy: self.policy,
                 preferred: preferred.to_vec(),
                 frames: None,
                 image_info: Some(image_info),
@@ -1281,6 +1313,7 @@ mod decoding {
     pub struct JxlDecoder<'a> {
         data: Cow<'a, [u8]>,
         limits: Option<ResourceLimits>,
+        policy: DecodePolicy,
         preferred: Vec<PixelDescriptor>,
     }
 
@@ -1298,7 +1331,10 @@ mod decoding {
             )
             .map_err(at)?;
 
-            let info = JxlDecodeJob::jxl_info_to_image_info(&result.info);
+            let info = JxlDecodeJob::apply_policy(
+                JxlDecodeJob::jxl_info_to_image_info(&result.info),
+                &self.policy,
+            );
             let mut output =
                 DecodeOutput::new(result.pixels, info).with_source_encoding_details(result.info);
             if let Some(gm) = result.gain_map {
@@ -1318,6 +1354,7 @@ mod decoding {
     pub struct JxlAnimationFrameDecoder {
         data: Vec<u8>,
         limits: Option<ResourceLimits>,
+        policy: DecodePolicy,
         preferred: Vec<PixelDescriptor>,
         /// Pre-decoded frames (lazily populated on first render_next_frame call).
         frames: Option<DecodedFrames>,
@@ -1377,6 +1414,7 @@ mod decoding {
             let orientation = basic_info.orientation as u8;
             let is_gray = crate::decode::profile_is_grayscale(decoder.embedded_color_profile());
             let num_extra = basic_info.extra_channels.len();
+            let xyb_encoded = !basic_info.uses_original_profile;
             let extra_channels = crate::decode::convert_extra_channels(&basic_info.extra_channels);
             let preview_size = basic_info.preview_size.map(|(w, h)| (w as u32, h as u32));
 
@@ -1490,8 +1528,12 @@ mod decoding {
                 xmp,
                 extra_channels,
                 preview_size,
+                xyb_encoded,
             };
-            let image_info = Arc::new(JxlDecodeJob::jxl_info_to_image_info(&jxl_info));
+            let image_info = Arc::new(JxlDecodeJob::apply_policy(
+                JxlDecodeJob::jxl_info_to_image_info(&jxl_info),
+                &self.policy,
+            ));
 
             self.image_info = Some(image_info);
             self.frames = Some(DecodedFrames { frames, loop_count });

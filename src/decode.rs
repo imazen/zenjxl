@@ -116,12 +116,27 @@ pub struct JxlInfo {
     /// JXL files can embed a small preview image for quick thumbnailing.
     /// `None` when no preview is present.
     pub preview_size: Option<(u32, u32)>,
+    /// Whether the image uses XYB color space transform (VarDCT lossy encoding).
+    ///
+    /// When `false` (`uses_original_profile` in the spec), the image uses the
+    /// modular pathway, which is the lossless encoding mode in JPEG XL.
+    /// This is exposed as `!basic_info.uses_original_profile` from jxl-rs.
+    pub xyb_encoded: bool,
 }
 
 impl zencodec::SourceEncodingDetails for JxlInfo {
     fn source_generic_quality(&self) -> Option<f32> {
         // JXL headers don't expose the encoding quality/distance.
         None
+    }
+
+    fn is_lossless(&self) -> bool {
+        // JXL lossless images use the modular pathway (original color profile,
+        // no XYB transform). `!xyb_encoded` is equivalent to
+        // `uses_original_profile` in the spec. All lossless JXL images have
+        // this flag; VarDCT (lossy) always uses XYB. Modular lossy exists but
+        // is extremely rare in practice, so this is the best header-level signal.
+        !self.xyb_encoded
     }
 }
 
@@ -510,6 +525,8 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, JxlError> {
     let (icc_profile, cicp) = extract_color_info(decoder.embedded_color_profile());
     let is_gray = profile_is_grayscale(decoder.embedded_color_profile());
 
+    let xyb_encoded = !info.uses_original_profile;
+
     let extra_channels = convert_extra_channels(&info.extra_channels);
     let preview_size = info.preview_size.map(|(w, h)| (w as u32, h as u32));
 
@@ -529,6 +546,7 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, JxlError> {
         xmp: None,
         extra_channels,
         preview_size,
+        xyb_encoded,
     })
 }
 
@@ -597,6 +615,7 @@ pub fn decode_with_parallel(
     let (icc_profile, cicp) = extract_color_info(decoder.embedded_color_profile());
 
     let num_extra = info.extra_channels.len();
+    let xyb_encoded = !info.uses_original_profile;
     let extra_channels = convert_extra_channels(&info.extra_channels);
     let preview_size = info.preview_size.map(|(w, h)| (w as u32, h as u32));
 
@@ -678,6 +697,7 @@ pub fn decode_with_parallel(
             xmp,
             extra_channels,
             preview_size,
+            xyb_encoded,
         },
         gain_map,
     })
