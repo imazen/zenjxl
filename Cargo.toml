@@ -3,7 +3,7 @@ name = "zenjxl"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.93"
-license = "AGPL-3.0-only"
+license = "AGPL-3.0-or-later"
 description = "JPEG XL encoding and decoding with zencodec trait integration"
 categories = ["multimedia::images", "multimedia::encoding"]
 keywords = ["jxl", "jpeg-xl", "image", "encoder", "decoder"]
@@ -16,7 +16,7 @@ whereat = "0.1.4"
 rgb = { version = "0.8.53", default-features = false, features = ["as-bytes"] }
 imgref = "1.12.0"
 enough = "0.4.2"
-zencodec = "0.1.4"
+zencodec = "0.1.5"
 zenpixels = { version = "0.2.0", default-features = false, features = ["rgb"] }
 linear-srgb = "0.6.5"
 jxl = { path = "../zenjxl-decoder/zenjxl-decoder", package = "zenjxl-decoder", optional = true }
