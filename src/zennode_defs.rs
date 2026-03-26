@@ -129,6 +129,13 @@ impl EncodeJxl {
         if self.effort != 7 {
             config = config.with_generic_effort(self.effort.clamp(1, 10));
         }
+        // Direct distance override (most specific — wins over quality mappings).
+        // Only apply if changed from default AND no quality was set
+        // (quality/jxl_quality go through calibrated mapping; distance is raw butteraugli).
+        if (self.distance - 1.0).abs() > f32::EPSILON && self.quality < 0 && self.jxl_quality < 0.0
+        {
+            config = config.with_distance(self.distance);
+        }
         // Noise synthesis
         if self.noise {
             config = config.with_noise(true);
