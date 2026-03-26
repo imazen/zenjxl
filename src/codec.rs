@@ -1090,7 +1090,7 @@ mod decoding {
 
     impl zencodec::decode::DecoderConfig for JxlDecoderConfig {
         type Error = At<JxlError>;
-        type Job<'a> = JxlDecodeJob<'a>;
+        type Job = JxlDecodeJob;
 
         fn formats() -> &'static [ImageFormat] {
             &[ImageFormat::Jxl]
@@ -1104,14 +1104,13 @@ mod decoding {
             &JXL_DECODE_CAPS
         }
 
-        fn job(&self) -> JxlDecodeJob<'_> {
+        fn job(self) -> JxlDecodeJob {
             JxlDecodeJob {
                 limits: None,
                 policy: DecodePolicy::none(),
                 stop: None,
                 start_frame_index: 0,
                 extract_gain_map: false,
-                _marker: core::marker::PhantomData,
             }
         }
     }
@@ -1119,16 +1118,15 @@ mod decoding {
     // ── JxlDecodeJob ────────────────────────────────────────────────────
 
     /// Per-operation decode job for JPEG XL.
-    pub struct JxlDecodeJob<'a> {
+    pub struct JxlDecodeJob {
         limits: Option<ResourceLimits>,
         policy: DecodePolicy,
         stop: Option<zencodec::StopToken>,
         start_frame_index: u32,
         extract_gain_map: bool,
-        _marker: core::marker::PhantomData<&'a ()>,
     }
 
-    impl JxlDecodeJob<'_> {
+    impl JxlDecodeJob {
         /// Enable extraction of the HDR gain map (ISO 21496-1 `jhgm` box).
         ///
         /// When `true`, a [`GainMapSource`](zencodec::gainmap::GainMapSource) is
@@ -1236,7 +1234,7 @@ mod decoding {
         }
     }
 
-    impl<'a> zencodec::decode::DecodeJob<'a> for JxlDecodeJob<'a> {
+    impl<'a> zencodec::decode::DecodeJob<'a> for JxlDecodeJob {
         type Error = At<JxlError>;
         type Dec = JxlDecoder<'a>;
         type StreamDec = Unsupported<At<JxlError>>;
