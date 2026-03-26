@@ -1090,7 +1090,7 @@ mod decoding {
 
     impl zencodec::decode::DecoderConfig for JxlDecoderConfig {
         type Error = At<JxlError>;
-        type Job = JxlDecodeJob;
+        type Job<'a> = JxlDecodeJob;
 
         fn formats() -> &'static [ImageFormat] {
             &[ImageFormat::Jxl]
@@ -1104,7 +1104,7 @@ mod decoding {
             &JXL_DECODE_CAPS
         }
 
-        fn job(self) -> JxlDecodeJob {
+        fn job<'a>(self) -> Self::Job<'a> {
             JxlDecodeJob {
                 limits: None,
                 policy: DecodePolicy::none(),
