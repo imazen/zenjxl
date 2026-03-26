@@ -42,7 +42,7 @@ Support sustainable and secure software; swap patch tuesday for patch leap-year.
 See [LICENSE-COMMERCIAL](LICENSE-COMMERCIAL) for details.
 
 Upstream code from [libjxl/libjxl](https://github.com/libjxl/libjxl) is licensed under BSD-3-Clause.
-Our additions and improvements are AGPL-3.0-or-later with commercial licensing as above.
+Our additions and improvements are dual-licensed (AGPL-3.0 or commercial) as above.
 
 ### Upstream Contribution
 
