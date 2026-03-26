@@ -996,6 +996,33 @@ mod decoding {
             .map(|l| !matches!(l.threading(), zencodec::ThreadingPolicy::SingleThread))
     }
 
+    /// Convert a jxl-rs [`GainMapBundle`] into a zencodec [`GainMapSource`].
+    ///
+    /// Parses the ISO 21496-1 binary metadata and probes the gain map
+    /// codestream for dimensions. Falls back to default metadata / zero
+    /// dimensions when parsing or probing fails — the raw codestream is
+    /// still preserved for downstream decode.
+    fn bundle_to_gain_map_source(
+        bundle: jxl::api::GainMapBundle,
+    ) -> zencodec::gainmap::GainMapSource {
+        use zencodec::gainmap::{GainMapInfo, GainMapSource};
+
+        // Parse ISO 21496-1 metadata; fall back to defaults on failure.
+        let params = zencodec::gainmap::parse_iso21496(&bundle.metadata).unwrap_or_default();
+
+        // Probe the bare JXL codestream to get gain map image dimensions.
+        let (width, height, channels) = if let Ok(gm_info) = probe(&bundle.gain_map_codestream) {
+            let ch = if gm_info.is_gray { 1u8 } else { 3u8 };
+            (gm_info.width, gm_info.height, ch)
+        } else {
+            // Codestream too short or invalid — dimensions unknown.
+            (0, 0, 1)
+        };
+
+        let metadata = GainMapInfo::new(params, width, height, channels);
+        GainMapSource::new(bundle.gain_map_codestream, ImageFormat::Jxl, metadata)
+    }
+
     // ── Capabilities ────────────────────────────────────────────────────
 
     static JXL_DECODE_CAPS: DecodeCapabilities = DecodeCapabilities::new()
@@ -1104,9 +1131,11 @@ mod decoding {
     impl JxlDecodeJob<'_> {
         /// Enable extraction of the HDR gain map (ISO 21496-1 `jhgm` box).
         ///
-        /// When `true`, the decoded [`GainMapBundle`](crate::GainMapBundle) is
+        /// When `true`, a [`GainMapSource`](zencodec::gainmap::GainMapSource) is
         /// attached to the [`DecodeOutput`](zencodec::decode::DecodeOutput) as a
-        /// typed extension (retrievable via `extras::<GainMapBundle>()`).
+        /// typed extension (retrievable via `extras::<GainMapSource>()`).
+        /// The source contains the raw JXL codestream and parsed ISO 21496-1
+        /// metadata, ready for downstream decode.
         ///
         /// Defaults to `false` — gain map data is skipped even when present.
         /// [`GainMapPresence`](zencodec::GainMapPresence) on [`ImageInfo`] is
@@ -1392,7 +1421,7 @@ mod decoding {
                 DecodeOutput::new(result.pixels, info).with_source_encoding_details(result.info);
             if self.extract_gain_map {
                 if let Some(gm) = result.gain_map {
-                    output = output.with_extras(gm);
+                    output = output.with_extras(bundle_to_gain_map_source(gm));
                 }
             }
             Ok(output)
