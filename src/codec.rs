@@ -1083,6 +1083,7 @@ mod decoding {
                 policy: DecodePolicy::none(),
                 stop: None,
                 start_frame_index: 0,
+                extract_gain_map: false,
                 _marker: core::marker::PhantomData,
             }
         }
@@ -1096,10 +1097,25 @@ mod decoding {
         policy: DecodePolicy,
         stop: Option<zencodec::StopToken>,
         start_frame_index: u32,
+        extract_gain_map: bool,
         _marker: core::marker::PhantomData<&'a ()>,
     }
 
     impl JxlDecodeJob<'_> {
+        /// Enable extraction of the HDR gain map (ISO 21496-1 `jhgm` box).
+        ///
+        /// When `true`, the decoded [`GainMapBundle`](crate::GainMapBundle) is
+        /// attached to the [`DecodeOutput`](zencodec::decode::DecodeOutput) as a
+        /// typed extension (retrievable via `extras::<GainMapBundle>()`).
+        ///
+        /// Defaults to `false` — gain map data is skipped even when present.
+        /// [`GainMapPresence`](zencodec::GainMapPresence) on [`ImageInfo`] is
+        /// always populated regardless of this flag.
+        pub fn with_extract_gain_map(mut self, extract: bool) -> Self {
+            self.extract_gain_map = extract;
+            self
+        }
+
         /// Strip metadata fields from an `ImageInfo` according to the decode policy.
         fn apply_policy(info: ImageInfo, policy: &DecodePolicy) -> ImageInfo {
             let mut info = info;
@@ -1273,6 +1289,7 @@ mod decoding {
                 policy: self.policy,
                 stop: self.stop,
                 preferred: preferred.to_vec(),
+                extract_gain_map: self.extract_gain_map,
             })
         }
 
@@ -1348,6 +1365,7 @@ mod decoding {
         policy: DecodePolicy,
         stop: Option<zencodec::StopToken>,
         preferred: Vec<PixelDescriptor>,
+        extract_gain_map: bool,
     }
 
     impl zencodec::decode::Decode for JxlDecoder<'_> {
@@ -1372,8 +1390,10 @@ mod decoding {
             );
             let mut output =
                 DecodeOutput::new(result.pixels, info).with_source_encoding_details(result.info);
-            if let Some(gm) = result.gain_map {
-                output = output.with_extras(gm);
+            if self.extract_gain_map {
+                if let Some(gm) = result.gain_map {
+                    output = output.with_extras(gm);
+                }
             }
             Ok(output)
         }
