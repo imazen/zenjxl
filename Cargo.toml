@@ -24,7 +24,7 @@ jxl-encoder = { path = "../jxl-encoder/jxl-encoder", optional = true, default-fe
 zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 
 [dev-dependencies]
-archmage = { version = "0.9.12", features = ["std"] }
+archmage = { version = "0.9.14", features = ["std"] }
 
 [features]
 default = ["encode", "decode"]
