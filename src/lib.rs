@@ -18,8 +18,8 @@ mod codec;
 #[cfg(feature = "decode")]
 mod decode;
 mod error;
-#[cfg(feature = "zennode")]
-pub mod zennode_defs;
+// #[cfg(feature = "zennode")]
+// pub mod zennode_defs;
 
 pub use error::JxlError;
 
