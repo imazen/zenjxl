@@ -1,27 +1,82 @@
-# zenjxl
+# zenjxl ![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenjxl/ci.yml?style=for-the-badge) ![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=for-the-badge) ![License](https://img.shields.io/badge/license-AGPL--3.0--only%20OR%20Commercial-blue?style=for-the-badge)
 
-JPEG XL encoding and decoding with `zencodec` trait integration.
+zenjxl is a JPEG XL encoding and decoding library combining [zenjxl-decoder](https://github.com/imazen/zenjxl-decoder) and [jxl-encoder](https://github.com/imazen/jxl-encoder) with resource limits, cancellation, and gain map support.
 
-Wraps [jxl-rs](https://github.com/libjxl/jxl-rs) for decoding and `jxl-encoder` for encoding. Both are feature-gated (`decode` and `encode`).
+zenjxl-decoder is Imazen's fork of jxl-rs with additional metadata extraction, gain map parsing, and resource limiting. jxl-encoder is a pure Rust JPEG XL encoder supporting both lossless (modular) and lossy (VarDCT) modes. zenjxl wraps both behind a unified API and provides zencodec/zennode integration for use in [zenpipe](https://github.com/imazen/zenpipe) pipelines.
+
+`#![forbid(unsafe_code)]`, `no_std + alloc`, edition 2024.
+
+## Quick start
+
+### Decode
+
+```rust
+use zenjxl::{decode, probe, JxlLimits};
+use zenpixels::PixelDescriptor;
+
+let jxl_bytes: &[u8] = &std::fs::read("photo.jxl").unwrap();
+
+// Metadata-only probe (no pixel decode).
+let info = probe(jxl_bytes).unwrap();
+println!("{}x{}, alpha={}, gray={}", info.width, info.height, info.has_alpha, info.is_gray);
+
+// Full decode with resource limits.
+let limits = JxlLimits {
+    max_pixels: Some(100_000_000),
+    max_memory_bytes: Some(2 * 1024 * 1024 * 1024),
+};
+let output = decode(jxl_bytes, Some(&limits), &[]).unwrap();
+let pixels = output.pixels; // PixelBuffer (zenpixels)
+```
+
+### Encode
+
+```rust
+use zenjxl::{encode_rgb8, encode_rgb8_lossless, calibrated_jxl_quality};
+
+let rgb: &[u8] = &[0u8; 256 * 256 * 3]; // RGB pixels
+
+// Lossy encode -- calibrated_jxl_quality maps 0..=100 to JXL distance.
+let distance = calibrated_jxl_quality(85);
+let lossy = encode_rgb8(rgb, 256, 256, distance).unwrap();
+
+// Lossless encode.
+let lossless = encode_rgb8_lossless(rgb, 256, 256).unwrap();
+```
 
 ## Features
 
-- `decode` — JPEG XL decoding via jxl-rs
-- `encode` — JPEG XL encoding via jxl-encoder
-- `threads` — Multithreaded decoding via rayon (requires `decode`)
-- `zencodec` — Enable zencodec trait integration
-- `butteraugli-loop` — Perceptual quality tuning (requires `encode`)
+**Decode** -- `probe()` returns `JxlInfo` with dimensions, bit depth, ICC profile, CICP signaling, EXIF orientation, raw EXIF/XMP bytes, extra channel metadata, HDR tone mapping fields, preview size, and gain map bundles. `decode()` returns a `PixelBuffer` with automatic format negotiation. `decode_with_parallel()` enables multithreaded decoding; `decode_with_options()` adds cancellation via `enough::Stop`.
 
-## zencodec integration
+**Encode** -- Convenience functions for RGB, RGBA, BGRA, and grayscale u8 data in both lossy and lossless modes. `calibrated_jxl_quality()` maps a 0--100 quality scale to JXL distance. Container utilities (`append_gain_map_box`, `is_bare_codestream`) for gain map authoring.
 
-`JxlEncoderConfig` implements `zencodec::EncoderConfig` and `JxlDecoderConfig` implements `zencodec::DecoderConfig`, enabling use in the unified zen* codec pipeline.
+**Gain maps** -- Decode extracts `GainMapBundle` from `jhgm` container boxes (ISO 21496-1). Encode can append gain map boxes to existing codestreams.
+
+**HDR metadata** -- `JxlInfo` exposes `intensity_target`, `min_nits`, `relative_to_max_display`, and `linear_below` from the JXL tone mapping header.
+
+## Feature flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `decode` | yes | JPEG XL decoding via [zenjxl-decoder](https://github.com/imazen/zenjxl-decoder) |
+| `encode` | yes | JPEG XL encoding via [jxl-encoder](https://github.com/imazen/jxl-encoder) |
+| `threads` | no | Multithreaded decoding via rayon (requires `decode`) |
+| `butteraugli-loop` | no | Perceptual quality tuning (requires `encode`) |
+| `zencodec` | no | Config/Job/Executor trait integration for zen codec pipelines |
+| `zennode` | no | `EncodeJxl` and `DecodeJxl` pipeline node definitions |
+
+## Limitations
+
+- Not published to crates.io. Depend on it via git or path.
+- Encoder is u8-only for the convenience API. The zencodec path supports wider bit depths.
+- zenjxl-decoder does not yet support all JPEG XL features (e.g., some edge cases in progressive decoding).
 
 ## License
 
 Dual-licensed: [AGPL-3.0](LICENSE-AGPL3) or [commercial](LICENSE-COMMERCIAL).
 
-I've maintained and developed open-source image server software — and the 40+
-library ecosystem it depends on — full-time since 2011. Fifteen years of
+I've maintained and developed open-source image server software -- and the 40+
+library ecosystem it depends on -- full-time since 2011. Fifteen years of
 continual maintenance, backwards compatibility, support, and the (very rare)
 security patch. That kind of stability requires sustainable funding, and
 dual-licensing is how we make it work without venture capital or rug-pulls.
@@ -31,20 +86,20 @@ Support sustainable and secure software; swap patch tuesday for patch leap-year.
 
 **Your options:**
 
-- **Startup license** — $1 if your company has under $1M revenue and fewer
-  than 5 employees. [Get a key →](https://www.imazen.io/pricing)
-- **Commercial subscription** — Governed by the Imazen Site-wide Subscription
+- **Startup license** -- $1 if your company has under $1M revenue and fewer
+  than 5 employees. [Get a key](https://www.imazen.io/pricing)
+- **Commercial subscription** -- Governed by the Imazen Site-wide Subscription
   License v1.1 or later. Apache 2.0-like terms, no source-sharing requirement.
   Sliding scale by company size.
-  [Pricing & 60-day free trial →](https://www.imazen.io/pricing)
-- **AGPL v3** — Free and open. Share your source if you distribute.
+  [Pricing & 60-day free trial](https://www.imazen.io/pricing)
+- **AGPL v3** -- Free and open. Share your source if you distribute.
 
 See [LICENSE-COMMERCIAL](LICENSE-COMMERCIAL) for details.
 
 Upstream code from [libjxl/libjxl](https://github.com/libjxl/libjxl) is licensed under BSD-3-Clause.
 Our additions and improvements are dual-licensed (AGPL-3.0 or commercial) as above.
 
-### Upstream Contribution
+### Upstream contribution
 
 We are willing to release our improvements under the original BSD-3-Clause
 license if upstream takes over maintenance of those improvements. We'd rather
