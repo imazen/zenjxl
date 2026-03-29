@@ -1,4 +1,4 @@
-# zenjxl ![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenjxl/ci.yml?style=for-the-badge) ![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=for-the-badge) ![License](https://img.shields.io/badge/license-AGPL--3.0--only%20OR%20Commercial-blue?style=for-the-badge)
+# zenjxl [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenjxl/ci.yml?style=for-the-badge)](https://github.com/imazen/zenjxl/actions/workflows/ci.yml) [![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=for-the-badge)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![License](https://img.shields.io/badge/license-AGPL--3.0--only%20OR%20Commercial-blue?style=for-the-badge)](https://github.com/imazen/zenjxl#license)
 
 zenjxl is a JPEG XL encoding and decoding library combining [zenjxl-decoder](https://github.com/imazen/zenjxl-decoder) and [jxl-encoder](https://github.com/imazen/jxl-encoder) with resource limits, cancellation, and gain map support.
 
