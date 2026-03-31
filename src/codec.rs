@@ -91,7 +91,7 @@ mod encoding {
         .with_native_f32(true)
         .with_push_rows(true)
         .with_animation(true)
-        .with_effort_range(1, 10)
+        .with_effort_range(0, 10)
         .with_quality_range(0.0, 100.0)
         .with_icc(true)
         .with_exif(true)
