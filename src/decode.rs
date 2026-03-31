@@ -14,6 +14,8 @@ use jxl::api::{
 
 use crate::error::JxlError;
 
+type At<E> = whereat::At<E>;
+
 /// Semantic type of a JXL extra channel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -521,17 +523,18 @@ pub(crate) fn convert_extra_channels(
 }
 
 /// Probe JXL metadata without decoding pixels.
-pub fn probe(data: &[u8]) -> Result<JxlInfo, JxlError> {
+pub fn probe(data: &[u8]) -> Result<JxlInfo, At<JxlError>> {
     let options = JxlDecoderOptions::default();
     let decoder = JxlDecoder::new(options);
 
     let mut input = data;
-    let decoder = match decoder.process(&mut input).map_err(map_err)? {
+    let result = decoder.process(&mut input).map_err(|e| whereat::at!(map_err(e)))?;
+    let decoder = match result {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
-            return Err(JxlError::InvalidInput(
+            return Err(whereat::at!(JxlError::InvalidInput(
                 "JXL: insufficient data for header".into(),
-            ));
+            )));
         }
     };
 
@@ -589,7 +592,7 @@ pub fn decode(
     data: &[u8],
     limits: Option<&JxlLimits>,
     preferred: &[PixelDescriptor],
-) -> Result<JxlDecodeOutput, JxlError> {
+) -> Result<JxlDecodeOutput, At<JxlError>> {
     decode_with_parallel(data, limits, preferred, None)
 }
 
@@ -604,7 +607,7 @@ pub fn decode_with_parallel(
     limits: Option<&JxlLimits>,
     preferred: &[PixelDescriptor],
     parallel: Option<bool>,
-) -> Result<JxlDecodeOutput, JxlError> {
+) -> Result<JxlDecodeOutput, At<JxlError>> {
     decode_with_options(data, limits, preferred, parallel, None)
 }
 
@@ -623,7 +626,7 @@ pub fn decode_with_options(
     preferred: &[PixelDescriptor],
     parallel: Option<bool>,
     stop: Option<alloc::sync::Arc<dyn enough::Stop>>,
-) -> Result<JxlDecodeOutput, JxlError> {
+) -> Result<JxlDecodeOutput, At<JxlError>> {
     let mut options = JxlDecoderOptions::default();
 
     if let Some(p) = parallel {
@@ -645,12 +648,13 @@ pub fn decode_with_options(
 
     // Phase 1: parse header
     let mut input = data;
-    let mut decoder = match decoder.process(&mut input).map_err(map_err)? {
+    let result = decoder.process(&mut input).map_err(|e| whereat::at!(map_err(e)))?;
+    let mut decoder = match result {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
-            return Err(JxlError::InvalidInput(
+            return Err(whereat::at!(JxlError::InvalidInput(
                 "JXL: insufficient data for header".into(),
-            ));
+            )));
         }
     };
 
@@ -690,18 +694,19 @@ pub fn decode_with_options(
 
     if let Some(lim) = limits {
         let bpp = (channels * bytes_per_sample) as u32;
-        lim.validate(width as u32, height as u32, bpp)?;
+        lim.validate(width as u32, height as u32, bpp).map_err(|e| whereat::at!(e))?;
     }
 
     decoder.set_pixel_format(chosen.pixel_format.clone());
 
     // Phase 2: frame info
-    let decoder = match decoder.process(&mut input).map_err(map_err)? {
+    let result = decoder.process(&mut input).map_err(|e| whereat::at!(map_err(e)))?;
+    let decoder = match result {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
-            return Err(JxlError::InvalidInput(
+            return Err(whereat::at!(JxlError::InvalidInput(
                 "JXL: insufficient data for frame".into(),
-            ));
+            )));
         }
     };
 
@@ -711,15 +716,15 @@ pub fn decode_with_options(
     let mut buf = vec![0u8; buf_size];
 
     let output = JxlOutputBuffer::new(&mut buf, height, bytes_per_row);
-    let mut final_decoder = match decoder
+    let result = decoder
         .process(&mut input, &mut [output])
-        .map_err(map_err)?
-    {
+        .map_err(|e| whereat::at!(map_err(e)))?;
+    let mut final_decoder = match result {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
-            return Err(JxlError::InvalidInput(
+            return Err(whereat::at!(JxlError::InvalidInput(
                 "JXL: insufficient data for pixels".into(),
-            ));
+            )));
         }
     };
 

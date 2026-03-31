@@ -45,11 +45,6 @@ mod encoding {
 
     use enough::Stop;
 
-    /// Helper to wrap a JxlError with location tracking.
-    fn at(e: JxlError) -> At<JxlError> {
-        whereat::at(e)
-    }
-
     /// Map a [`ThreadingPolicy`] to the jxl-encoder thread count parameter.
     ///
     /// - `0` = auto (use all available cores)
@@ -486,7 +481,7 @@ mod encoding {
                 (ChannelLayout::Rgba, ChannelType::F32) => Ok(PixelLayout::RgbaLinearF32),
                 (ChannelLayout::Gray, ChannelType::F32) => Ok(PixelLayout::GrayLinearF32),
                 (ChannelLayout::GrayAlpha, ChannelType::F32) => Ok(PixelLayout::GrayAlphaLinearF32),
-                _ => Err(at(JxlError::UnsupportedOperation(
+                _ => Err(whereat::at!(JxlError::UnsupportedOperation(
                     UnsupportedOperation::PixelFormat,
                 ))),
             }
@@ -528,11 +523,11 @@ mod encoding {
             if let Some(ref limits) = self.limits {
                 limits
                     .check_dimensions(width, height)
-                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
                 let estimated = width as u64 * height as u64 * bpp as u64;
                 limits
                     .check_memory(estimated)
-                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
             }
             Ok(())
         }
@@ -542,7 +537,7 @@ mod encoding {
             if let Some(ref limits) = self.limits {
                 limits
                     .check_output_size(encoded.len() as u64)
-                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
             }
             Ok(())
         }
@@ -569,7 +564,7 @@ mod encoding {
                     req
                 };
                 req.encode(data)
-                    .map_err(|e| at(JxlError::Encode(e.decompose().0)))
+                    .map_err(|e| whereat::at!(JxlError::Encode(e.decompose().0)))
             };
 
             match &self.mode {
@@ -594,7 +589,7 @@ mod encoding {
         type Error = At<JxlError>;
 
         fn reject(op: UnsupportedOperation) -> At<JxlError> {
-            at(JxlError::UnsupportedOperation(op))
+            whereat::at!(JxlError::UnsupportedOperation(op))
         }
 
         fn encode(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<JxlError>> {
@@ -695,7 +690,7 @@ mod encoding {
                     ..
                 } => {
                     if width != *w || desc != *d {
-                        return Err(at(JxlError::InvalidInput(
+                        return Err(whereat::at!(JxlError::InvalidInput(
                             "push_rows: width or pixel format changed between calls".into(),
                         )));
                     }
@@ -716,7 +711,7 @@ mod encoding {
                 ..
             } = self.stream
             else {
-                return Err(at(JxlError::InvalidInput(
+                return Err(whereat::at!(JxlError::InvalidInput(
                     "finish: no rows were pushed".into(),
                 )));
             };
@@ -851,7 +846,7 @@ mod encoding {
         type Error = At<JxlError>;
 
         fn reject(op: UnsupportedOperation) -> At<JxlError> {
-            at(JxlError::UnsupportedOperation(op))
+            whereat::at!(JxlError::UnsupportedOperation(op))
         }
 
         fn push_frame(
@@ -862,7 +857,7 @@ mod encoding {
         ) -> Result<(), At<JxlError>> {
             // Check cancellation before doing any work.
             if let Some(stop) = stop {
-                stop.check().map_err(|e| at(JxlError::Cancelled(e)))?;
+                stop.check().map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
             }
 
             let layout = JxlEncoder::descriptor_to_layout(pixels.descriptor())?;
@@ -874,13 +869,13 @@ mod encoding {
                 if let Some(ref limits) = self.limits {
                     limits
                         .check_dimensions(w, h)
-                        .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+                        .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
                 }
                 self.width = w;
                 self.height = h;
                 self.layout = Some(layout);
             } else if w != self.width || h != self.height {
-                return Err(at(JxlError::InvalidInput(
+                return Err(whereat::at!(JxlError::InvalidInput(
                     "animation frame dimensions must match first frame".into(),
                 )));
             }
@@ -889,7 +884,7 @@ mod encoding {
             if let Some(ref limits) = self.limits {
                 limits
                     .check_frames(self.pixel_data.len() as u32 + 1)
-                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
             }
 
             let frame_data = pixels.contiguous_bytes().into_owned();
@@ -900,7 +895,7 @@ mod encoding {
             if let Some(ref limits) = self.limits {
                 limits
                     .check_memory(self.accumulated_bytes)
-                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
             }
 
             self.pixel_data.push(frame_data);
@@ -911,12 +906,12 @@ mod encoding {
         fn finish(self, stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<JxlError>> {
             // Check cancellation before expensive encode.
             if let Some(stop) = stop {
-                stop.check().map_err(|e| at(JxlError::Cancelled(e)))?;
+                stop.check().map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
             }
 
             let layout = self
                 .layout
-                .ok_or_else(|| at(JxlError::InvalidInput("no frames pushed".into())))?;
+                .ok_or_else(|| whereat::at!(JxlError::InvalidInput("no frames pushed".into())))?;
 
             let animation = AnimationParams {
                 tps_numerator: 1000,
@@ -937,10 +932,10 @@ mod encoding {
             let encoded = match &self.mode {
                 JxlEncMode::Lossy(cfg) => cfg
                     .encode_animation(self.width, self.height, layout, &animation, &anim_frames)
-                    .map_err(|e| at(JxlError::Encode(e.decompose().0)))?,
+                    .map_err(|e| whereat::at!(JxlError::Encode(e.decompose().0)))?,
                 JxlEncMode::Lossless(cfg) => cfg
                     .encode_animation(self.width, self.height, layout, &animation, &anim_frames)
-                    .map_err(|e| at(JxlError::Encode(e.decompose().0)))?,
+                    .map_err(|e| whereat::at!(JxlError::Encode(e.decompose().0)))?,
             };
 
             let encoded = self.wrap_with_metadata_and_gain_map(encoded);
@@ -980,11 +975,6 @@ mod decoding {
         JxlInfo, JxlLimits, build_pixel_data, choose_pixel_format, decode_with_options,
         extract_color_info, is_hdr_or_wide_gamut, probe,
     };
-
-    /// Helper to wrap a JxlError with location tracking.
-    fn at(e: JxlError) -> At<JxlError> {
-        whereat::at(e)
-    }
 
     /// Determine the decoder `parallel` flag from a [`ThreadingPolicy`].
     ///
@@ -1179,7 +1169,7 @@ mod decoding {
             }
 
             image_info = image_info
-                .with_orientation(zencodec::Orientation::from_exif(info.orientation as u16));
+                .with_orientation(zencodec::Orientation::from_exif(info.orientation).unwrap_or_default());
 
             if let Some((cp, tc, mc, fr)) = info.cicp {
                 image_info = image_info.with_cicp(Cicp::new(cp, tc, mc, fr));
@@ -1265,14 +1255,14 @@ mod decoding {
             if let Some(ref limits) = self.limits {
                 limits
                     .check_input_size(data.len() as u64)
-                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
             }
-            let info = probe(data).map_err(at)?;
+            let info = probe(data)?;
             // Enforce dimension limits after probing the header.
             if let Some(ref limits) = self.limits {
                 limits
                     .check_dimensions(info.width, info.height)
-                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
             }
             let image_info = Self::jxl_info_to_image_info(&info).with_source_encoding_details(info);
             Ok(Self::apply_policy(image_info, &self.policy))
@@ -1283,14 +1273,14 @@ mod decoding {
             if let Some(ref limits) = self.limits {
                 limits
                     .check_input_size(data.len() as u64)
-                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
             }
-            let info = probe(data).map_err(at)?;
+            let info = probe(data)?;
             // Enforce dimension limits after probing the header.
             if let Some(ref limits) = self.limits {
                 limits
                     .check_dimensions(info.width, info.height)
-                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
             }
             let native_desc = Self::native_descriptor(&info);
             Ok(
@@ -1308,7 +1298,7 @@ mod decoding {
             if let Some(ref limits) = self.limits {
                 limits
                     .check_input_size(data.len() as u64)
-                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
             }
             Ok(JxlDecoder {
                 data,
@@ -1325,7 +1315,7 @@ mod decoding {
             _data: Cow<'a, [u8]>,
             _preferred: &[PixelDescriptor],
         ) -> Result<Unsupported<At<JxlError>>, At<JxlError>> {
-            Err(at(JxlError::UnsupportedOperation(
+            Err(whereat::at!(JxlError::UnsupportedOperation(
                 UnsupportedOperation::RowLevelDecode,
             )))
         }
@@ -1337,7 +1327,7 @@ mod decoding {
             preferred: &[PixelDescriptor],
         ) -> Result<OutputInfo, At<JxlError>> {
             zencodec::helpers::copy_decode_to_sink(self, data, sink, preferred, |e| {
-                at(JxlError::Sink(e))
+                whereat::at!(JxlError::Sink(e))
             })
         }
 
@@ -1347,7 +1337,7 @@ mod decoding {
             preferred: &[PixelDescriptor],
         ) -> Result<JxlAnimationFrameDecoder, At<JxlError>> {
             if !self.policy.resolve_animation(true) {
-                return Err(at(JxlError::UnsupportedOperation(
+                return Err(whereat::at!(JxlError::UnsupportedOperation(
                     UnsupportedOperation::AnimationDecode,
                 )));
             }
@@ -1355,15 +1345,15 @@ mod decoding {
             if let Some(ref limits) = self.limits {
                 limits
                     .check_input_size(data.len() as u64)
-                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
             }
             // Eagerly probe to populate image_info so info() never panics.
-            let info = probe(&data).map_err(at)?;
+            let info = probe(&data)?;
             // Enforce dimension limits after probing the header.
             if let Some(ref limits) = self.limits {
                 limits
                     .check_dimensions(info.width, info.height)
-                    .map_err(|e| at(JxlError::LimitExceeded(e.to_string())))?;
+                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
             }
             let image_info = Arc::new(Self::apply_policy(
                 Self::jxl_info_to_image_info(&info),
@@ -1408,8 +1398,7 @@ mod decoding {
                 &self.preferred,
                 parallel,
                 stop_arc,
-            )
-            .map_err(at)?;
+            )?;
 
             let info = JxlDecodeJob::apply_policy(
                 JxlDecodeJob::jxl_info_to_image_info(&result.info),
@@ -1478,13 +1467,13 @@ mod decoding {
 
             // Parse header
             let mut input: &[u8] = &self.data;
-            let mut decoder = match decoder
+            let result = decoder
                 .process(&mut input)
-                .map_err(|e| at(JxlError::Decode(e)))?
-            {
+                .map_err(|e| whereat::at!(JxlError::Decode(e)))?;
+            let mut decoder = match result {
                 ProcessingResult::Complete { result } => result,
                 ProcessingResult::NeedsMoreInput { .. } => {
-                    return Err(at(JxlError::InvalidInput(
+                    return Err(whereat::at!(JxlError::InvalidInput(
                         "JXL: insufficient data for header".into(),
                     )));
                 }
@@ -1548,10 +1537,10 @@ mod decoding {
 
             loop {
                 // Advance to frame info
-                let decoder_fi = match decoder
+                let result = decoder
                     .process(&mut input)
-                    .map_err(|e| at(JxlError::Decode(e)))?
-                {
+                    .map_err(|e| whereat::at!(JxlError::Decode(e)))?;
+                let decoder_fi = match result {
                     ProcessingResult::Complete { result } => result,
                     ProcessingResult::NeedsMoreInput { .. } => break,
                 };
@@ -1564,13 +1553,13 @@ mod decoding {
                 let mut buf = vec![0u8; buf_size];
                 let output = JxlOutputBuffer::new(&mut buf, height, bytes_per_row);
 
-                let next_decoder = match decoder_fi
+                let result = decoder_fi
                     .process(&mut input, &mut [output])
-                    .map_err(|e| at(JxlError::Decode(e)))?
-                {
+                    .map_err(|e| whereat::at!(JxlError::Decode(e)))?;
+                let next_decoder = match result {
                     ProcessingResult::Complete { result } => result,
                     ProcessingResult::NeedsMoreInput { .. } => {
-                        return Err(at(JxlError::InvalidInput(
+                        return Err(whereat::at!(JxlError::InvalidInput(
                             "JXL: insufficient data for frame pixels".into(),
                         )));
                     }
@@ -1644,7 +1633,7 @@ mod decoding {
         type Error = At<JxlError>;
 
         fn wrap_sink_error(err: SinkError) -> At<JxlError> {
-            at(JxlError::Sink(err))
+            whereat::at!(JxlError::Sink(err))
         }
 
         fn info(&self) -> &ImageInfo {

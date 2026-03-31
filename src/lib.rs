@@ -13,6 +13,8 @@
 
 extern crate alloc;
 
+whereat::define_at_crate_info!();
+
 #[cfg(feature = "zencodec")]
 mod codec;
 #[cfg(feature = "decode")]
