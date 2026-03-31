@@ -857,7 +857,8 @@ mod encoding {
         ) -> Result<(), At<JxlError>> {
             // Check cancellation before doing any work.
             if let Some(stop) = stop {
-                stop.check().map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
+                stop.check()
+                    .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
             }
 
             let layout = JxlEncoder::descriptor_to_layout(pixels.descriptor())?;
@@ -906,7 +907,8 @@ mod encoding {
         fn finish(self, stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<JxlError>> {
             // Check cancellation before expensive encode.
             if let Some(stop) = stop {
-                stop.check().map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
+                stop.check()
+                    .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
             }
 
             let layout = self
@@ -1168,8 +1170,9 @@ mod decoding {
                 });
             }
 
-            image_info = image_info
-                .with_orientation(zencodec::Orientation::from_exif(info.orientation).unwrap_or_default());
+            image_info = image_info.with_orientation(
+                zencodec::Orientation::from_exif(info.orientation).unwrap_or_default(),
+            );
 
             if let Some((cp, tc, mc, fr)) = info.cicp {
                 image_info = image_info.with_cicp(Cicp::new(cp, tc, mc, fr));

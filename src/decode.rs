@@ -528,7 +528,9 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, At<JxlError>> {
     let decoder = JxlDecoder::new(options);
 
     let mut input = data;
-    let result = decoder.process(&mut input).map_err(|e| whereat::at!(map_err(e)))?;
+    let result = decoder
+        .process(&mut input)
+        .map_err(|e| whereat::at!(map_err(e)))?;
     let decoder = match result {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
@@ -648,7 +650,9 @@ pub fn decode_with_options(
 
     // Phase 1: parse header
     let mut input = data;
-    let result = decoder.process(&mut input).map_err(|e| whereat::at!(map_err(e)))?;
+    let result = decoder
+        .process(&mut input)
+        .map_err(|e| whereat::at!(map_err(e)))?;
     let mut decoder = match result {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
@@ -694,13 +698,16 @@ pub fn decode_with_options(
 
     if let Some(lim) = limits {
         let bpp = (channels * bytes_per_sample) as u32;
-        lim.validate(width as u32, height as u32, bpp).map_err(|e| whereat::at!(e))?;
+        lim.validate(width as u32, height as u32, bpp)
+            .map_err(|e| whereat::at!(e))?;
     }
 
     decoder.set_pixel_format(chosen.pixel_format.clone());
 
     // Phase 2: frame info
-    let result = decoder.process(&mut input).map_err(|e| whereat::at!(map_err(e)))?;
+    let result = decoder
+        .process(&mut input)
+        .map_err(|e| whereat::at!(map_err(e)))?;
     let decoder = match result {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
