@@ -19,8 +19,8 @@ enough = "0.4.3"
 zencodec = "0.1.8"
 zenpixels = { version = "0.2.1", default-features = false, features = ["rgb"] }
 linear-srgb = "0.6.6"
-jxl = { path = "../zenjxl-decoder/zenjxl-decoder", package = "zenjxl-decoder", optional = true }
-jxl-encoder = { path = "../jxl-encoder/jxl-encoder", optional = true, default-features = false, features = ["std", "convenience"] }
+jxl = { version = "0.3.4", path = "../zenjxl-decoder/zenjxl-decoder", package = "zenjxl-decoder", optional = true }
+jxl-encoder = { version = "0.1.3", path = "../jxl-encoder/jxl-encoder", optional = true, default-features = false, features = ["std", "convenience"] }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 
 [dev-dependencies]

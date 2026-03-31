@@ -16,8 +16,6 @@ env:
 
 jobs:
   # Base tests (no-default-features, zencodec) — run on all platforms.
-  # Cargo resolves all deps in Cargo.toml even when features are off,
-  # so sibling repos must always be cloned.
   test-base:
     name: Base (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -27,13 +25,11 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest, windows-11-arm]
     steps:
       - uses: actions/checkout@v6
-      - name: Clone sibling path deps
-        shell: bash
-        run: |
-          git clone --depth 1 https://github.com/imazen/zenjxl-decoder.git ../zenjxl-decoder
-          git clone --depth 1 https://github.com/imazen/jxl-encoder.git ../jxl-encoder-rs
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Patch path deps for CI
+        shell: bash
+        run: sed -i 's/, path = "[^"]*"//g' Cargo.toml
       - name: Check (no default features)
         run: cargo check --no-default-features
       - name: Test (no default features)
@@ -43,8 +39,8 @@ jobs:
       - name: Test (zencodec only)
         run: cargo test --no-default-features --features zencodec
 
-  # Feature permutation tests — need sibling repo clones.
-  # Skipped on aarch64 due to upstream zenjxl-decoder repr(transparent) issue.
+  # Feature permutation tests — skipped on aarch64 due to upstream
+  # zenjxl-decoder repr(transparent) issue.
   test-features:
     name: Features (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -54,15 +50,13 @@ jobs:
         os: [ubuntu-latest, macos-26-intel, windows-latest]
     steps:
       - uses: actions/checkout@v6
-      - name: Clone sibling path deps
-        shell: bash
-        run: |
-          git clone --depth 1 https://github.com/imazen/zenjxl-decoder.git ../zenjxl-decoder
-          git clone --depth 1 https://github.com/imazen/jxl-encoder.git ../jxl-encoder-rs
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           key: features
+      - name: Patch path deps for CI
+        shell: bash
+        run: sed -i 's/, path = "[^"]*"//g' Cargo.toml
       - name: Check (decode only)
         run: cargo check --no-default-features --features decode
       - name: Test (decode only)
@@ -79,16 +73,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Clone sibling path deps into project for cross visibility
-        run: |
-          # cross mounts only the project dir inside Docker.
-          # Clone deps inside the project and rewrite paths so they resolve.
-          git clone --depth 1 https://github.com/imazen/zenjxl-decoder.git .sibling-zenjxl-decoder
-          git clone --depth 1 https://github.com/imazen/jxl-encoder.git .sibling-jxl-encoder-rs
-          sed -i \
-            -e 's|path = "\.\./zenjxl-decoder/jxl"|path = ".sibling-zenjxl-decoder/jxl"|' \
-            -e 's|path = "\.\./jxl-encoder-rs/jxl_encoder"|path = ".sibling-jxl-encoder-rs/jxl_encoder"|' \
-            Cargo.toml
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: i686-unknown-linux-gnu
@@ -96,6 +80,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: cross-i686
+      - name: Patch path deps for CI
+        shell: bash
+        run: sed -i 's/, path = "[^"]*"//g' Cargo.toml
       - name: Test (i686, no default features)
         run: cross test --target i686-unknown-linux-gnu --no-default-features
 
@@ -104,14 +91,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Clone sibling path deps
-        run: |
-          git clone --depth 1 https://github.com/imazen/zenjxl-decoder.git ../zenjxl-decoder
-          git clone --depth 1 https://github.com/imazen/jxl-encoder.git ../jxl-encoder-rs
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip1
       - uses: Swatinem/rust-cache@v2
+      - name: Patch path deps for CI
+        shell: bash
+        run: sed -i 's/, path = "[^"]*"//g' Cargo.toml
       - name: Check WASM (no default features)
         run: cargo check --target wasm32-wasip1 --no-default-features
 
@@ -120,14 +106,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Clone sibling path deps
-        run: |
-          git clone --depth 1 https://github.com/imazen/zenjxl-decoder.git ../zenjxl-decoder
-          git clone --depth 1 https://github.com/imazen/jxl-encoder.git ../jxl-encoder-rs
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Patch path deps for CI
+        shell: bash
+        run: sed -i 's/, path = "[^"]*"//g' Cargo.toml
       - name: Clippy (no default features)
         run: cargo clippy --no-default-features --all-targets -- -D warnings
       - name: Clippy (zencodec only)
@@ -155,13 +140,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Clone sibling path deps
-        run: |
-          git clone --depth 1 https://github.com/imazen/zenjxl-decoder.git ../zenjxl-decoder
-          git clone --depth 1 https://github.com/imazen/jxl-encoder.git ../jxl-encoder-rs
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
+      - name: Patch path deps for CI
+        shell: bash
+        run: sed -i 's/, path = "[^"]*"//g' Cargo.toml
       - name: Check MSRV (no default features)
         run: cargo hack check --rust-version --no-default-features
       - name: Check MSRV (all features)
@@ -172,13 +156,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Clone sibling path deps
-        run: |
-          git clone --depth 1 https://github.com/imazen/zenjxl-decoder.git ../zenjxl-decoder
-          git clone --depth 1 https://github.com/imazen/jxl-encoder.git ../jxl-encoder-rs
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: Swatinem/rust-cache@v2
+      - name: Patch path deps for CI
+        shell: bash
+        run: sed -i 's/, path = "[^"]*"//g' Cargo.toml
       - name: Generate coverage
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
       - name: Upload coverage
