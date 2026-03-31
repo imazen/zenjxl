@@ -30,7 +30,7 @@ jobs:
       - name: Patch path deps for CI
         shell: bash
         run: |
-          sed -i 's/, path = "[^"]*"//g' Cargo.toml
+          perl -i -pe 's/, path = "[^"]*"//g' Cargo.toml
       - name: Check (no default features)
         run: cargo check --no-default-features
       - name: Test (no default features)
@@ -61,7 +61,7 @@ jobs:
       - name: Patch path deps for CI
         shell: bash
         run: |
-          sed -i 's/, path = "[^"]*"//g' Cargo.toml
+          perl -i -pe 's/, path = "[^"]*"//g' Cargo.toml
       - name: Check (decode only)
         run: cargo check --no-default-features --features decode
       - name: Test (decode only)
@@ -88,7 +88,7 @@ jobs:
       - name: Patch path deps for CI
         shell: bash
         run: |
-          sed -i 's/, path = "[^"]*"//g' Cargo.toml
+          perl -i -pe 's/, path = "[^"]*"//g' Cargo.toml
       - name: Test (i686, no default features)
         run: cross test --target i686-unknown-linux-gnu --no-default-features
 
@@ -104,7 +104,7 @@ jobs:
       - name: Patch path deps for CI
         shell: bash
         run: |
-          sed -i 's/, path = "[^"]*"//g' Cargo.toml
+          perl -i -pe 's/, path = "[^"]*"//g' Cargo.toml
       - name: Check WASM (no default features)
         run: cargo check --target wasm32-wasip1 --no-default-features
 
@@ -120,7 +120,7 @@ jobs:
       - name: Patch path deps for CI
         shell: bash
         run: |
-          sed -i 's/, path = "[^"]*"//g' Cargo.toml
+          perl -i -pe 's/, path = "[^"]*"//g' Cargo.toml
       - name: Clippy (no default features)
         run: cargo clippy --no-default-features --all-targets -- -D warnings
       - name: Clippy (zencodec only)
@@ -154,7 +154,7 @@ jobs:
       - name: Patch path deps for CI
         shell: bash
         run: |
-          sed -i 's/, path = "[^"]*"//g' Cargo.toml
+          perl -i -pe 's/, path = "[^"]*"//g' Cargo.toml
       - name: Check MSRV (no default features)
         run: cargo hack check --rust-version --no-default-features
       - name: Check MSRV (all features)
@@ -173,7 +173,7 @@ jobs:
       - name: Patch path deps for CI
         shell: bash
         run: |
-          sed -i 's/, path = "[^"]*"//g' Cargo.toml
+          perl -i -pe 's/, path = "[^"]*"//g' Cargo.toml
       - name: Generate coverage
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
       - name: Upload coverage

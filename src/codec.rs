@@ -1409,10 +1409,8 @@ mod decoding {
             );
             let mut output =
                 DecodeOutput::new(result.pixels, info).with_source_encoding_details(result.info);
-            if self.extract_gain_map {
-                if let Some(gm) = result.gain_map {
-                    output = output.with_extras(bundle_to_gain_map_source(gm));
-                }
+            if self.extract_gain_map && let Some(gm) = result.gain_map {
+                output = output.with_extras(bundle_to_gain_map_source(gm));
             }
             Ok(output)
         }
