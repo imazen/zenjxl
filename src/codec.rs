@@ -99,7 +99,7 @@ mod encoding {
         .with_gain_map(true)
         .with_enforces_max_pixels(true)
         .with_enforces_max_memory(true)
-        .with_stop(false)
+        .with_stop(true)
         .with_threads_supported_range(1, u16::MAX);
 
     /// Supported pixel descriptors for encoding.

@@ -51,6 +51,9 @@ jobs:
         os: [ubuntu-latest, macos-26-intel, windows-latest]
     steps:
       - uses: actions/checkout@v6
+      - name: Clone zenjxl-decoder (test resources)
+        shell: bash
+        run: git clone --depth 1 https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -162,6 +165,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Clone zenjxl-decoder (test resources)
+        run: git clone --depth 1 https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: Swatinem/rust-cache@v2
