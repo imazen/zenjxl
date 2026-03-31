@@ -31,8 +31,8 @@ jobs:
         shell: bash
         run: |
           sed -i 's/, path = "[^"]*"//g' Cargo.toml
-          # jxl-encoder 0.2.0 not yet published; use git until released
-          sed -i 's|jxl-encoder = { version = "0.2.0"|jxl-encoder = { git = "https://github.com/imazen/jxl-encoder"|g' Cargo.toml
+          # jxl-encoder 0.1.4 not yet published; use git until released
+          sed -i 's|jxl-encoder = { version = "0.1.4"|jxl-encoder = { git = "https://github.com/imazen/jxl-encoder"|g' Cargo.toml
       - name: Check (no default features)
         run: cargo check --no-default-features
       - name: Test (no default features)
@@ -61,8 +61,8 @@ jobs:
         shell: bash
         run: |
           sed -i 's/, path = "[^"]*"//g' Cargo.toml
-          # jxl-encoder 0.2.0 not yet published; use git until released
-          sed -i 's|jxl-encoder = { version = "0.2.0"|jxl-encoder = { git = "https://github.com/imazen/jxl-encoder"|g' Cargo.toml
+          # jxl-encoder 0.1.4 not yet published; use git until released
+          sed -i 's|jxl-encoder = { version = "0.1.4"|jxl-encoder = { git = "https://github.com/imazen/jxl-encoder"|g' Cargo.toml
       - name: Check (decode only)
         run: cargo check --no-default-features --features decode
       - name: Test (decode only)
@@ -90,8 +90,8 @@ jobs:
         shell: bash
         run: |
           sed -i 's/, path = "[^"]*"//g' Cargo.toml
-          # jxl-encoder 0.2.0 not yet published; use git until released
-          sed -i 's|jxl-encoder = { version = "0.2.0"|jxl-encoder = { git = "https://github.com/imazen/jxl-encoder"|g' Cargo.toml
+          # jxl-encoder 0.1.4 not yet published; use git until released
+          sed -i 's|jxl-encoder = { version = "0.1.4"|jxl-encoder = { git = "https://github.com/imazen/jxl-encoder"|g' Cargo.toml
       - name: Test (i686, no default features)
         run: cross test --target i686-unknown-linux-gnu --no-default-features
 
@@ -108,8 +108,8 @@ jobs:
         shell: bash
         run: |
           sed -i 's/, path = "[^"]*"//g' Cargo.toml
-          # jxl-encoder 0.2.0 not yet published; use git until released
-          sed -i 's|jxl-encoder = { version = "0.2.0"|jxl-encoder = { git = "https://github.com/imazen/jxl-encoder"|g' Cargo.toml
+          # jxl-encoder 0.1.4 not yet published; use git until released
+          sed -i 's|jxl-encoder = { version = "0.1.4"|jxl-encoder = { git = "https://github.com/imazen/jxl-encoder"|g' Cargo.toml
       - name: Check WASM (no default features)
         run: cargo check --target wasm32-wasip1 --no-default-features
 
@@ -126,8 +126,8 @@ jobs:
         shell: bash
         run: |
           sed -i 's/, path = "[^"]*"//g' Cargo.toml
-          # jxl-encoder 0.2.0 not yet published; use git until released
-          sed -i 's|jxl-encoder = { version = "0.2.0"|jxl-encoder = { git = "https://github.com/imazen/jxl-encoder"|g' Cargo.toml
+          # jxl-encoder 0.1.4 not yet published; use git until released
+          sed -i 's|jxl-encoder = { version = "0.1.4"|jxl-encoder = { git = "https://github.com/imazen/jxl-encoder"|g' Cargo.toml
       - name: Clippy (no default features)
         run: cargo clippy --no-default-features --all-targets -- -D warnings
       - name: Clippy (zencodec only)
@@ -162,8 +162,8 @@ jobs:
         shell: bash
         run: |
           sed -i 's/, path = "[^"]*"//g' Cargo.toml
-          # jxl-encoder 0.2.0 not yet published; use git until released
-          sed -i 's|jxl-encoder = { version = "0.2.0"|jxl-encoder = { git = "https://github.com/imazen/jxl-encoder"|g' Cargo.toml
+          # jxl-encoder 0.1.4 not yet published; use git until released
+          sed -i 's|jxl-encoder = { version = "0.1.4"|jxl-encoder = { git = "https://github.com/imazen/jxl-encoder"|g' Cargo.toml
       - name: Check MSRV (no default features)
         run: cargo hack check --rust-version --no-default-features
       - name: Check MSRV (all features)
@@ -181,8 +181,8 @@ jobs:
         shell: bash
         run: |
           sed -i 's/, path = "[^"]*"//g' Cargo.toml
-          # jxl-encoder 0.2.0 not yet published; use git until released
-          sed -i 's|jxl-encoder = { version = "0.2.0"|jxl-encoder = { git = "https://github.com/imazen/jxl-encoder"|g' Cargo.toml
+          # jxl-encoder 0.1.4 not yet published; use git until released
+          sed -i 's|jxl-encoder = { version = "0.1.4"|jxl-encoder = { git = "https://github.com/imazen/jxl-encoder"|g' Cargo.toml
       - name: Generate coverage
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
       - name: Upload coverage
