@@ -12,15 +12,15 @@ exclude = ["CLAUDE.md", ".claude/", ".github/"]
 
 [dependencies]
 thiserror = { version = "2.0.18", default-features = false }
-whereat = "0.1.5"
+whereat = { version = "0.1.5"}
 rgb = { version = "0.8.53", default-features = false, features = ["as-bytes"] }
 imgref = "1.12.0"
 enough = "0.4.3"
-zencodec = "0.1.11"
+zencodec = { version = "0.1.11"}
 zenpixels = { version = "0.2.2", default-features = false, features = ["rgb"] }
-linear-srgb = "0.6.6"
+linear-srgb = { version = "0.6.7"}
 jxl = { version = "0.3.4", path = "../zenjxl-decoder/zenjxl-decoder", package = "zenjxl-decoder", optional = true }
-jxl-encoder = { version = "0.1.4", path = "../jxl-encoder/jxl-encoder", optional = true, default-features = false, features = ["std", "convenience"] }
+jxl-encoder = { version = "0.1.4", optional = true, default-features = false, features = ["std", "convenience"] }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 
 [dev-dependencies]
