@@ -16,7 +16,7 @@ whereat = "0.1.5"
 rgb = { version = "0.8.53", default-features = false, features = ["as-bytes"] }
 imgref = "1.12.0"
 enough = "0.4.3"
-zencodec = "0.1.8"
+zencodec = "0.1.11"
 zenpixels = { version = "0.2.2", default-features = false, features = ["rgb"] }
 linear-srgb = "0.6.6"
 jxl = { version = "0.3.4", path = "../zenjxl-decoder/zenjxl-decoder", package = "zenjxl-decoder", optional = true }
