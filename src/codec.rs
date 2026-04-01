@@ -1000,7 +1000,10 @@ mod decoding {
         use zencodec::gainmap::{GainMapInfo, GainMapSource};
 
         // Parse ISO 21496-1 metadata; fall back to defaults on failure.
-        let params = zencodec::gainmap::parse_iso21496(&bundle.metadata).unwrap_or_default();
+        // JXL jhgm bundles store raw GainMapMetadata (no version byte prefix).
+        // The version byte is part of the AVIF ToneMapImage envelope, not the
+        // metadata itself. Use the JPEG/JXL variant which expects no version byte.
+        let params = zencodec::gainmap::parse_iso21496_jpeg(&bundle.metadata).unwrap_or_default();
 
         // Probe the bare JXL codestream to get gain map image dimensions.
         let (width, height, channels) = if let Ok(gm_info) = probe(&bundle.gain_map_codestream) {
