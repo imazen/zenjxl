@@ -534,11 +534,11 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, At<JxlError>> {
     // - ICC 1MB: covers all real-world ICC profiles (typical sRGB is 0.5-3KB)
     // - 64MB memory: bounds total allocations during header+ICC parsing
     // - Minimal tree/patch/spline limits since we don't decode frames
-    options.limits.max_icc_size = Some(1 << 20);       // 1 MB (vs 256 MB default)
-    options.limits.max_memory_bytes = Some(64 << 20);  // 64 MB
-    options.limits.max_tree_size = Some(1 << 16);      // 64K nodes
-    options.limits.max_patches = Some(0);              // no patches during probe
-    options.limits.max_spline_points = Some(0);        // no splines during probe
+    options.limits.max_icc_size = Some(1 << 20); // 1 MB (vs 256 MB default)
+    options.limits.max_memory_bytes = Some(64 << 20); // 64 MB
+    options.limits.max_tree_size = Some(1 << 16); // 64K nodes
+    options.limits.max_patches = Some(0); // no patches during probe
+    options.limits.max_spline_points = Some(0); // no splines during probe
     let decoder = JxlDecoder::new(options);
 
     let mut input = data;
@@ -1090,7 +1090,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "zenjxl-decoder 0.3.4 panics with 'padded data too short' on full decode of lossless files"]
     fn extra_channels_survive_full_decode() {
         // Verify extra_channels are also populated after full decode, not just probe
         let data = read_jxl_test_file("3x3a_srgb_lossless.jxl");
@@ -1104,7 +1103,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "zenjxl-decoder 0.3.4 panics with 'padded data too short' on full decode of lossless files"]
     fn preview_size_survives_full_decode() {
         let data = read_jxl_test_file("with_preview.jxl");
         let output = decode(&data, None, &[]).unwrap();
