@@ -8,7 +8,7 @@ description = "JPEG XL encoding and decoding with zencodec trait integration"
 categories = ["multimedia::images", "multimedia::encoding"]
 keywords = ["jxl", "jpeg-xl", "image", "encoder", "decoder"]
 repository = "https://github.com/imazen/zenjxl"
-exclude = ["CLAUDE.md", ".claude/", ".github/"]
+exclude = ["CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", ".claude/", ".superwork/", ".zenbench/", "copter-report/", ".github/", "Cross.toml", "justfile", "Cargo.toml.original.txt", "fuzz/"]
 
 [dependencies]
 thiserror = { version = "2.0.18", default-features = false }
