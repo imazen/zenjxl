@@ -969,7 +969,7 @@ mod decoding {
     use zencodec::decode::{DecodeCapabilities, DecodeOutput, DecodePolicy, OutputInfo, SinkError};
     use zencodec::{AnimationFrame, OwnedAnimationFrame};
     use zencodec::{ImageInfo, ResourceLimits, UnsupportedOperation};
-    use zenpixels::Cicp;
+    use zenpixels::{Cicp, ColorAuthority};
 
     use enough::Stop;
 
@@ -1187,6 +1187,13 @@ mod decoding {
 
             if let Some(ref icc) = info.icc_profile {
                 image_info = image_info.with_icc_profile(icc.clone());
+            }
+
+            // JXL color mode is exclusive:
+            //   want_icc=true  → only ICC is set → authority stays Icc (default)
+            //   want_icc=false → both CICP and a synthesized ICC are set → CICP is authoritative
+            if info.cicp.is_some() {
+                image_info = image_info.with_color_authority(ColorAuthority::Cicp);
             }
 
             if let Some(ref exif) = info.exif {
