@@ -31,6 +31,11 @@ default = ["encode", "decode"]
 decode = ["dep:jxl"]
 threads = ["decode", "jxl/threads"]
 encode = ["dep:jxl-encoder"]
+# Enable rayon-based per-frame parallelism inside the JXL encoder.
+# Useful when a single encode call should saturate multiple cores
+# (e.g. high-effort encodes); not needed when the caller already runs
+# many encode tasks in parallel.
+parallel = ["encode", "jxl-encoder/parallel"]
 butteraugli-loop = ["encode", "jxl-encoder/butteraugli-loop"]
 # Enable zencodec trait integration
 zencodec = []

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `parallel` feature forwards to `jxl-encoder/parallel`, enabling rayon-based
+  per-frame parallelism inside the encoder. Previously, callers could only
+  parallelize across encode calls — now a single high-effort encode can
+  saturate multiple cores.
+
 ## 0.1.1 (2026-04-01)
 
 - Bump `jxl-encoder` 0.1.4 -> 0.2.0, `zenjxl-decoder` 0.3.4 -> 0.3.5
