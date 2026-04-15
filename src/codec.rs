@@ -111,6 +111,8 @@ mod encoding {
         PixelDescriptor::RGB8_SRGB,
         PixelDescriptor::RGBA8_SRGB,
         PixelDescriptor::BGRA8_SRGB,
+        PixelDescriptor::RGBX8_SRGB,
+        PixelDescriptor::BGRX8_SRGB,
         PixelDescriptor::GRAY8_SRGB,
         PixelDescriptor::GRAYA8_SRGB,
         // 16-bit sRGB
@@ -593,9 +595,38 @@ mod encoding {
         }
 
         fn encode(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<JxlError>> {
-            let layout = Self::descriptor_to_layout(pixels.descriptor())?;
+            use zenpixels::PixelFormat;
+
             let width = pixels.width();
             let height = pixels.rows();
+
+            // Rgbx8 / Bgrx8: byte 3 is undefined padding — strip to 3-channel RGB
+            // so the encoder doesn't treat the padding as alpha.
+            let pf = pixels.descriptor().pixel_format();
+            if matches!(pf, PixelFormat::Rgbx8 | PixelFormat::Bgrx8) {
+                self.check_limits(width, height, 3)?;
+                let raw = pixels.contiguous_bytes();
+                let mut rgb =
+                    alloc::vec::Vec::with_capacity((width as usize) * (height as usize) * 3);
+                if matches!(pf, PixelFormat::Rgbx8) {
+                    for px in raw.chunks_exact(4) {
+                        rgb.extend_from_slice(&[px[0], px[1], px[2]]);
+                    }
+                } else {
+                    // Bgrx8: swap B↔R while stripping.
+                    for px in raw.chunks_exact(4) {
+                        rgb.extend_from_slice(&[px[2], px[1], px[0]]);
+                    }
+                }
+                let encoded = self.encode_with_metadata(&rgb, width, height, PixelLayout::Rgb8)?;
+                let encoded = self.maybe_attach_gain_map(encoded);
+                self.check_encoded_output_size(&encoded)?;
+                return Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
+                    .with_mime_type("image/jxl")
+                    .with_extension("jxl"));
+            }
+
+            let layout = Self::descriptor_to_layout(pixels.descriptor())?;
             let bpp = pixels.descriptor().bytes_per_pixel() as u32;
             self.check_limits(width, height, bpp)?;
 
@@ -664,16 +695,39 @@ mod encoding {
         }
 
         fn push_rows(&mut self, rows: PixelSlice<'_>) -> Result<(), At<JxlError>> {
+            use zenpixels::PixelFormat;
+
             let desc = rows.descriptor();
-            let layout = Self::descriptor_to_layout(desc)?;
             let width = rows.width();
             let num_rows = rows.rows();
-            let bytes = rows.contiguous_bytes();
+
+            // Rgbx8 / Bgrx8: strip padding byte and coerce to Rgb8 in the
+            // accumulated buffer, then treat the stream as Rgb8 internally.
+            let pf = desc.pixel_format();
+            let (layout, bytes_cow): (PixelLayout, alloc::borrow::Cow<'_, [u8]>) =
+                if matches!(pf, PixelFormat::Rgbx8 | PixelFormat::Bgrx8) {
+                    let raw = rows.contiguous_bytes();
+                    let mut rgb =
+                        alloc::vec::Vec::with_capacity((width as usize) * (num_rows as usize) * 3);
+                    if matches!(pf, PixelFormat::Rgbx8) {
+                        for px in raw.chunks_exact(4) {
+                            rgb.extend_from_slice(&[px[0], px[1], px[2]]);
+                        }
+                    } else {
+                        for px in raw.chunks_exact(4) {
+                            rgb.extend_from_slice(&[px[2], px[1], px[0]]);
+                        }
+                    }
+                    (PixelLayout::Rgb8, alloc::borrow::Cow::Owned(rgb))
+                } else {
+                    (Self::descriptor_to_layout(desc)?, rows.contiguous_bytes())
+                };
+            let bytes: &[u8] = &bytes_cow;
 
             match &mut self.stream {
                 StreamState::Empty => {
                     let mut data = Vec::new();
-                    data.extend_from_slice(&bytes);
+                    data.extend_from_slice(bytes);
                     self.stream = StreamState::Accumulating {
                         width,
                         layout,
@@ -694,7 +748,7 @@ mod encoding {
                             "push_rows: width or pixel format changed between calls".into(),
                         )));
                     }
-                    data.extend_from_slice(&bytes);
+                    data.extend_from_slice(bytes);
                     *rows_pushed += num_rows;
                 }
             }
@@ -855,13 +909,22 @@ mod encoding {
             duration_ms: u32,
             stop: Option<&dyn Stop>,
         ) -> Result<(), At<JxlError>> {
+            use zenpixels::PixelFormat;
+
             // Check cancellation before doing any work.
             if let Some(stop) = stop {
                 stop.check()
                     .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
             }
 
-            let layout = JxlEncoder::descriptor_to_layout(pixels.descriptor())?;
+            let desc = pixels.descriptor();
+            let pf = desc.pixel_format();
+            let strip_padding = matches!(pf, PixelFormat::Rgbx8 | PixelFormat::Bgrx8);
+            let layout = if strip_padding {
+                PixelLayout::Rgb8
+            } else {
+                JxlEncoder::descriptor_to_layout(desc)?
+            };
             let w = pixels.width();
             let h = pixels.rows();
 
@@ -888,7 +951,22 @@ mod encoding {
                     .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
             }
 
-            let frame_data = pixels.contiguous_bytes().into_owned();
+            let frame_data = if strip_padding {
+                let raw = pixels.contiguous_bytes();
+                let mut rgb = Vec::with_capacity((w as usize) * (h as usize) * 3);
+                if matches!(pf, PixelFormat::Rgbx8) {
+                    for px in raw.chunks_exact(4) {
+                        rgb.extend_from_slice(&[px[0], px[1], px[2]]);
+                    }
+                } else {
+                    for px in raw.chunks_exact(4) {
+                        rgb.extend_from_slice(&[px[2], px[1], px[0]]);
+                    }
+                }
+                rgb
+            } else {
+                pixels.contiguous_bytes().into_owned()
+            };
             let frame_bytes = frame_data.len() as u64;
             self.accumulated_bytes += frame_bytes;
 
@@ -1860,6 +1938,135 @@ mod tests {
         let decoded = decoder.decode().unwrap();
         assert_eq!(decoded.width(), width);
         assert_eq!(decoded.height(), height);
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn supported_descriptors_includes_rgbx_and_bgrx() {
+        use zencodec::encode::EncoderConfig;
+        let desc = JxlEncoderConfig::supported_descriptors();
+        assert!(
+            desc.contains(&zenpixels::PixelDescriptor::RGBX8_SRGB),
+            "RGBX8_SRGB must be in supported_descriptors"
+        );
+        assert!(
+            desc.contains(&zenpixels::PixelDescriptor::BGRX8_SRGB),
+            "BGRX8_SRGB must be in supported_descriptors"
+        );
+    }
+
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    #[test]
+    fn encode_rgbx8_roundtrip() {
+        use zencodec::decode::Decode;
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zenpixels::{PixelDescriptor, PixelSlice};
+
+        let w = 16u32;
+        let h = 16u32;
+        let mut buf = Vec::with_capacity((w * h * 4) as usize);
+        for _ in 0..(w * h) {
+            buf.extend_from_slice(&[255, 128, 0, 0x13]);
+        }
+        let slice =
+            PixelSlice::new(&buf, w, h, (w * 4) as usize, PixelDescriptor::RGBX8_SRGB).unwrap();
+
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let encoder = config.job().encoder().unwrap();
+        let output = encoder.encode(slice.erase()).unwrap();
+        assert!(!output.data().is_empty());
+
+        // Verify decode back to RGB (no alpha channel expected).
+        use zencodec::decode::{DecodeJob, DecoderConfig};
+        let dec = JxlDecoderConfig::new();
+        let decoder = dec
+            .job()
+            .decoder(Cow::Borrowed(output.data()), &[])
+            .unwrap();
+        let decoded = decoder.decode().unwrap();
+        assert_eq!(decoded.width(), w);
+        assert_eq!(decoded.height(), h);
+    }
+
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    #[test]
+    fn encode_bgrx8_roundtrip() {
+        use zencodec::decode::Decode;
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zenpixels::{PixelDescriptor, PixelSlice};
+
+        let w = 16u32;
+        let h = 16u32;
+        let mut buf = Vec::with_capacity((w * h * 4) as usize);
+        for _ in 0..(w * h) {
+            // BGR order with padding: B=0, G=128, R=255, pad
+            buf.extend_from_slice(&[0, 128, 255, 0x42]);
+        }
+        let slice =
+            PixelSlice::new(&buf, w, h, (w * 4) as usize, PixelDescriptor::BGRX8_SRGB).unwrap();
+
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let encoder = config.job().encoder().unwrap();
+        let output = encoder.encode(slice.erase()).unwrap();
+        assert!(!output.data().is_empty());
+
+        use zencodec::decode::{DecodeJob, DecoderConfig};
+        let dec = JxlDecoderConfig::new();
+        let decoder = dec
+            .job()
+            .decoder(Cow::Borrowed(output.data()), &[])
+            .unwrap();
+        let decoded = decoder.decode().unwrap();
+        assert_eq!(decoded.width(), w);
+        assert_eq!(decoded.height(), h);
+    }
+
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    #[test]
+    fn encode_rgbx8_smaller_than_rgba() {
+        // RGBX8 encodes as 3-channel RGB; an RGBA8 encode of the same data
+        // with non-opaque alpha bytes stored in byte 3 would be larger or
+        // different. Confirm RGBX output matches RGB output byte-for-byte.
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zenpixels::{PixelDescriptor, PixelSlice};
+
+        let w = 16u32;
+        let h = 16u32;
+        let mut rgbx = Vec::with_capacity((w * h * 4) as usize);
+        let mut rgb = Vec::with_capacity((w * h * 3) as usize);
+        for i in 0..(w * h) {
+            let r = (i & 0xff) as u8;
+            let g = ((i >> 1) & 0xff) as u8;
+            let b = ((i >> 2) & 0xff) as u8;
+            rgbx.extend_from_slice(&[r, g, b, 0x55]);
+            rgb.extend_from_slice(&[r, g, b]);
+        }
+
+        let rgbx_slice =
+            PixelSlice::new(&rgbx, w, h, (w * 4) as usize, PixelDescriptor::RGBX8_SRGB).unwrap();
+        let rgb_slice =
+            PixelSlice::new(&rgb, w, h, (w * 3) as usize, PixelDescriptor::RGB8_SRGB).unwrap();
+
+        let rgbx_out = JxlEncoderConfig::new()
+            .with_lossless(true)
+            .job()
+            .encoder()
+            .unwrap()
+            .encode(rgbx_slice.erase())
+            .unwrap();
+        let rgb_out = JxlEncoderConfig::new()
+            .with_lossless(true)
+            .job()
+            .encoder()
+            .unwrap()
+            .encode(rgb_slice.erase())
+            .unwrap();
+
+        assert_eq!(
+            rgbx_out.data(),
+            rgb_out.data(),
+            "RGBX8 must encode identically to RGB8 (padding byte stripped)"
+        );
     }
 
     #[cfg(feature = "decode")]
