@@ -968,7 +968,7 @@ mod decoding {
     use zencodec::Unsupported;
     use zencodec::decode::{DecodeCapabilities, DecodeOutput, DecodePolicy, OutputInfo, SinkError};
     use zencodec::{AnimationFrame, OwnedAnimationFrame};
-    use zencodec::{ImageInfo, ResourceLimits, UnsupportedOperation};
+    use zencodec::{ContentLightLevel, ImageInfo, ResourceLimits, UnsupportedOperation};
     use zenpixels::{Cicp, ColorAuthority};
 
     use enough::Stop;
@@ -1202,6 +1202,18 @@ mod decoding {
 
             if let Some(ref xmp) = info.xmp {
                 image_info = image_info.with_xmp(xmp.clone());
+            }
+
+            // JXL ToneMapping.intensity_target = peak luminance the content was
+            // mastered for. Default 255.0 = SDR; >255 indicates HDR. Surface as
+            // MaxCLL so downstream HDR-aware code (tone-mapping policy, encode
+            // negotiation) sees the peak. JXL has no MaxFALL signal — leave 0.
+            // JXL also has no separate cLLi-style box; this is the closest
+            // semantic match in the zencodec metadata model.
+            if info.intensity_target > 255.0 {
+                let max_cll = info.intensity_target.min(u16::MAX as f32) as u16;
+                image_info =
+                    image_info.with_content_light_level(ContentLightLevel::new(max_cll, 0));
             }
 
             image_info
