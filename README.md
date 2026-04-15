@@ -1,8 +1,8 @@
-# zenjxl [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenjxl/ci.yml?style=for-the-badge)](https://github.com/imazen/zenjxl/actions/workflows/ci.yml) [![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=for-the-badge)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![License](https://img.shields.io/badge/license-AGPL--3.0--only%20OR%20Commercial-blue?style=for-the-badge)](https://github.com/imazen/zenjxl#license)
+# zenjxl [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenjxl/ci.yml?style=flat-square)](https://github.com/imazen/zenjxl/actions/workflows/ci.yml) [![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=flat-square)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![License](https://img.shields.io/badge/license-AGPL--3.0--only%20OR%20Commercial-blue?style=flat-square)](https://github.com/imazen/zenjxl#license)
 
 zenjxl is a JPEG XL encoding and decoding library combining [zenjxl-decoder](https://github.com/imazen/zenjxl-decoder) and [jxl-encoder](https://github.com/imazen/jxl-encoder) with resource limits, cancellation, and gain map support.
 
-zenjxl-decoder is Imazen's fork of jxl-rs with additional metadata extraction, gain map parsing, and resource limiting. jxl-encoder is a pure Rust JPEG XL encoder supporting both lossless (modular) and lossy (VarDCT) modes. zenjxl wraps both behind a unified API and provides zencodec/zennode integration for use in [zenpipe](https://github.com/imazen/zenpipe) pipelines.
+zenjxl-decoder is Imazen's fork of jxl-rs with additional metadata extraction, gain map parsing, and resource limiting. jxl-encoder is a pure Rust JPEG XL encoder supporting both lossless (modular) and lossy (VarDCT) modes. zenjxl wraps both behind a unified API and provides zencodec integration for use in [zenpipe](https://github.com/imazen/zenpipe) pipelines.
 
 `#![forbid(unsafe_code)]`, `no_std + alloc`, edition 2024.
 
@@ -61,9 +61,9 @@ let lossless = encode_rgb8_lossless(rgb, 256, 256).unwrap();
 | `decode` | yes | JPEG XL decoding via [zenjxl-decoder](https://github.com/imazen/zenjxl-decoder) |
 | `encode` | yes | JPEG XL encoding via [jxl-encoder](https://github.com/imazen/jxl-encoder) |
 | `threads` | no | Multithreaded decoding via rayon (requires `decode`) |
+| `parallel` | no | Per-frame parallelism inside the encoder via rayon (requires `encode`) |
 | `butteraugli-loop` | no | Perceptual quality tuning (requires `encode`) |
 | `zencodec` | no | Config/Job/Executor trait integration for zen codec pipelines |
-| `zennode` | no | `EncodeJxl` and `DecodeJxl` pipeline node definitions |
 
 ## Limitations
 
