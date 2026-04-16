@@ -47,9 +47,9 @@ mod encoding {
 
     /// Map a [`ThreadingPolicy`] to the jxl-encoder thread count parameter.
     ///
-    /// - `0` = auto (use all available cores)
-    /// - `1` = single-threaded
-    /// - `N` = use N threads
+    /// - `0` = use ambient rayon pool (caller controls via `pool.install()`)
+    /// - `1` = single-threaded (no rayon)
+    /// - `N >= 2` = create a dedicated N-thread pool
     fn policy_to_threads(policy: zencodec::ThreadingPolicy) -> usize {
         match policy {
             zencodec::ThreadingPolicy::SingleThread => 1,
@@ -57,13 +57,8 @@ mod encoding {
             zencodec::ThreadingPolicy::LimitOrAny {
                 preferred_max_threads,
             } => preferred_max_threads as usize,
-            zencodec::ThreadingPolicy::Balanced => {
-                // no_std: can't query available_parallelism; use 0 (auto) and
-                // let the encoder's rayon pool decide.
-                0
-            }
-            zencodec::ThreadingPolicy::Unlimited => 0, // 0 = auto
-            _ => 0,                                    // future variants default to auto
+            zencodec::ThreadingPolicy::Balanced | zencodec::ThreadingPolicy::Unlimited => 0,
+            _ => 0,
         }
     }
 
