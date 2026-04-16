@@ -50,7 +50,10 @@ mod encoding {
     /// `is_parallel() == true` → threads=0 (ambient rayon pool).
     /// `is_parallel() == false` → threads=1 (sequential).
     fn apply_threads(mode: &JxlEncMode, limits: &Option<ResourceLimits>) -> JxlEncMode {
-        let threads = if limits.as_ref().is_some_and(|l| !l.threading().is_parallel()) {
+        let threads = if limits
+            .as_ref()
+            .is_some_and(|l| !l.threading().is_parallel())
+        {
             1
         } else {
             0
