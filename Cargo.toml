@@ -16,7 +16,7 @@ whereat = { version = "0.1.5"}
 rgb = { version = "0.8.53", default-features = false, features = ["as-bytes"] }
 imgref = "1.12.0"
 enough = "0.4.3"
-zencodec = { version = "0.1.16"}
+zencodec = { version = "0.1.18" }
 zenpixels = { version = "0.2.7", default-features = false, features = ["rgb"] }
 linear-srgb = { version = "0.6.7"}
 jxl = { version = "0.3.7", package = "zenjxl-decoder", optional = true }
@@ -41,3 +41,4 @@ butteraugli-loop = ["encode", "jxl-encoder/butteraugli-loop"]
 zencodec = []
 # Enable zennode node definitions (EncodeJxl, DecodeJxl)
 # zennode = ["dep:zennode"]
+

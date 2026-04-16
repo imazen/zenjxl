@@ -45,29 +45,16 @@ mod encoding {
 
     use enough::Stop;
 
-    /// Map a [`ThreadingPolicy`] to the jxl-encoder thread count parameter.
-    ///
-    /// - `0` = use ambient rayon pool (caller controls via `pool.install()`)
-    /// - `1` = single-threaded (no rayon)
-    /// - `N >= 2` = create a dedicated N-thread pool
-    fn policy_to_threads(policy: zencodec::ThreadingPolicy) -> usize {
-        match policy {
-            zencodec::ThreadingPolicy::SingleThread => 1,
-            zencodec::ThreadingPolicy::LimitOrSingle { max_threads } => max_threads as usize,
-            zencodec::ThreadingPolicy::LimitOrAny {
-                preferred_max_threads,
-            } => preferred_max_threads as usize,
-            zencodec::ThreadingPolicy::Balanced | zencodec::ThreadingPolicy::Unlimited => 0,
-            _ => 0,
-        }
-    }
-
     /// Apply threading policy from [`ResourceLimits`] to a [`JxlEncMode`].
+    ///
+    /// `is_parallel() == true` → threads=0 (ambient rayon pool).
+    /// `is_parallel() == false` → threads=1 (sequential).
     fn apply_threads(mode: &JxlEncMode, limits: &Option<ResourceLimits>) -> JxlEncMode {
-        let threads = limits
-            .as_ref()
-            .map(|l| policy_to_threads(l.threading()))
-            .unwrap_or(0);
+        let threads = if limits.as_ref().is_some_and(|l| !l.threading().is_parallel()) {
+            1
+        } else {
+            0
+        };
         match mode {
             JxlEncMode::Lossy(cfg) => JxlEncMode::Lossy(cfg.clone().with_threads(threads)),
             JxlEncMode::Lossless(cfg) => JxlEncMode::Lossless(cfg.clone().with_threads(threads)),
@@ -1051,14 +1038,9 @@ mod decoding {
         extract_color_info, is_hdr_or_wide_gamut, probe,
     };
 
-    /// Determine the decoder `parallel` flag from a [`ThreadingPolicy`].
-    ///
-    /// Returns `Some(false)` for single-threaded, `Some(true)` for explicitly
-    /// multi-threaded, or `None` to keep the decoder default.
+    /// Determine the decoder `parallel` flag from limits.
     fn policy_to_parallel(limits: &Option<ResourceLimits>) -> Option<bool> {
-        limits
-            .as_ref()
-            .map(|l| !matches!(l.threading(), zencodec::ThreadingPolicy::SingleThread))
+        limits.as_ref().map(|l| l.threading().is_parallel())
     }
 
     /// Convert a jxl-rs [`GainMapBundle`] into a zencodec [`GainMapSource`].
@@ -2200,7 +2182,7 @@ mod tests {
         let buf =
             zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, width, height).unwrap();
 
-        let limits = ResourceLimits::none().with_threading(ThreadingPolicy::SingleThread);
+        let limits = ResourceLimits::none().with_threading(ThreadingPolicy::Sequential);
         let config = JxlEncoderConfig::new().with_lossless(true);
         let encoder = config.job().with_limits(limits).encoder().unwrap();
         let output = encoder.encode(buf.as_slice().into()).unwrap();
@@ -2228,7 +2210,7 @@ mod tests {
         let buf =
             zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, width, height).unwrap();
 
-        let limits = ResourceLimits::none().with_threading(ThreadingPolicy::SingleThread);
+        let limits = ResourceLimits::none().with_threading(ThreadingPolicy::Sequential);
 
         // Encode with single thread
         let config = JxlEncoderConfig::new().with_lossless(true);
