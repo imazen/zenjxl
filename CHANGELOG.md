@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## [Unreleased]
+
+## [0.2.0] - 2026-04-17
+
+### BREAKING CHANGES
+- Re-exports from `jxl-encoder` which bumped 0.2 to 0.3
 
 ### Added
 - `parallel` feature forwards to `jxl-encoder/parallel`, enabling rayon-based
