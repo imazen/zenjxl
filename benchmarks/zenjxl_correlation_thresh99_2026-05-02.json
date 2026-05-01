@@ -1,0 +1,161 @@
+{
+  "source": "/home/lilith/work/zen/zenjxl--ablate-overnight-2026-05-02/benchmarks/zenjxl_features_multiaxis_only_2026-05-02.tsv",
+  "threshold": 0.99,
+  "n_rows": 421,
+  "n_features_in": 99,
+  "n_features_dropped": 7,
+  "n_constant": 14,
+  "n_low_variance": 5,
+  "constant_columns": [
+    {
+      "name": "feat_alpha_present",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_alpha_used_fraction",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_alpha_bimodal_score",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_peak_luminance_nits",
+      "n_unique": 1,
+      "value": 80.0
+    },
+    {
+      "name": "feat_p99_luminance_nits",
+      "n_unique": 1,
+      "value": 80.0
+    },
+    {
+      "name": "feat_hdr_headroom_stops",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_hdr_pixel_fraction",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_wide_gamut_peak",
+      "n_unique": 1,
+      "value": 1.0
+    },
+    {
+      "name": "feat_wide_gamut_fraction",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_effective_bit_depth",
+      "n_unique": 1,
+      "value": 8.0
+    },
+    {
+      "name": "feat_hdr_present",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_gamut_coverage_srgb",
+      "n_unique": 1,
+      "value": 1.0
+    },
+    {
+      "name": "feat_gamut_coverage_p3",
+      "n_unique": 1,
+      "value": 1.0
+    },
+    {
+      "name": "feat_channel_count",
+      "n_unique": 1,
+      "value": 3.0
+    }
+  ],
+  "low_variance_columns": [
+    {
+      "name": "feat_indexed_palette_width",
+      "n_unique": 4
+    },
+    {
+      "name": "feat_palette_fits_in_256",
+      "n_unique": 2
+    },
+    {
+      "name": "feat_is_grayscale",
+      "n_unique": 2
+    },
+    {
+      "name": "feat_quant_survival_uv_p10",
+      "n_unique": 4
+    },
+    {
+      "name": "feat_laplacian_variance_p1",
+      "n_unique": 2
+    }
+  ],
+  "clusters": [
+    {
+      "anchor": "feat_aq_map_p5",
+      "anchor_n_unique": 184,
+      "dropped": [
+        "feat_noise_floor_y_p5"
+      ],
+      "cluster_size": 2,
+      "min_abs_corr_in_cluster": 0.9901425982242364
+    },
+    {
+      "anchor": "feat_chroma_complexity",
+      "anchor_n_unique": 346,
+      "dropped": [
+        "feat_colourfulness"
+      ],
+      "cluster_size": 2,
+      "min_abs_corr_in_cluster": 0.9901758877611904
+    },
+    {
+      "anchor": "feat_log_aspect_abs",
+      "anchor_n_unique": 127,
+      "dropped": [
+        "feat_aspect_min_over_max"
+      ],
+      "cluster_size": 2,
+      "min_abs_corr_in_cluster": 0.9938861433508575
+    },
+    {
+      "anchor": "feat_noise_floor_y",
+      "anchor_n_unique": 203,
+      "dropped": [
+        "feat_aq_map_p10",
+        "feat_noise_floor_y_p10"
+      ],
+      "cluster_size": 3,
+      "min_abs_corr_in_cluster": 0.9957522872484994
+    },
+    {
+      "anchor": "feat_pixel_count",
+      "anchor_n_unique": 147,
+      "dropped": [
+        "feat_bitmap_bytes",
+        "feat_log_pixels"
+      ],
+      "cluster_size": 3,
+      "min_abs_corr_in_cluster": 0.9999999999999997
+    }
+  ],
+  "drop_list": [
+    "feat_aq_map_p10",
+    "feat_aspect_min_over_max",
+    "feat_bitmap_bytes",
+    "feat_colourfulness",
+    "feat_log_pixels",
+    "feat_noise_floor_y_p10",
+    "feat_noise_floor_y_p5"
+  ]
+}
