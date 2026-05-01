@@ -1,0 +1,13 @@
+[package]
+name = "extract_features_multiaxis"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+zenanalyze = { path = "/home/lilith/work/zen/zenanalyze", features = ["experimental", "hdr"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
