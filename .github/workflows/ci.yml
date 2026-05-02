@@ -99,6 +99,11 @@ jobs:
         run: |
           perl -i -pe 's/, path = "[^"]*"//g' Cargo.toml
       - name: Test (i686, no default features)
+        env:
+          # Mount sibling jxl-encoder--expert into the cross container so
+          # the [patch.crates-io] path dep resolves. Cross only mounts the
+          # project dir by default; volumes in Cross.toml extend that.
+          JXL_ENCODER_EXPERT_DIR: ${{ github.workspace }}/../jxl-encoder--expert
         run: cross test --target i686-unknown-linux-gnu --no-default-features
 
   wasm:
