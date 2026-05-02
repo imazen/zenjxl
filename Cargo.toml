@@ -1,6 +1,6 @@
 [package]
 name = "zenjxl"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.93"
 license = "AGPL-3.0-only OR LicenseRef-Imazen-Commercial"
@@ -25,7 +25,7 @@ zencodec = { version = "0.1.19" }
 zenpixels = { version = "0.2.10", default-features = false, features = ["rgb"] }
 linear-srgb = { version = "0.6.7"}
 jxl = { version = "0.3.7", package = "zenjxl-decoder", optional = true }
-jxl-encoder = { version = "0.3.0", optional = true, default-features = false, features = ["std", "convenience"] }
+jxl-encoder = { version = "0.3.1", optional = true, default-features = false, features = ["std", "convenience"] }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 
 [dev-dependencies]
@@ -54,13 +54,3 @@ __expert = ["encode", "jxl-encoder/__expert"]
 zencodec = []
 # Enable zennode node definitions (EncodeJxl, DecodeJxl)
 # zennode = ["dep:zennode"]
-
-
-# jxl-encoder feat/expert-internal-params adds the `__expert` cargo
-# feature (rename of `unstable-tuning-knobs`). While that branch is
-# unmerged, the patch points at the sibling worktree
-# `../jxl-encoder--expert/jxl-encoder/` so `jxl-encoder/__expert`
-# resolves. Revert to `../jxl-encoder/jxl-encoder` once the branch
-# lands, and drop the patch entirely once the rename publishes.
-[patch.crates-io]
-jxl-encoder = { path = "../jxl-encoder--expert/jxl-encoder" }

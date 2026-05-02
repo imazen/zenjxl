@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-02
+
+### Changed
+- Bump minimum `jxl-encoder` dependency to 0.3.1 (published with the
+  `__expert` cargo feature + segmented `LossyInternalParams` /
+  `LosslessInternalParams`). Drops the local `[patch.crates-io]`
+  override.
+
 ### Added
 - `validate()` methods on zenjxl-owned Config types (`JxlEncoderConfig`,
   `JxlDecoderConfig`) and a new `ValidationError` enum re-exported from
