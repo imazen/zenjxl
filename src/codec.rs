@@ -1060,10 +1060,11 @@ mod decoding {
         // Parse ISO 21496-1 metadata; fall back to defaults on failure.
         // JXL jhgm bundles store raw GainMapMetadata (no version byte prefix).
         // The version byte is part of the AVIF ToneMapImage envelope, not the
-        // metadata itself. Use the JPEG/JXL variant which expects no version byte.
+        // metadata itself. `JxlJhgm` is the canonical name for these bytes
+        // (same payload as the deprecated `JpegApp2` variant).
         let params = zencodec::gainmap::parse_iso21496_fmt(
             &bundle.metadata,
-            zencodec::gainmap::Iso21496Format::JpegApp2,
+            zencodec::gainmap::Iso21496Format::JxlJhgm,
         )
         .unwrap_or_default();
 
