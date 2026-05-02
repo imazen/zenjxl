@@ -247,6 +247,42 @@ mod encoding {
             }
         }
 
+        /// Fail-fast validation of the configured encoder parameters.
+        ///
+        /// Encoder setters such as [`with_distance`](Self::with_distance) and
+        /// [`with_generic_effort`](zencodec::encode::EncoderConfig::with_generic_effort)
+        /// already clamp out-of-range values silently, which suits one-off
+        /// encode calls but hides typos in batch jobs that fan a single
+        /// config out across many encodes. `validate()` returns
+        /// [`Err`](crate::ValidationError) for the same out-of-range inputs
+        /// the setters silently accept, letting callers fail fast.
+        ///
+        /// Validates:
+        /// - `generic_quality` in `0.0..=100.0` (and not NaN)
+        /// - `distance_override` in `0.0..=25.0` (and not NaN)
+        /// - `effort` in `1..=10`
+        ///
+        /// The opaque `gain_map` payload is not parsed here — its validity
+        /// surfaces during encode.
+        pub fn validate(&self) -> Result<(), crate::ValidationError> {
+            crate::validate::check_optional_f32_range(
+                self.generic_quality,
+                &crate::validate::GENERIC_QUALITY_RANGE,
+                |value, valid| crate::ValidationError::GenericQualityOutOfRange { value, valid },
+            )?;
+            crate::validate::check_optional_f32_range(
+                self.distance_override,
+                &crate::validate::DISTANCE_RANGE,
+                |value, valid| crate::ValidationError::DistanceOutOfRange { value, valid },
+            )?;
+            crate::validate::check_optional_i32_range(
+                self.effort,
+                &crate::validate::EFFORT_RANGE,
+                |value, valid| crate::ValidationError::EffortOutOfRange { value, valid },
+            )?;
+            Ok(())
+        }
+
         /// Rebuild the lossy mode from current quality/distance + effort + noise state.
         fn rebuild_lossy(&mut self) {
             let distance = self
@@ -1143,6 +1179,17 @@ mod decoding {
     impl JxlDecoderConfig {
         pub fn new() -> Self {
             Self::default()
+        }
+
+        /// Fail-fast validation of the configured decoder parameters.
+        ///
+        /// Currently a no-op: [`JxlDecoderConfig`] has no tunable fields
+        /// — all decode policy lives on [`JxlDecodeJob`] and is set per-call.
+        /// The method exists so callers can write the same
+        /// `cfg.validate()?` pattern across encoder and decoder configs in
+        /// generic batch code.
+        pub fn validate(&self) -> Result<(), crate::ValidationError> {
+            Ok(())
         }
     }
 

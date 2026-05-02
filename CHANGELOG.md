@@ -2,6 +2,58 @@
 
 ## [Unreleased]
 
+### Added
+- `validate()` methods on zenjxl-owned Config types (`JxlEncoderConfig`,
+  `JxlDecoderConfig`) and a new `ValidationError` enum re-exported from
+  the crate root. Setters keep clamping out-of-range inputs as before;
+  `validate()` is an opt-in fail-fast for batch jobs that want to
+  refuse silently-clamped values. Catches `generic_quality` outside
+  `0.0..=100.0` (or NaN) — the only zenjxl-side knob whose setter does
+  not clamp. A `JxlEncoder` variant on `ValidationError` is reserved
+  behind `__expert` for forwarding `jxl-encoder::ValidationError` once
+  upstream lands its own `validate()` methods. New `tests/validate.rs`
+  covers happy-path, out-of-range, NaN, and clamped-setter cases.
+- New `__expert` cargo feature forwards `jxl-encoder/__expert` for
+  picker training and codec calibration sweeps. Re-exports the
+  segmented `LossyInternalParams` and `LosslessInternalParams` types
+  plus `EncoderMode` and `EntropyMulTable` at the crate root (gated
+  behind `__expert`); the
+  `LossyConfig::with_internal_params(LossyInternalParams)` /
+  `LosslessConfig::with_internal_params(LosslessInternalParams)`
+  builders on the already-re-exported `LossyConfig` / `LosslessConfig`
+  do the work. Double-underscore prefix signals "private — do not
+  depend on this in production code." Anything in the underlying
+  escape hatch may change without semver bumps. Pulls jxl-encoder's
+  `__expert` feature; see jxl-encoder feat/expert-internal-params
+  branch.
+- `tests/expert_forwarding.rs` smoke test (gated on `__expert`)
+  verifying that `LossyInternalParams` (`try_dct16` /
+  `try_dct32 = Some(false)`) and `LosslessInternalParams`
+  (`nb_rcts_to_try = Some(0)`) overrides propagate through the
+  re-exports and change the produced JXL bitstream. Exhaustive
+  per-knob coverage lives upstream in jxl-encoder's
+  `effort_expert_tests`.
+
+### Changed
+- Tracks jxl-encoder's segmentation refactor
+  (imazen/jxl-encoder#26): the previously re-exported `EffortProfile`
+  is now `#[doc(hidden)]` upstream and the
+  `with_effort_profile_override` builders are removed. zenjxl now
+  re-exports the per-mode `LossyInternalParams` /
+  `LosslessInternalParams` (`#[non_exhaustive]`, `Default`, all fields
+  `Option<T>`) and forwards them via the new `with_internal_params`
+  builders. The escape hatch is still gated behind `__expert`; the
+  surface area is just narrower per mode (lossy knobs cannot be handed
+  to the lossless encoder and vice versa).
+
+### Internal
+- While jxl-encoder's `feat/expert-internal-params` branch is
+  unmerged, `[patch.crates-io] jxl-encoder` points at the sibling
+  worktree `../jxl-encoder--expert/jxl-encoder`. Revert to
+  `../jxl-encoder/jxl-encoder` once the branch lands, and drop the
+  patch entirely once the rename publishes. Both must happen before
+  any zenjxl release.
+
 ## [0.2.0] - 2026-04-17
 
 ### BREAKING CHANGES
