@@ -60,15 +60,27 @@ pub use jxl_encoder::{calibrated_jxl_quality, quality_to_distance};
 
 /// Expert / unstable escape hatch — forwards jxl-encoder's `__expert` feature.
 ///
-/// Re-exports `EffortProfile`, `EncoderMode`, and `EntropyMulTable` so callers
-/// driving picker training or codec calibration sweeps can construct an
-/// `EffortProfile` and apply it via
-/// `LossyConfig::with_effort_profile_override(EffortProfile)` /
-/// `LosslessConfig::with_effort_profile_override(EffortProfile)` (those builder
-/// methods live on the re-exported `LossyConfig` / `LosslessConfig` and are
-/// gated behind `__expert` in jxl-encoder itself).
+/// Re-exports the segmented internal-params types (`LossyInternalParams` and
+/// `LosslessInternalParams`) plus `EncoderMode` and `EntropyMulTable` so
+/// callers driving picker training or codec calibration sweeps can construct
+/// per-mode override knobs and apply them via
+/// `LossyConfig::with_internal_params(LossyInternalParams)` /
+/// `LosslessConfig::with_internal_params(LosslessInternalParams)` (those
+/// builder methods live on the re-exported `LossyConfig` / `LosslessConfig`
+/// and are gated behind `__expert` in jxl-encoder itself).
 ///
-/// The `EffortProfile` struct, its fields, and override semantics live in
+/// Both `*InternalParams` structs are `#[non_exhaustive]` with `Default` and
+/// `Option`-typed fields: `Some(v)` overrides the corresponding effort-derived
+/// default, `None` keeps it. New knobs land additively without breaking
+/// callers.
+///
+/// `EntropyMulTable` is re-exported because it is the field type of
+/// `LossyInternalParams::entropy_mul_table`. `EncoderMode` is the public
+/// `Reference` / `Experimental` selector on `LossyConfig` / `LosslessConfig`
+/// and is reachable from stable jxl-encoder regardless; we re-export it here
+/// for convenience inside the `__expert` namespace.
+///
+/// The internal types, their fields, and override semantics live in
 /// jxl-encoder; see its `effort` module documentation for the full knob list
 /// and how each one flows through the encoder. This crate adds no semantics
 /// beyond forwarding.
@@ -77,4 +89,4 @@ pub use jxl_encoder::{calibrated_jxl_quality, quality_to_distance};
 /// prefix signals that anything reachable through this feature can change
 /// without a semver bump.
 #[cfg(feature = "__expert")]
-pub use jxl_encoder::{EffortProfile, EncoderMode, EntropyMulTable};
+pub use jxl_encoder::{EncoderMode, EntropyMulTable, LosslessInternalParams, LossyInternalParams};

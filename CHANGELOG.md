@@ -4,11 +4,12 @@
 
 ### Added
 - New `__expert` cargo feature forwards `jxl-encoder/__expert` for
-  picker training and codec calibration sweeps. Re-exports
-  `EffortProfile`, `EncoderMode`, and `EntropyMulTable` at the crate
-  root (gated behind `__expert`); the
-  `LossyConfig::with_effort_profile_override(EffortProfile)` /
-  `LosslessConfig::with_effort_profile_override(EffortProfile)`
+  picker training and codec calibration sweeps. Re-exports the
+  segmented `LossyInternalParams` and `LosslessInternalParams` types
+  plus `EncoderMode` and `EntropyMulTable` at the crate root (gated
+  behind `__expert`); the
+  `LossyConfig::with_internal_params(LossyInternalParams)` /
+  `LosslessConfig::with_internal_params(LosslessInternalParams)`
   builders on the already-re-exported `LossyConfig` / `LosslessConfig`
   do the work. Double-underscore prefix signals "private — do not
   depend on this in production code." Anything in the underlying
@@ -16,10 +17,24 @@
   `__expert` feature; see jxl-encoder feat/expert-internal-params
   branch.
 - `tests/expert_forwarding.rs` smoke test (gated on `__expert`)
-  verifying an `EffortProfile` override (`try_dct16` /
-  `try_dct32 = false`) propagates through the re-exports and changes
-  the produced JXL bitstream. Exhaustive per-knob coverage lives
-  upstream in jxl-encoder's `effort_expert_tests`.
+  verifying that `LossyInternalParams` (`try_dct16` /
+  `try_dct32 = Some(false)`) and `LosslessInternalParams`
+  (`nb_rcts_to_try = Some(0)`) overrides propagate through the
+  re-exports and change the produced JXL bitstream. Exhaustive
+  per-knob coverage lives upstream in jxl-encoder's
+  `effort_expert_tests`.
+
+### Changed
+- Tracks jxl-encoder's segmentation refactor
+  (imazen/jxl-encoder#26): the previously re-exported `EffortProfile`
+  is now `#[doc(hidden)]` upstream and the
+  `with_effort_profile_override` builders are removed. zenjxl now
+  re-exports the per-mode `LossyInternalParams` /
+  `LosslessInternalParams` (`#[non_exhaustive]`, `Default`, all fields
+  `Option<T>`) and forwards them via the new `with_internal_params`
+  builders. The escape hatch is still gated behind `__expert`; the
+  surface area is just narrower per mode (lossy knobs cannot be handed
+  to the lossless encoder and vice versa).
 
 ### Internal
 - While jxl-encoder's `feat/expert-internal-params` branch is

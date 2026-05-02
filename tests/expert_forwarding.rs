@@ -3,17 +3,21 @@
 //
 //! Smoke test for the `__expert` feature.
 //!
-//! Verifies that zenjxl re-exports the expert escape-hatch types
-//! (`EffortProfile`, `EncoderMode`) and that `LossyConfig::with_effort_profile_override`
-//! actually propagates an override through to the produced bitstream.
+//! Verifies that zenjxl re-exports the segmented internal-params types
+//! (`LossyInternalParams`, `LosslessInternalParams`) and that
+//! `LossyConfig::with_internal_params` / `LosslessConfig::with_internal_params`
+//! actually propagate overrides through to the produced bitstreams.
 //!
 //! The exhaustive per-knob coverage lives in jxl-encoder's
 //! `effort_expert_tests`; this test only confirms the forwarding wiring is
-//! intact at the zenjxl boundary.
+//! intact at the zenjxl boundary after the segmentation refactor
+//! (jxl-encoder feat/expert-internal-params).
 
 #![cfg(all(test, feature = "__expert"))]
 
-use zenjxl::{EffortProfile, EncoderMode, LossyConfig, PixelLayout};
+use zenjxl::{
+    LosslessConfig, LosslessInternalParams, LossyConfig, LossyInternalParams, PixelLayout,
+};
 
 const W: u32 = 96;
 const H: u32 = 96;
@@ -48,30 +52,40 @@ fn baseline_lossy() -> LossyConfig {
     LossyConfig::new(1.5).with_effort(7).with_threads(1)
 }
 
-fn encode(cfg: &LossyConfig, pixels: &[u8]) -> Vec<u8> {
+fn encode_lossy(cfg: &LossyConfig, pixels: &[u8]) -> Vec<u8> {
     cfg.clone()
         .encode(pixels, W, H, PixelLayout::Rgb8)
         .expect("lossy encode")
 }
 
-/// Build a custom `EffortProfile` via zenjxl's re-exports, mutate a field
+fn baseline_lossless() -> LosslessConfig {
+    LosslessConfig::new().with_effort(7).with_threads(1)
+}
+
+fn encode_lossless(cfg: &LosslessConfig, pixels: &[u8]) -> Vec<u8> {
+    cfg.clone()
+        .encode(pixels, W, H, PixelLayout::Rgb8)
+        .expect("lossless encode")
+}
+
+/// Build a custom `LossyInternalParams` via zenjxl's re-exports, set fields
 /// known to affect lossy bytes (`try_dct16` + `try_dct32`, both override-
 /// effective per jxl-encoder's `effort_expert_tests::lossy_override_try_dct16`),
-/// apply via `LossyConfig::with_effort_profile_override`, and confirm the
-/// produced bitstream differs from the baseline.
+/// apply via `LossyConfig::with_internal_params`, and confirm the produced
+/// bitstream differs from the baseline.
 #[test]
-fn expert_override_propagates_through_zenjxl() {
+fn lossy_expert_override_propagates_through_zenjxl() {
     let pixels = synthetic_rgb8();
 
-    let mut profile = EffortProfile::lossy(7, EncoderMode::Reference);
+    let mut params = LossyInternalParams::default();
     // e7 default = both true. Disabling forces no DCT16x16 / DCT16x8 /
     // DCT32x32 etc. merges, which definitively changes the bitstream.
-    profile.try_dct16 = false;
-    profile.try_dct32 = false;
+    params.try_dct16 = Some(false);
+    params.try_dct32 = Some(false);
 
-    let cfg_override = baseline_lossy().with_effort_profile_override(profile);
-    let bytes_override = encode(&cfg_override, &pixels);
-    let bytes_baseline = encode(&baseline_lossy(), &pixels);
+    let cfg_override = baseline_lossy().with_internal_params(params);
+    let bytes_override = encode_lossy(&cfg_override, &pixels);
+    let bytes_baseline = encode_lossy(&baseline_lossy(), &pixels);
 
     // Both must be valid JXL bitstreams.
     assert_eq!(&bytes_override[..2], &[0xFF, 0x0A]);
@@ -79,8 +93,36 @@ fn expert_override_propagates_through_zenjxl() {
 
     assert_ne!(
         bytes_override, bytes_baseline,
-        "EffortProfile override (try_dct16=false, try_dct32=false) must \
+        "LossyInternalParams override (try_dct16=Some(false), try_dct32=Some(false)) must \
          change the bitstream when applied through zenjxl's re-exported \
-         LossyConfig::with_effort_profile_override"
+         LossyConfig::with_internal_params"
+    );
+}
+
+/// Build a custom `LosslessInternalParams` via zenjxl's re-exports, override
+/// `nb_rcts_to_try` (e7 default = 7; forcing 0 skips the RCT search entirely
+/// and falls back to the unconditional YCoCg pick, which definitively changes
+/// the bitstream — matches jxl-encoder's
+/// `effort_expert_tests::lossless_override_nb_rcts_to_try`), and confirm the
+/// override propagates.
+#[test]
+fn lossless_expert_override_propagates_through_zenjxl() {
+    let pixels = synthetic_rgb8();
+
+    let mut params = LosslessInternalParams::default();
+    params.nb_rcts_to_try = Some(0);
+
+    let cfg_override = baseline_lossless().with_internal_params(params);
+    let bytes_override = encode_lossless(&cfg_override, &pixels);
+    let bytes_baseline = encode_lossless(&baseline_lossless(), &pixels);
+
+    // Both must be valid JXL bitstreams.
+    assert_eq!(&bytes_override[..2], &[0xFF, 0x0A]);
+    assert_eq!(&bytes_baseline[..2], &[0xFF, 0x0A]);
+
+    assert_ne!(
+        bytes_override, bytes_baseline,
+        "LosslessInternalParams override (nb_rcts_to_try=Some(0)) must change the bitstream \
+         when applied through zenjxl's re-exported LosslessConfig::with_internal_params"
     );
 }
