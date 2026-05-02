@@ -59,19 +59,16 @@ pub enum ValidationError {
     /// upstream Config (`LossyConfig`, `LosslessConfig`, or any
     /// `*InternalParams`).
     ///
-    /// This variant exists for forward-compatibility: jxl-encoder will grow
-    /// its own `ValidationError` and `validate()` methods, at which point
-    /// callers can `?`-bubble those errors through zenjxl's
-    /// `ValidationError`. The variant is gated behind `__expert` because that
-    /// is the feature that exposes the `*InternalParams` types whose
-    /// validation it reflects; once upstream `LossyConfig::validate()` is
-    /// stable, this gate can be widened.
-    // NOTE: The `From` conversion lives behind the same gate; once
-    // jxl-encoder adds its own ValidationError, the `#[from]` attribute can
-    // be re-enabled.
+    /// Wraps [`jxl_encoder::ValidationError`] (re-exported at the crate root
+    /// as [`crate::JxlValidationError`] for the same `__expert` gate). The
+    /// `#[from]` impl lets callers `?`-bubble upstream validation errors
+    /// straight into [`ValidationError`]. The variant is gated behind
+    /// `__expert` because that is the feature that exposes the
+    /// `*InternalParams` types whose validation it reflects; once upstream
+    /// `LossyConfig::validate()` is stable, this gate can be widened.
     #[cfg(feature = "__expert")]
-    #[error("jxl-encoder validation error")]
-    JxlEncoder,
+    #[error(transparent)]
+    JxlEncoder(#[from] jxl_encoder::ValidationError),
 }
 
 /// Inclusive valid range for `generic_quality` (libjpeg-turbo scale).

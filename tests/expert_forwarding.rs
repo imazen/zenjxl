@@ -16,7 +16,8 @@
 #![cfg(all(test, feature = "__expert"))]
 
 use zenjxl::{
-    LosslessConfig, LosslessInternalParams, LossyConfig, LossyInternalParams, PixelLayout,
+    JxlValidationError, LosslessConfig, LosslessInternalParams, LossyConfig, LossyInternalParams,
+    PixelLayout, ValidationError,
 };
 
 const W: u32 = 96;
@@ -124,5 +125,32 @@ fn lossless_expert_override_propagates_through_zenjxl() {
         bytes_override, bytes_baseline,
         "LosslessInternalParams override (nb_rcts_to_try=Some(0)) must change the bitstream \
          when applied through zenjxl's re-exported LosslessConfig::with_internal_params"
+    );
+}
+
+/// Verify that a `LossyConfig::validate()` error from upstream jxl-encoder
+/// propagates through zenjxl's `ValidationError::JxlEncoder` via the
+/// `From<jxl_encoder::ValidationError>` impl, so callers can `?`-bubble
+/// upstream validation errors into zenjxl's own error type.
+///
+/// `LossyConfig::new(0.0)` triggers `DistanceOutOfRange` upstream (lossy
+/// distance must be > 0; lossless work goes through `LosslessConfig`).
+#[test]
+fn jxl_validation_error_propagates() {
+    let cfg = LossyConfig::new(0.0);
+    let upstream_err = cfg
+        .validate()
+        .expect_err("distance=0.0 must be rejected upstream");
+    assert!(
+        matches!(upstream_err, JxlValidationError::DistanceOutOfRange { .. }),
+        "expected upstream DistanceOutOfRange, got {upstream_err:?}"
+    );
+
+    // The `?`-bubble path: From<jxl_encoder::ValidationError> for
+    // zenjxl::ValidationError lands as ValidationError::JxlEncoder(_).
+    let zen_err: ValidationError = LossyConfig::new(0.0).validate().unwrap_err().into();
+    assert!(
+        matches!(zen_err, ValidationError::JxlEncoder(_)),
+        "expected ValidationError::JxlEncoder, got {zen_err:?}"
     );
 }

@@ -92,3 +92,14 @@ pub use jxl_encoder::{calibrated_jxl_quality, quality_to_distance};
 /// without a semver bump.
 #[cfg(feature = "__expert")]
 pub use jxl_encoder::{EncoderMode, EntropyMulTable, LosslessInternalParams, LossyInternalParams};
+
+/// Re-export of [`jxl_encoder::ValidationError`] under an aliased name so it
+/// sits as a sibling of zenjxl's own [`ValidationError`] without shadowing it.
+///
+/// This is the inner type wrapped by [`ValidationError::JxlEncoder`]; it is
+/// re-exported so callers can match on specific upstream variants after a
+/// `?`-bubble without pulling `jxl_encoder` into scope themselves. Gated
+/// behind `__expert` because the validation surface it covers
+/// (`*InternalParams`) is itself only reachable through that feature.
+#[cfg(feature = "__expert")]
+pub use jxl_encoder::ValidationError as JxlValidationError;
