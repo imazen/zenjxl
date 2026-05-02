@@ -71,44 +71,55 @@ pub enum ValidationError {
     JxlEncoder(#[from] jxl_encoder::ValidationError),
 }
 
-/// Inclusive valid range for `generic_quality` (libjpeg-turbo scale).
-#[cfg_attr(not(feature = "zencodec"), allow(dead_code))]
-pub(crate) const GENERIC_QUALITY_RANGE: RangeInclusive<f32> = 0.0..=100.0;
-/// Inclusive valid range for butteraugli `distance`.
-#[cfg_attr(not(feature = "zencodec"), allow(dead_code))]
-pub(crate) const DISTANCE_RANGE: RangeInclusive<f32> = 0.0..=25.0;
-/// Inclusive valid range for `effort`.
-#[cfg_attr(not(feature = "zencodec"), allow(dead_code))]
-pub(crate) const EFFORT_RANGE: RangeInclusive<i32> = 1..=10;
+/// Internal validation helpers — only exist when there's a Config that
+/// uses them. Today that's `zencodec`'s `JxlEncoderConfig`. Gating the
+/// whole block on `feature = "zencodec"` avoids dead-code warnings on
+/// builds that have neither validation consumer enabled.
+#[cfg(feature = "zencodec")]
+mod helpers {
+    use super::ValidationError;
+    use core::ops::RangeInclusive;
 
-/// Validate an `Option<f32>` field against an inclusive range.
-///
-/// Returns `Err` if `Some(v)` is NaN or falls outside `range`.
-#[cfg_attr(not(feature = "zencodec"), allow(dead_code))]
-pub(crate) fn check_optional_f32_range(
-    value: Option<f32>,
-    range: &RangeInclusive<f32>,
-    mk_err: impl FnOnce(f32, RangeInclusive<f32>) -> ValidationError,
-) -> Result<(), ValidationError> {
-    if let Some(v) = value
-        && (v.is_nan() || !range.contains(&v))
-    {
-        return Err(mk_err(v, range.clone()));
+    /// Inclusive valid range for `generic_quality` (libjpeg-turbo scale).
+    pub(crate) const GENERIC_QUALITY_RANGE: RangeInclusive<f32> = 0.0..=100.0;
+    /// Inclusive valid range for butteraugli `distance`.
+    pub(crate) const DISTANCE_RANGE: RangeInclusive<f32> = 0.0..=25.0;
+    /// Inclusive valid range for `effort`.
+    pub(crate) const EFFORT_RANGE: RangeInclusive<i32> = 1..=10;
+
+    /// Validate an `Option<f32>` field against an inclusive range.
+    ///
+    /// Returns `Err` if `Some(v)` is NaN or falls outside `range`.
+    pub(crate) fn check_optional_f32_range(
+        value: Option<f32>,
+        range: &RangeInclusive<f32>,
+        mk_err: impl FnOnce(f32, RangeInclusive<f32>) -> ValidationError,
+    ) -> Result<(), ValidationError> {
+        if let Some(v) = value
+            && (v.is_nan() || !range.contains(&v))
+        {
+            return Err(mk_err(v, range.clone()));
+        }
+        Ok(())
     }
-    Ok(())
+
+    /// Validate an `Option<i32>` field against an inclusive range.
+    pub(crate) fn check_optional_i32_range(
+        value: Option<i32>,
+        range: &RangeInclusive<i32>,
+        mk_err: impl FnOnce(i32, RangeInclusive<i32>) -> ValidationError,
+    ) -> Result<(), ValidationError> {
+        if let Some(v) = value
+            && !range.contains(&v)
+        {
+            return Err(mk_err(v, range.clone()));
+        }
+        Ok(())
+    }
 }
 
-/// Validate an `Option<i32>` field against an inclusive range.
-#[cfg_attr(not(feature = "zencodec"), allow(dead_code))]
-pub(crate) fn check_optional_i32_range(
-    value: Option<i32>,
-    range: &RangeInclusive<i32>,
-    mk_err: impl FnOnce(i32, RangeInclusive<i32>) -> ValidationError,
-) -> Result<(), ValidationError> {
-    if let Some(v) = value
-        && !range.contains(&v)
-    {
-        return Err(mk_err(v, range.clone()));
-    }
-    Ok(())
-}
+#[cfg(feature = "zencodec")]
+pub(crate) use helpers::{
+    DISTANCE_RANGE, EFFORT_RANGE, GENERIC_QUALITY_RANGE, check_optional_f32_range,
+    check_optional_i32_range,
+};
