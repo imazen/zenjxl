@@ -57,3 +57,24 @@ pub use jxl_encoder::{LosslessConfig, LossyConfig, PixelLayout};
 pub use jxl_encoder::container::{append_gain_map_box, is_bare_codestream, is_container};
 #[cfg(feature = "encode")]
 pub use jxl_encoder::{calibrated_jxl_quality, quality_to_distance};
+
+/// Expert / unstable escape hatch — forwards jxl-encoder's `__expert` feature.
+///
+/// Re-exports `EffortProfile`, `EncoderMode`, and `EntropyMulTable` so callers
+/// driving picker training or codec calibration sweeps can construct an
+/// `EffortProfile` and apply it via
+/// `LossyConfig::with_effort_profile_override(EffortProfile)` /
+/// `LosslessConfig::with_effort_profile_override(EffortProfile)` (those builder
+/// methods live on the re-exported `LossyConfig` / `LosslessConfig` and are
+/// gated behind `__expert` in jxl-encoder itself).
+///
+/// The `EffortProfile` struct, its fields, and override semantics live in
+/// jxl-encoder; see its `effort` module documentation for the full knob list
+/// and how each one flows through the encoder. This crate adds no semantics
+/// beyond forwarding.
+///
+/// **Private — do not depend on this in production code.** Double-underscore
+/// prefix signals that anything reachable through this feature can change
+/// without a semver bump.
+#[cfg(feature = "__expert")]
+pub use jxl_encoder::{EffortProfile, EncoderMode, EntropyMulTable};
