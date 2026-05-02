@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+- New `__expert` cargo feature forwards `jxl-encoder/__expert` for
+  picker training and codec calibration sweeps. Re-exports route
+  `LossyConfig::with_effort_profile_override(EffortProfile)` /
+  `LosslessConfig::with_effort_profile_override(EffortProfile)`
+  through to jxl-encoder. Double-underscore prefix signals "private —
+  do not depend on this in production code." Anything in the
+  underlying escape hatch may change without semver bumps. Pulls
+  jxl-encoder's `__expert` feature; see jxl-encoder
+  feat/expert-internal-params branch. Path-patch
+  `[patch.crates-io] jxl-encoder = path "../jxl-encoder/jxl-encoder"`
+  required until the rename publishes.
+
 ## [0.2.0] - 2026-04-17
 
 ### BREAKING CHANGES

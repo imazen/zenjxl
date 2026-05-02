@@ -42,8 +42,23 @@ encode = ["dep:jxl-encoder"]
 # many encode tasks in parallel.
 parallel = ["encode", "jxl-encoder/parallel"]
 butteraugli-loop = ["encode", "jxl-encoder/butteraugli-loop"]
+# Expert / unstable: forwards jxl-encoder's `__expert` feature so picker
+# training and codec calibration sweeps can apply
+# `LossyConfig::with_effort_profile_override(EffortProfile)` /
+# `LosslessConfig::with_effort_profile_override(EffortProfile)` through
+# zenjxl's re-exports. Double-underscore prefix signals "private — do
+# not depend on this in production code." Anything in the underlying
+# escape hatch may change without semver bumps.
+__expert = ["encode", "jxl-encoder/__expert"]
 # Enable zencodec trait integration
 zencodec = []
 # Enable zennode node definitions (EncodeJxl, DecodeJxl)
 # zennode = ["dep:zennode"]
 
+
+# jxl-encoder feat/expert-internal-params adds the `__expert` cargo
+# feature (rename of `unstable-tuning-knobs`). Until jxl-encoder
+# publishes that rename, zenjxl needs this patch to resolve
+# `jxl-encoder/__expert`. Drop after publish.
+[patch.crates-io]
+jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }
