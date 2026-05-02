@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Added
+- `validate()` methods on zenjxl-owned Config types (`JxlEncoderConfig`,
+  `JxlDecoderConfig`) and a new `ValidationError` enum re-exported from
+  the crate root. Setters keep clamping out-of-range inputs as before;
+  `validate()` is an opt-in fail-fast for batch jobs that want to
+  refuse silently-clamped values. Catches `generic_quality` outside
+  `0.0..=100.0` (or NaN) — the only zenjxl-side knob whose setter does
+  not clamp. A `JxlEncoder` variant on `ValidationError` is reserved
+  behind `__expert` for forwarding `jxl-encoder::ValidationError` once
+  upstream lands its own `validate()` methods. New `tests/validate.rs`
+  covers happy-path, out-of-range, NaN, and clamped-setter cases.
 - New `__expert` cargo feature forwards `jxl-encoder/__expert` for
   picker training and codec calibration sweeps. Re-exports the
   segmented `LossyInternalParams` and `LosslessInternalParams` types

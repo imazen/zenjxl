@@ -20,10 +20,12 @@ mod codec;
 #[cfg(feature = "decode")]
 mod decode;
 mod error;
+mod validate;
 // #[cfg(feature = "zennode")]
 // pub mod zennode_defs;
 
 pub use error::JxlError;
+pub use validate::ValidationError;
 
 #[cfg(feature = "decode")]
 pub use decode::{
