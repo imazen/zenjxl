@@ -57,8 +57,10 @@ zencodec = []
 
 
 # jxl-encoder feat/expert-internal-params adds the `__expert` cargo
-# feature (rename of `unstable-tuning-knobs`). Until jxl-encoder
-# publishes that rename, zenjxl needs this patch to resolve
-# `jxl-encoder/__expert`. Drop after publish.
+# feature (rename of `unstable-tuning-knobs`). While that branch is
+# unmerged, the patch points at the sibling worktree
+# `../jxl-encoder--expert/jxl-encoder/` so `jxl-encoder/__expert`
+# resolves. Revert to `../jxl-encoder/jxl-encoder` once the branch
+# lands, and drop the patch entirely once the rename publishes.
 [patch.crates-io]
-jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }
+jxl-encoder = { path = "../jxl-encoder--expert/jxl-encoder" }

@@ -4,16 +4,30 @@
 
 ### Added
 - New `__expert` cargo feature forwards `jxl-encoder/__expert` for
-  picker training and codec calibration sweeps. Re-exports route
+  picker training and codec calibration sweeps. Re-exports
+  `EffortProfile`, `EncoderMode`, and `EntropyMulTable` at the crate
+  root (gated behind `__expert`); the
   `LossyConfig::with_effort_profile_override(EffortProfile)` /
   `LosslessConfig::with_effort_profile_override(EffortProfile)`
-  through to jxl-encoder. Double-underscore prefix signals "private —
-  do not depend on this in production code." Anything in the
-  underlying escape hatch may change without semver bumps. Pulls
-  jxl-encoder's `__expert` feature; see jxl-encoder
-  feat/expert-internal-params branch. Path-patch
-  `[patch.crates-io] jxl-encoder = path "../jxl-encoder/jxl-encoder"`
-  required until the rename publishes.
+  builders on the already-re-exported `LossyConfig` / `LosslessConfig`
+  do the work. Double-underscore prefix signals "private — do not
+  depend on this in production code." Anything in the underlying
+  escape hatch may change without semver bumps. Pulls jxl-encoder's
+  `__expert` feature; see jxl-encoder feat/expert-internal-params
+  branch.
+- `tests/expert_forwarding.rs` smoke test (gated on `__expert`)
+  verifying an `EffortProfile` override (`try_dct16` /
+  `try_dct32 = false`) propagates through the re-exports and changes
+  the produced JXL bitstream. Exhaustive per-knob coverage lives
+  upstream in jxl-encoder's `effort_expert_tests`.
+
+### Internal
+- While jxl-encoder's `feat/expert-internal-params` branch is
+  unmerged, `[patch.crates-io] jxl-encoder` points at the sibling
+  worktree `../jxl-encoder--expert/jxl-encoder`. Revert to
+  `../jxl-encoder/jxl-encoder` once the branch lands, and drop the
+  patch entirely once the rename publishes. Both must happen before
+  any zenjxl release.
 
 ## [0.2.0] - 2026-04-17
 
