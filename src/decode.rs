@@ -214,6 +214,38 @@ fn map_err(e: jxl::api::Error) -> JxlError {
     JxlError::Decode(e)
 }
 
+/// Convert a header-reported dimension (`usize`) to `u32` with a checked cast.
+///
+/// JXL dimensions max out at 2^30 per spec, so a header value that does not
+/// fit in `u32` is malformed input. On 32-bit targets the conversion is
+/// always a no-op; on 64-bit targets it catches header forgeries.
+pub(crate) fn dim_to_u32(value: usize, label: &'static str) -> Result<u32, JxlError> {
+    u32::try_from(value).map_err(|_| {
+        JxlError::InvalidInput(alloc::format!("JXL: {label} dimension {value} exceeds u32"))
+    })
+}
+
+/// Compute a `usize` buffer size as `width * channels * bytes_per_sample * height`
+/// using checked multiplication, returning a `LimitExceeded` error on overflow.
+///
+/// Used in the decoder to size the per-frame pixel buffer; a wraparound here
+/// would silently allocate a too-small buffer.
+pub(crate) fn checked_buf_size(
+    width: usize,
+    height: usize,
+    channels: usize,
+    bytes_per_sample: usize,
+) -> Result<(usize, usize), JxlError> {
+    let bytes_per_row = width
+        .checked_mul(channels)
+        .and_then(|v| v.checked_mul(bytes_per_sample))
+        .ok_or_else(|| JxlError::LimitExceeded("bytes_per_row overflow".into()))?;
+    let buf_size = bytes_per_row
+        .checked_mul(height)
+        .ok_or_else(|| JxlError::LimitExceeded("frame buffer size overflow".into()))?;
+    Ok((bytes_per_row, buf_size))
+}
+
 /// Extract ICC profile and CICP from JXL color profile.
 #[allow(clippy::type_complexity)]
 pub(crate) fn extract_color_info(
@@ -575,8 +607,8 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, At<JxlError>> {
     let tm = &info.tone_mapping;
 
     Ok(JxlInfo {
-        width: width as u32,
-        height: height as u32,
+        width: dim_to_u32(width, "width").map_err(|e| whereat::at!(e))?,
+        height: dim_to_u32(height, "height").map_err(|e| whereat::at!(e))?,
         has_alpha,
         has_animation,
         bit_depth: Some(bit_depth),
@@ -649,10 +681,17 @@ pub fn decode_with_options(
         options.parallel = p;
     }
 
-    if let Some(lim) = limits
-        && let Some(max_px) = lim.max_pixels
-    {
-        options.limits.max_pixels = Some(max_px as usize);
+    if let Some(lim) = limits {
+        if let Some(max_px) = lim.max_pixels {
+            // Saturate u64 → usize on 32-bit targets so a high u64 limit
+            // doesn't truncate to a small usize cap.
+            options.limits.max_pixels = Some(usize::try_from(max_px).unwrap_or(usize::MAX));
+        }
+        if let Some(max_mem) = lim.max_memory_bytes {
+            // jxl-rs takes max_memory_bytes as u64; pass through directly so
+            // the wrapper's memory cap is honored end-to-end.
+            options.limits.max_memory_bytes = Some(max_mem);
+        }
     }
 
     // Forward stop token for cooperative cancellation.
@@ -710,9 +749,12 @@ pub fn decode_with_options(
         _ => 1,
     };
 
+    let width_u32 = dim_to_u32(width, "width").map_err(|e| whereat::at!(e))?;
+    let height_u32 = dim_to_u32(height, "height").map_err(|e| whereat::at!(e))?;
+
     if let Some(lim) = limits {
         let bpp = (channels * bytes_per_sample) as u32;
-        lim.validate(width as u32, height as u32, bpp)
+        lim.validate(width_u32, height_u32, bpp)
             .map_err(|e| whereat::at!(e))?;
     }
 
@@ -732,8 +774,8 @@ pub fn decode_with_options(
     };
 
     // Phase 3: decode pixels
-    let bytes_per_row = width * channels * bytes_per_sample;
-    let buf_size = bytes_per_row * height;
+    let (bytes_per_row, buf_size) =
+        checked_buf_size(width, height, channels, bytes_per_sample).map_err(|e| whereat::at!(e))?;
     let mut buf = vec![0u8; buf_size];
 
     let output = JxlOutputBuffer::new(&mut buf, height, bytes_per_row);
@@ -769,8 +811,8 @@ pub fn decode_with_options(
     Ok(JxlDecodeOutput {
         pixels,
         info: JxlInfo {
-            width: width as u32,
-            height: height as u32,
+            width: width_u32,
+            height: height_u32,
             has_alpha,
             has_animation,
             bit_depth: Some(bit_depth_u8),
@@ -1112,5 +1154,88 @@ mod tests {
             .preview_size
             .expect("preview_size should be set after full decode");
         assert!(pw > 0 && ph > 0);
+    }
+
+    // ── Audit H1/H3/H4 regression tests ────────────────────────────────
+
+    /// H1: max_memory_bytes must reach the decoder.
+    ///
+    /// A pathologically tight memory cap (one byte) forwarded into
+    /// jxl-rs's `options.limits.max_memory_bytes` should make the decoder
+    /// abort, not silently allocate. Before the fix the field was dropped
+    /// at the wrapper -> decoder hop.
+    #[test]
+    fn max_memory_bytes_propagates_to_decoder() {
+        let data = read_jxl_test_file("3x3_srgb_lossless.jxl");
+        let limits = JxlLimits {
+            max_pixels: None,
+            // 1 byte: well below anything jxl-rs can allocate during decode.
+            max_memory_bytes: Some(1),
+        };
+        let result = decode(&data, Some(&limits), &[]);
+        assert!(
+            result.is_err(),
+            "expected decode to fail under a 1-byte memory cap, got Ok"
+        );
+    }
+
+    /// H1: a generous max_memory_bytes does not break the happy path.
+    #[test]
+    fn generous_max_memory_bytes_decodes_ok() {
+        let data = read_jxl_test_file("3x3_srgb_lossless.jxl");
+        let limits = JxlLimits {
+            max_pixels: None,
+            max_memory_bytes: Some(64 * 1024 * 1024),
+        };
+        let result = decode(&data, Some(&limits), &[]);
+        assert!(result.is_ok(), "decode under 64 MB cap should succeed");
+    }
+
+    /// H3: header dimensions exceeding `u32::MAX` are flagged as malformed,
+    /// not silently truncated.
+    #[test]
+    fn dim_to_u32_rejects_oversized_dimension() {
+        // On 32-bit targets `usize == u32` and this can't overflow; skip.
+        if usize::BITS <= 32 {
+            return;
+        }
+        let too_big: usize = (u32::MAX as usize) + 1;
+        let err = dim_to_u32(too_big, "width").expect_err("must reject");
+        assert!(matches!(err, JxlError::InvalidInput(_)));
+    }
+
+    /// H3: dimensions that fit pass through unchanged.
+    #[test]
+    fn dim_to_u32_accepts_normal_dimensions() {
+        assert_eq!(dim_to_u32(0, "w").unwrap(), 0);
+        assert_eq!(dim_to_u32(1, "w").unwrap(), 1);
+        assert_eq!(dim_to_u32(4096, "w").unwrap(), 4096);
+        assert_eq!(dim_to_u32(u32::MAX as usize, "w").unwrap(), u32::MAX);
+    }
+
+    /// H4: the buffer-size product overflowing usize must surface as
+    /// `LimitExceeded`, not wrap and produce an undersized allocation.
+    #[test]
+    fn checked_buf_size_rejects_overflow() {
+        // Pick a width and height whose product overflows usize on both
+        // 32- and 64-bit. usize::MAX as both factors guarantees that.
+        let res = checked_buf_size(usize::MAX, 2, 1, 1);
+        assert!(matches!(res, Err(JxlError::LimitExceeded(_))));
+
+        // Overflow further down the multiplication chain.
+        let res = checked_buf_size(usize::MAX / 4 + 1, 1, 4, 1);
+        assert!(matches!(res, Err(JxlError::LimitExceeded(_))));
+    }
+
+    /// H4: small dimensions compute the expected sizes.
+    #[test]
+    fn checked_buf_size_happy_path() {
+        let (row, total) = checked_buf_size(640, 480, 4, 1).unwrap();
+        assert_eq!(row, 640 * 4);
+        assert_eq!(total, 640 * 4 * 480);
+
+        let (row, total) = checked_buf_size(1, 1, 1, 1).unwrap();
+        assert_eq!(row, 1);
+        assert_eq!(total, 1);
     }
 }
