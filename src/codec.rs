@@ -2409,7 +2409,7 @@ mod tests {
     #[test]
     fn animation_decode_respects_max_memory_bytes() {
         use zencodec::decode::{AnimationFrameDecoder, DecodeJob, DecoderConfig};
-        use zencodec::encode::{AnimationFrameEncoder, EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{AnimationFrameEncoder, EncodeJob, EncoderConfig};
         use zencodec::{ResourceLimits, ThreadingPolicy};
         use zenpixels::{PixelDescriptor, PixelSlice};
 
@@ -2420,7 +2420,7 @@ mod tests {
         let frame_pixels = stride * height as usize;
         let make_frame = |seed: u8| -> Vec<u8> {
             (0..frame_pixels)
-                .map(|i| (seed.wrapping_add(i as u8)))
+                .map(|i| seed.wrapping_add(i as u8))
                 .collect()
         };
         let limits_for_encode = ResourceLimits::none().with_threading(ThreadingPolicy::Sequential);
@@ -2465,7 +2465,7 @@ mod tests {
     #[test]
     fn animation_decode_respects_max_frames() {
         use zencodec::decode::{AnimationFrameDecoder, DecodeJob, DecoderConfig};
-        use zencodec::encode::{AnimationFrameEncoder, EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{AnimationFrameEncoder, EncodeJob, EncoderConfig};
         use zencodec::{ResourceLimits, ThreadingPolicy};
         use zenpixels::{PixelDescriptor, PixelSlice};
 
