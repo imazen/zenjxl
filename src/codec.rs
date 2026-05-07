@@ -676,7 +676,16 @@ mod encoding {
             if make_opaque {
                 // Encode as RGB — strip alpha entirely for smaller output.
                 self.check_limits(width, height, 3)?;
-                let mut rgb = Vec::with_capacity(w * h * 3);
+                // check_limits already gates dimensions, but use checked_mul
+                // here so a degenerate width/height pair can't overflow the
+                // capacity computation on its way to a panic.
+                let rgb_capacity =
+                    w.checked_mul(h)
+                        .and_then(|v| v.checked_mul(3))
+                        .ok_or_else(|| {
+                            whereat::at!(JxlError::LimitExceeded("RGB capacity overflow".into(),))
+                        })?;
+                let mut rgb = Vec::with_capacity(rgb_capacity);
                 for y in 0..h {
                     let row_start = y * stride * 4;
                     let row = &data[row_start..row_start + w * 4];
@@ -1587,10 +1596,16 @@ mod decoding {
                 options.parallel = p;
             }
 
-            if let Some(ref lim) = self.limits
-                && let Some(max_px) = lim.max_pixels
-            {
-                options.limits.max_pixels = Some(max_px as usize);
+            if let Some(ref lim) = self.limits {
+                if let Some(max_px) = lim.max_pixels {
+                    // Saturate u64 → usize on 32-bit targets.
+                    options.limits.max_pixels = Some(usize::try_from(max_px).unwrap_or(usize::MAX));
+                }
+                if let Some(max_mem) = lim.max_memory_bytes {
+                    // jxl-rs takes max_memory_bytes as u64; pass through directly
+                    // so the wrapper's memory cap is honored end-to-end.
+                    options.limits.max_memory_bytes = Some(max_mem);
+                }
             }
 
             // Forward stop token for cooperative cancellation.
@@ -1655,7 +1670,14 @@ mod decoding {
 
             decoder.set_pixel_format(chosen.pixel_format.clone());
 
-            let bytes_per_row = width * channels * bytes_per_sample;
+            let width_u32 =
+                crate::decode::dim_to_u32(width, "width").map_err(|e| whereat::at!(e))?;
+            let height_u32 =
+                crate::decode::dim_to_u32(height, "height").map_err(|e| whereat::at!(e))?;
+
+            let (bytes_per_row, frame_buf_bytes) =
+                crate::decode::checked_buf_size(width, height, channels, bytes_per_sample)
+                    .map_err(|e| whereat::at!(e))?;
 
             let is_f32 = matches!(
                 chosen.pixel_format.color_data_format,
@@ -1667,10 +1689,23 @@ mod decoding {
 
             let mut frames = VecDeque::new();
             let mut frame_index = 0u32;
+            // Bytes retained across frames (matches encoder-side accumulator) —
+            // used to gate against ResourceLimits.max_memory_bytes so a long
+            // animation cannot allocate without bound.
+            let mut accumulated_bytes: u64 = 0;
             // Track the final decoder so we can extract EXIF/XMP after the loop.
             let mut final_decoder = None;
 
             loop {
+                // Gate frame count BEFORE allocating the next frame's buffer.
+                // `frame_index` is the count of frames seen so far, so the
+                // (frame_index + 1)th frame must satisfy max_frames.
+                if let Some(ref limits) = self.limits {
+                    limits
+                        .check_frames(frame_index.saturating_add(1))
+                        .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
+                }
+
                 // Advance to frame info
                 let result = decoder
                     .process(&mut input)
@@ -1684,8 +1719,7 @@ mod decoding {
                 let duration_ms = frame_header.duration.map(|d| d as u32).unwrap_or(0);
 
                 // Decode pixels
-                let buf_size = bytes_per_row * height;
-                let mut buf = vec![0u8; buf_size];
+                let mut buf = vec![0u8; frame_buf_bytes];
                 let output = JxlOutputBuffer::new(&mut buf, height, bytes_per_row);
 
                 let result = decoder_fi
@@ -1705,6 +1739,15 @@ mod decoding {
                 // storing in the VecDeque.  This avoids holding all skipped
                 // frames in memory at peak.
                 if frame_index >= self.start_frame_index {
+                    // Track retained-memory growth and gate against limits
+                    // before pushing the new frame, mirroring the encoder
+                    // path (ResourceLimits.check_memory).
+                    accumulated_bytes = accumulated_bytes.saturating_add(frame_buf_bytes as u64);
+                    if let Some(ref limits) = self.limits {
+                        limits
+                            .check_memory(accumulated_bytes)
+                            .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
+                    }
                     if clamp {
                         crate::decode::clamp_f32_buf(&mut buf);
                     }
@@ -1732,8 +1775,8 @@ mod decoding {
             let xmp = final_decoder.as_mut().and_then(|d| d.take_xmp());
 
             let jxl_info = JxlInfo {
-                width: width as u32,
-                height: height as u32,
+                width: width_u32,
+                height: height_u32,
                 has_alpha,
                 has_animation,
                 bit_depth: Some(bit_depth_u8),
@@ -2354,6 +2397,116 @@ mod tests {
         assert_eq!(info.width, width);
         assert_eq!(info.height, height);
         assert_eq!(info.format, ImageFormat::Jxl);
+    }
+
+    /// H2 (audit): animation decode must gate accumulated retained-frame
+    /// memory against ResourceLimits.max_memory_bytes.
+    ///
+    /// We encode a 4-frame animation, then ask the animation decoder to
+    /// render under a memory cap that's too tight to hold even the first
+    /// decoded frame. The first call to `render_next_frame` must error.
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    #[test]
+    fn animation_decode_respects_max_memory_bytes() {
+        use zencodec::decode::{AnimationFrameDecoder, DecodeJob, DecoderConfig};
+        use zencodec::encode::{AnimationFrameEncoder, EncodeJob, EncoderConfig};
+        use zencodec::{ResourceLimits, ThreadingPolicy};
+        use zenpixels::{PixelDescriptor, PixelSlice};
+
+        // Encode a 4-frame 8x8 RGB animation with lossless to keep deps low.
+        let width = 8u32;
+        let height = 8u32;
+        let stride = (width as usize) * 3;
+        let frame_pixels = stride * height as usize;
+        let make_frame = |seed: u8| -> Vec<u8> {
+            (0..frame_pixels)
+                .map(|i| seed.wrapping_add(i as u8))
+                .collect()
+        };
+        let limits_for_encode = ResourceLimits::none().with_threading(ThreadingPolicy::Sequential);
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let mut enc = config
+            .job()
+            .with_limits(limits_for_encode)
+            .animation_frame_encoder()
+            .unwrap();
+        for seed in 0u8..4 {
+            let frame = make_frame(seed * 17);
+            let slice =
+                PixelSlice::new(&frame, width, height, stride, PixelDescriptor::RGB8_SRGB).unwrap();
+            enc.push_frame(slice, 100, None).unwrap();
+        }
+        let encoded = AnimationFrameEncoder::finish(enc, None).unwrap();
+
+        // Decode with a max_memory_bytes cap below one frame's retained bytes
+        // (8 * 8 * 4 = 256 for RGBA8 native output; cap at 128).
+        let dec_limits = ResourceLimits::none()
+            .with_threading(ThreadingPolicy::Sequential)
+            .with_max_memory(128);
+        let dec_config = JxlDecoderConfig::new();
+        let mut ffd = dec_config
+            .job()
+            .with_limits(dec_limits)
+            .animation_frame_decoder(Cow::Borrowed(encoded.data()), &[])
+            .unwrap();
+
+        // First render call triggers decode_all_frames and must fail with
+        // a LimitExceeded error from the new accumulated_bytes gate.
+        let result = ffd.render_next_frame(None);
+        assert!(
+            result.is_err(),
+            "animation render under tight memory cap must error, got Ok"
+        );
+    }
+
+    /// H2 (audit): animation decode must also gate frame count via
+    /// ResourceLimits.max_frames. Encode 3 frames, cap to 2, expect error.
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    #[test]
+    fn animation_decode_respects_max_frames() {
+        use zencodec::decode::{AnimationFrameDecoder, DecodeJob, DecoderConfig};
+        use zencodec::encode::{AnimationFrameEncoder, EncodeJob, EncoderConfig};
+        use zencodec::{ResourceLimits, ThreadingPolicy};
+        use zenpixels::{PixelDescriptor, PixelSlice};
+
+        let width = 4u32;
+        let height = 4u32;
+        let stride = (width as usize) * 3;
+        let frame_pixels = stride * height as usize;
+        let make_frame = |seed: u8| -> Vec<u8> {
+            (0..frame_pixels)
+                .map(|i| seed.wrapping_add(i as u8))
+                .collect()
+        };
+        let enc_limits = ResourceLimits::none().with_threading(ThreadingPolicy::Sequential);
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let mut enc = config
+            .job()
+            .with_limits(enc_limits)
+            .animation_frame_encoder()
+            .unwrap();
+        for seed in 0u8..3 {
+            let frame = make_frame(seed * 23);
+            let slice =
+                PixelSlice::new(&frame, width, height, stride, PixelDescriptor::RGB8_SRGB).unwrap();
+            enc.push_frame(slice, 50, None).unwrap();
+        }
+        let encoded = AnimationFrameEncoder::finish(enc, None).unwrap();
+
+        let dec_limits = ResourceLimits::none()
+            .with_threading(ThreadingPolicy::Sequential)
+            .with_max_frames(2);
+        let dec_config = JxlDecoderConfig::new();
+        let mut ffd = dec_config
+            .job()
+            .with_limits(dec_limits)
+            .animation_frame_decoder(Cow::Borrowed(encoded.data()), &[])
+            .unwrap();
+        let result = ffd.render_next_frame(None);
+        assert!(
+            result.is_err(),
+            "animation render with 3 frames under max_frames=2 must error"
+        );
     }
 
     /// Encode with gain map via zencodec trait → decode → verify gain map roundtrips.
