@@ -1027,16 +1027,28 @@ mod encoding {
                 tps_numerator: 1000,
                 tps_denominator: 1,
                 num_loops: self.loop_count.unwrap_or(0),
+                // jxl-encoder 0.3.2 (W12-4 a1-audit chunk-1) added
+                // associated/premultiplied-alpha signalling on the
+                // animation path. zenjxl's high-level wrapper takes
+                // straight-alpha pixels, matching the new default.
+                ..AnimationParams::default()
             };
 
             let anim_frames: Vec<AnimationFrame<'_>> = self
                 .pixel_data
                 .iter()
                 .zip(&self.frames)
-                .map(|(data, &duration)| AnimationFrame {
-                    pixels: data,
-                    duration,
-                })
+                // jxl-encoder 0.3.2 expanded AnimationFrame with
+                // blend_mode / blend_source / save_as_reference /
+                // reference_only / name / timecode for multi-layer
+                // animation API parity with libjxl frame headers
+                // (jxl-encoder commit d0e47838). zenjxl's wrapper
+                // produces single-pass replace-blend frames, so
+                // `AnimationFrame::new` is the right constructor —
+                // it leaves every optional field at the encoder
+                // default (= the prior `pixels + duration`-only
+                // behaviour).
+                .map(|(data, &duration)| AnimationFrame::new(data, duration))
                 .collect();
 
             let encoded = match &self.mode {
