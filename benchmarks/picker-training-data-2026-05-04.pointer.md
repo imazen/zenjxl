@@ -9,9 +9,9 @@ not in this repo. They exceed the 30 KB git-commit limit (one TSV is
 
 Block storage: `/mnt/v/zen/picker-training/zenjxl-2026-05-04/`
 
-R2 mirror (TODO): `s3://zentrain/picker-training-zenjxl-2026-05-04/`
+R2 mirror: `s3://zentrain/picker-training-zenjxl-2026-05-04/` (uploaded 2026-05-21)
 
-Tower backup (TODO): `/mnt/tower/output/zensim-archive-2026-05-20/picker-training-zenjxl-2026-05-04/`
+Tower backup: `/mnt/tower/output/zensim-archive-2026-05-20/picker-training-zenjxl-2026-05-04/` (rsynced 2026-05-21, sha256-verified)
 
 ## Files + sha256
 
