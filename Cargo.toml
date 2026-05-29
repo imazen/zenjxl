@@ -25,8 +25,17 @@ zencodec = { version = "0.1.19" }
 zenpixels = { version = "0.2.10", default-features = false, features = ["rgb"] }
 linear-srgb = { version = "0.6.7"}
 jxl = { version = "0.3.7", package = "zenjxl-decoder", optional = true }
-jxl-encoder = { version = "0.3.1", optional = true, default-features = false, features = ["std", "convenience"] }
+jxl-encoder = { version = "0.3.2", optional = true, default-features = false, features = ["std", "convenience"] }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
+
+# jxl-encoder 0.3.2 (lossy-JPEG recompression API) + zenjpeg 0.8.7 (libjxl-parity
+# magetypes fix) are not yet on crates.io; path-patch to the local siblings, the
+# same pattern jxl-encoder itself uses for its unpublished zenjpeg dep. Remove
+# these once the chain is published (see docs/zenjxl_jpeg_lossy/README.md in the
+# jxl-encoder repo). Builds require the sibling checkouts.
+[patch.crates-io]
+jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }
+zenjpeg = { path = "../zenjpeg/zenjpeg" }
 
 [dev-dependencies]
 archmage = { version = "0.9.19", features = ["std"] }
@@ -42,6 +51,11 @@ encode = ["dep:jxl-encoder"]
 # many encode tasks in parallel.
 parallel = ["encode", "jxl-encoder/parallel"]
 butteraugli-loop = ["encode", "jxl-encoder/butteraugli-loop"]
+# Lossy JPEG -> JXL recompression to a quality target (PreserveJxl closed loop).
+# Needs both encode (jxl-encoder's coefficient-domain coarsener, behind its
+# `jpeg-reencoding` feature) AND decode (to score each candidate in-process).
+# Metric-agnostic: the caller supplies a scorer callback over decoded RGB8.
+jpeg-lossy = ["encode", "decode", "jxl-encoder/jpeg-reencoding"]
 # Expert / unstable: forwards jxl-encoder's `__expert` feature so picker
 # training and codec calibration sweeps can apply
 # `LossyConfig::with_effort_profile_override(EffortProfile)` /

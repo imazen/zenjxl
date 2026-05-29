@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Added
+- **`jpeg-lossy` feature: lossy JPEG → JXL recompression closed loop**
+  (`zenjxl::jpeg_lossy`). Drives the PreserveJxl coefficient-domain coarsener
+  (from `jxl-encoder`) to a perceptual-quality **target** by bisecting the
+  coarsening scale, scoring each candidate **in-process** (encode → decode →
+  score) — zenjxl is the natural home because it deps both the encoder and the
+  decoder. Metric-agnostic: the caller supplies a scorer callback over decoded
+  RGB8 (`recompress_jpeg_lossy_relative`), so the same loop hits a
+  zensim-A / cvvdp / butteraugli target. `recompress_jpeg_coarsen` exposes the
+  explicit-scale path. Relative (generation-loss vs the source's own pixels)
+  targets; unreachable targets fall back to the lossless-transcode floor.
+  Validated by `tests/jpeg_lossy.rs` (3/3). See the RD strategy in jxl-encoder's
+  `docs/JPEG_LOSSY_RECOMPRESSION.md`.
+
+### Changed
+- Bump `jxl-encoder` dep to 0.3.2 (lossy-JPEG recompression API). 0.3.2 and
+  `zenjpeg` 0.8.7 are not yet on crates.io, so `[patch.crates-io]` redirects both
+  to the local siblings (the same pattern jxl-encoder uses for its unpublished
+  `zenjpeg` dep). Builds now require the sibling checkouts until the chain is
+  published.
+
 ## [0.2.1] - 2026-05-02
 
 ### Changed
