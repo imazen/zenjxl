@@ -166,6 +166,189 @@ pub fn recompress_jpeg_lossy_relative(
     )
 }
 
+/// Which perceptual metric an [`QualityTarget::Inferred`] is expressed in.
+/// Used only for the **preliminary** floor table + abs↔relative mapping; the
+/// scorer callback still does the actual scoring (supply one matching the
+/// metric).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum InferredMetric {
+    /// zensim-A, native scale 0–100, higher = better (100 = identical).
+    ZensimA,
+    /// CVVDP JOD, native scale 0–10, higher = better.
+    Cvvdp,
+    /// Butteraugli (pnorm-3), distance ≥ 0, lower = better.
+    Butteraugli,
+}
+
+impl InferredMetric {
+    /// Score direction (true = higher is better).
+    pub fn higher_is_better(self) -> bool {
+        !matches!(self, InferredMetric::Butteraugli)
+    }
+
+    /// **Preliminary** additive map from an absolute target to the relative
+    /// (vs-source) target the loop should aim for, given the source's `floor`.
+    /// Model: a degradation of `Δ` below the floor in absolute terms is a
+    /// degradation of `Δ` below "identical" in relative terms (perceptual
+    /// degradations roughly add near the operating point). NOT calibrated —
+    /// pending the abs↔relative sweep; see jxl-encoder
+    /// `docs/JPEG_LOSSY_RECOMPRESSION.md`.
+    pub fn approx_relative_target(self, abs_level: f32, floor: f32) -> f32 {
+        match self {
+            // higher-better, "identical" = top of scale (100 / 10):
+            InferredMetric::ZensimA => (abs_level - floor + 100.0).clamp(0.0, 100.0),
+            InferredMetric::Cvvdp => (abs_level - floor + 10.0).clamp(0.0, 10.0),
+            // lower-better distance, "identical" = 0:
+            InferredMetric::Butteraugli => (abs_level - floor).max(0.0),
+        }
+    }
+}
+
+/// What quality to hit. `Relative` is distortion vs the source's own pixels
+/// (precise, directly measured by the scorer). `Inferred` is quality vs the
+/// (unknown) original: the loop **clamps** an unreachable absolute target to the
+/// lossless floor (the dominant inferred byte win), and otherwise aims at
+/// `relative_target`. Build `Inferred` explicitly, or via the preliminary
+/// [`QualityTarget::inferred_preliminary`] helper.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub enum QualityTarget {
+    /// Distortion vs the source's own pixels (generation loss).
+    Relative {
+        /// Target score in the scorer's units.
+        level: f32,
+        /// Metric direction (true = higher better).
+        higher_is_better: bool,
+    },
+    /// Quality vs the unknown original.
+    Inferred {
+        /// Desired absolute quality (vs the original), in the metric's units.
+        abs_level: f32,
+        /// Best achievable absolute quality from this source (the source's own
+        /// quality vs the original) — predict from source quality.
+        floor: f32,
+        /// The relative (vs-source) score the loop should aim for to land at
+        /// `abs_level` (caller-owned abs↔relative mapping).
+        relative_target: f32,
+        /// Metric direction (true = higher better).
+        higher_is_better: bool,
+    },
+}
+
+impl QualityTarget {
+    /// **Preliminary** constructor: probe the source's quality
+    /// (`zenjpeg::detect`), predict the floor from the N=5 calibration table,
+    /// and derive `relative_target` via the additive map. Returns `None` if the
+    /// source quality can't be read on the IJG scale (e.g. jpegli sources report
+    /// a butteraugli-distance scale). NOT production-calibrated — see
+    /// [`predict_inferred_floor`].
+    pub fn inferred_preliminary(
+        jpeg_bytes: &[u8],
+        metric: InferredMetric,
+        abs_level: f32,
+    ) -> Option<Self> {
+        let floor = predict_inferred_floor(jpeg_bytes, metric)?;
+        Some(QualityTarget::Inferred {
+            abs_level,
+            floor,
+            relative_target: metric.approx_relative_target(abs_level, floor),
+            higher_is_better: metric.higher_is_better(),
+        })
+    }
+}
+
+/// Recompress to a [`QualityTarget`] via the chosen [`JpegRecompressMethod`].
+///
+/// `Relative` runs the loop directly. `Inferred` first applies the
+/// **achievability clamp**: if the absolute target is *better* than the source's
+/// floor it cannot be reached (you can't recover detail the source discarded), so
+/// the lossless transcode (the floor — smallest output preserving the source)
+/// ships; otherwise the loop aims at `relative_target`. Requires the `jpeg-lossy`
+/// feature.
+pub fn recompress_jpeg_lossy_target(
+    jpeg_bytes: &[u8],
+    method: JpegRecompressMethod,
+    target: QualityTarget,
+    scorer: &RelativeScorer<'_>,
+    effort: u8,
+) -> Result<Vec<u8>, At<JxlError>> {
+    match target {
+        QualityTarget::Relative {
+            level,
+            higher_is_better,
+        } => recompress_jpeg_lossy(jpeg_bytes, method, level, higher_is_better, scorer, effort),
+        QualityTarget::Inferred {
+            abs_level,
+            floor,
+            relative_target,
+            higher_is_better,
+        } => {
+            let unreachable = if higher_is_better {
+                abs_level > floor
+            } else {
+                abs_level < floor
+            };
+            if unreachable {
+                // Can't beat the source's own quality vs the original → floor.
+                return encode_coarsen(jpeg_bytes, 1.0, effort);
+            }
+            recompress_jpeg_lossy(
+                jpeg_bytes,
+                method,
+                relative_target,
+                higher_is_better,
+                scorer,
+                effort,
+            )
+        }
+    }
+}
+
+/// **Preliminary** floor predictor: read the source's IJG quality
+/// (`zenjpeg::detect::probe`) and interpolate the N=5 calibration table (CID22,
+/// mean of 5 — `jxl-encoder/docs/JPEG_LOSSY_RECOMPRESSION.md`) to the best
+/// achievable absolute quality from this source, in `metric`'s units. Returns
+/// `None` when the source quality isn't on the IJG scale.
+///
+/// NOT production-calibrated — the table is a 5-image starting point pending a
+/// proper size×quality×content sweep. Treat the result as an estimate; prefer a
+/// caller-supplied floor when you have better calibration.
+pub fn predict_inferred_floor(jpeg_bytes: &[u8], metric: InferredMetric) -> Option<f32> {
+    let probe = zenjpeg::detect::probe(jpeg_bytes).ok()?;
+    if probe.quality.scale != zenjpeg::detect::QualityScale::IjgQuality {
+        return None;
+    }
+    let q = probe.quality.value;
+    // (ijg_q, zensim_floor, butter_floor, cvvdp_floor) — N=5 CID22 means.
+    const TABLE: [(f32, f32, f32, f32); 3] = [
+        (72.0, 70.1, 1.477, 9.826),
+        (82.0, 76.5, 1.291, 9.865),
+        (92.0, 88.2, 0.668, 9.992),
+    ];
+    let pick = |f: fn(&(f32, f32, f32, f32)) -> f32| -> f32 {
+        if q <= TABLE[0].0 {
+            return f(&TABLE[0]);
+        }
+        if q >= TABLE[2].0 {
+            return f(&TABLE[2]);
+        }
+        for w in TABLE.windows(2) {
+            let (q0, q1) = (w[0].0, w[1].0);
+            if q >= q0 && q <= q1 {
+                let t = (q - q0) / (q1 - q0);
+                return f(&w[0]) + t * (f(&w[1]) - f(&w[0]));
+            }
+        }
+        f(&TABLE[2])
+    };
+    Some(match metric {
+        InferredMetric::ZensimA => pick(|r| r.1),
+        InferredMetric::Butteraugli => pick(|r| r.2),
+        InferredMetric::Cvvdp => pick(|r| r.3),
+    })
+}
+
 /// Thin wrapper: PreserveJxl coarsen at an explicit `scale` (no quality loop),
 /// applying the bundled deadzone + chroma policy. `scale <= 1.0` is the lossless
 /// transcode. Exposed so callers that already know the scale (or drive their own

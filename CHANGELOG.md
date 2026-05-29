@@ -20,17 +20,33 @@
   scorer, effort)` (main), `recompress_jpeg_lossy_relative` (Coarsen
   convenience), `recompress_jpeg_coarsen` (explicit-scale, no loop).
   Metric-agnostic: the caller supplies a scorer callback over decoded RGB8, so
-  the same loop hits a zensim-A / cvvdp / butteraugli target. Relative
-  (generation-loss vs the source's own pixels) targets; unreachable targets fall
-  back to the lossless-transcode floor. Validated by `tests/jpeg_lossy.rs` (5/5).
-  See the RD strategy in jxl-encoder's `docs/JPEG_LOSSY_RECOMPRESSION.md`.
+  the same loop hits a zensim-A / cvvdp / butteraugli target.
+
+  Relative vs inferred targets via `QualityTarget` +
+  `recompress_jpeg_lossy_target`:
+  - `Relative` — distortion vs the source's own pixels (precise, measured).
+  - `Inferred` — quality vs the unknown original, with the **achievability
+    clamp**: an absolute target *better* than the source's floor is unreachable
+    (you can't recover discarded detail), so the lossless transcode (the floor)
+    ships — the dominant inferred byte win. Reachable targets aim at the
+    caller-supplied `relative_target`.
+
+  Preliminary helpers (clearly marked, NOT production-calibrated — N=5 CID22
+  starting table pending a proper sweep): `predict_inferred_floor` (reads source
+  IJG quality via `zenjpeg::detect` and interpolates the floor table per
+  `InferredMetric`) and `QualityTarget::inferred_preliminary` (wires
+  detect → floor → additive relative_target). Unreachable targets (and any path
+  that can't reach the target) fall back to the lossless-transcode floor.
+  Validated by `tests/jpeg_lossy.rs` (8/8). See the RD strategy in jxl-encoder's
+  `docs/JPEG_LOSSY_RECOMPRESSION.md`.
 
 ### Changed
-- Bump `jxl-encoder` dep to 0.3.2 (lossy-JPEG recompression API). 0.3.2 and
-  `zenjpeg` 0.8.7 are not yet on crates.io, so `[patch.crates-io]` redirects both
-  to the local siblings (the same pattern jxl-encoder uses for its unpublished
-  `zenjpeg` dep). Builds now require the sibling checkouts until the chain is
-  published.
+- Bump `jxl-encoder` dep to 0.3.2 (lossy-JPEG recompression API) + add `zenjpeg`
+  0.8.7 (optional, `jpeg-lossy` only — source-quality detection for the inferred
+  floor predictor). 0.3.2 and `zenjpeg` 0.8.7 are not yet on crates.io, so
+  `[patch.crates-io]` redirects both to the local siblings (the same pattern
+  jxl-encoder uses for its unpublished `zenjpeg` dep). Builds now require the
+  sibling checkouts until the chain is published.
 
 ## [0.2.1] - 2026-05-02
 

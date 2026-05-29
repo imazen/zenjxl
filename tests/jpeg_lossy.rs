@@ -7,8 +7,9 @@
 #![cfg(feature = "jpeg-lossy")]
 
 use zenjxl::jpeg_lossy::{
-    JpegRecompressMethod, recompress_jpeg_coarsen, recompress_jpeg_lossy,
-    recompress_jpeg_lossy_relative,
+    InferredMetric, JpegRecompressMethod, QualityTarget, predict_inferred_floor,
+    recompress_jpeg_coarsen, recompress_jpeg_lossy, recompress_jpeg_lossy_relative,
+    recompress_jpeg_lossy_target,
 };
 
 // A tiny real-photo baseline JPEG (96x96, 3-component, ~3.8 KB).
@@ -123,6 +124,52 @@ fn auto_router_picks_the_smaller_path() {
         reencode.len()
     );
     assert!(auto.len() == coarsen.len() || auto.len() == reencode.len());
+}
+
+#[test]
+fn inferred_floor_predictor_reads_source_quality() {
+    // tiny.jpg was encoded at Q85; the IJG floor predictor should return a
+    // zensim floor between the Q82 (76.5) and Q92 (88.2) table rows.
+    let floor = predict_inferred_floor(TINY_JPEG, InferredMetric::ZensimA)
+        .expect("IJG-scale source quality should be readable");
+    assert!(
+        (70.0..=90.0).contains(&floor),
+        "Q85 zensim floor should sit between the table rows, got {floor}"
+    );
+}
+
+#[test]
+fn inferred_unreachable_target_clamps_to_lossless() {
+    // Ask for an absolute quality BETTER than the source floor -> unreachable
+    // (can't recover discarded detail) -> ships the lossless transcode.
+    let floor = predict_inferred_floor(TINY_JPEG, InferredMetric::ZensimA).unwrap();
+    let target = QualityTarget::Inferred {
+        abs_level: floor + 8.0, // above floor (zensim higher = better) => unreachable
+        floor,
+        relative_target: 50.0,
+        higher_is_better: true,
+    };
+    let out = recompress_jpeg_lossy_target(TINY_JPEG, JpegRecompressMethod::Auto, target, &mse, 5)
+        .expect("inferred clamp");
+    let lossless = recompress_jpeg_coarsen(TINY_JPEG, 1.0, 5).expect("lossless");
+    assert_eq!(
+        out.len(),
+        lossless.len(),
+        "unreachable abs target -> lossless floor"
+    );
+    assert_eq!(decode_dims(&out), (96, 96));
+}
+
+#[test]
+fn inferred_preliminary_builds_and_runs() {
+    // The preliminary constructor wires detect -> floor -> relative_target.
+    // A reachable target (well below floor) should produce a decodable output.
+    let target = QualityTarget::inferred_preliminary(TINY_JPEG, InferredMetric::ZensimA, 50.0)
+        .expect("preliminary inferred target from IJG source");
+    let out =
+        recompress_jpeg_lossy_target(TINY_JPEG, JpegRecompressMethod::Coarsen, target, &mse, 5)
+            .expect("inferred reachable");
+    assert_eq!(decode_dims(&out), (96, 96));
 }
 
 #[test]

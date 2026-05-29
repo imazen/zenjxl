@@ -26,6 +26,10 @@ zenpixels = { version = "0.2.10", default-features = false, features = ["rgb"] }
 linear-srgb = { version = "0.6.7"}
 jxl = { version = "0.3.7", package = "zenjxl-decoder", optional = true }
 jxl-encoder = { version = "0.3.2", optional = true, default-features = false, features = ["std", "convenience"] }
+# Source-quality detection (header-only) for the inferred-target floor predictor
+# (jpeg-lossy feature). detect is ungated in zenjpeg; default-features = false
+# keeps it light (no decoder pulled).
+zenjpeg = { version = "0.8.7", optional = true, default-features = false }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 
 # jxl-encoder 0.3.2 (lossy-JPEG recompression API) + zenjpeg 0.8.7 (libjxl-parity
@@ -55,7 +59,7 @@ butteraugli-loop = ["encode", "jxl-encoder/butteraugli-loop"]
 # Needs both encode (jxl-encoder's coefficient-domain coarsener, behind its
 # `jpeg-reencoding` feature) AND decode (to score each candidate in-process).
 # Metric-agnostic: the caller supplies a scorer callback over decoded RGB8.
-jpeg-lossy = ["encode", "decode", "jxl-encoder/jpeg-reencoding"]
+jpeg-lossy = ["encode", "decode", "jxl-encoder/jpeg-reencoding", "dep:zenjpeg"]
 # Expert / unstable: forwards jxl-encoder's `__expert` feature so picker
 # training and codec calibration sweeps can apply
 # `LossyConfig::with_effort_profile_override(EffortProfile)` /
