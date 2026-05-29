@@ -4,17 +4,26 @@
 
 ### Added
 - **`jpeg-lossy` feature: lossy JPEG → JXL recompression closed loop**
-  (`zenjxl::jpeg_lossy`). Drives the PreserveJxl coefficient-domain coarsener
-  (from `jxl-encoder`) to a perceptual-quality **target** by bisecting the
-  coarsening scale, scoring each candidate **in-process** (encode → decode →
+  (`zenjxl::jpeg_lossy`). Drives a perceptual-quality **target** by bisecting a
+  quality knob and scoring each candidate **in-process** (encode → decode →
   score) — zenjxl is the natural home because it deps both the encoder and the
-  decoder. Metric-agnostic: the caller supplies a scorer callback over decoded
-  RGB8 (`recompress_jpeg_lossy_relative`), so the same loop hits a
-  zensim-A / cvvdp / butteraugli target. `recompress_jpeg_coarsen` exposes the
-  explicit-scale path. Relative (generation-loss vs the source's own pixels)
-  targets; unreachable targets fall back to the lossless-transcode floor.
-  Validated by `tests/jpeg_lossy.rs` (3/3). See the RD strategy in jxl-encoder's
-  `docs/JPEG_LOSSY_RECOMPRESSION.md`.
+  decoder. Two paths + a router via `JpegRecompressMethod`:
+  - `Coarsen` — PreserveJxl coefficient-domain coarsening (jxl-encoder); best at
+    gentle / near-lossless targets.
+  - `Reencode` — full VarDCT pixel re-encode (reuses the lossless-transcode
+    pixels as input, so both paths score against the same reference); best at
+    medium / aggressive targets.
+  - `Auto` (default) — the **router**: run both to the target and keep the
+    smaller; beats either single path (content/target-dependent crossover).
+
+  Entry points: `recompress_jpeg_lossy(jpeg, method, target, higher_is_better,
+  scorer, effort)` (main), `recompress_jpeg_lossy_relative` (Coarsen
+  convenience), `recompress_jpeg_coarsen` (explicit-scale, no loop).
+  Metric-agnostic: the caller supplies a scorer callback over decoded RGB8, so
+  the same loop hits a zensim-A / cvvdp / butteraugli target. Relative
+  (generation-loss vs the source's own pixels) targets; unreachable targets fall
+  back to the lossless-transcode floor. Validated by `tests/jpeg_lossy.rs` (5/5).
+  See the RD strategy in jxl-encoder's `docs/JPEG_LOSSY_RECOMPRESSION.md`.
 
 ### Changed
 - Bump `jxl-encoder` dep to 0.3.2 (lossy-JPEG recompression API). 0.3.2 and

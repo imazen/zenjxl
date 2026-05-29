@@ -6,7 +6,10 @@
 //! Run: cargo test -p zenjxl --features jpeg-lossy --test jpeg_lossy
 #![cfg(feature = "jpeg-lossy")]
 
-use zenjxl::jpeg_lossy::{recompress_jpeg_coarsen, recompress_jpeg_lossy_relative};
+use zenjxl::jpeg_lossy::{
+    JpegRecompressMethod, recompress_jpeg_coarsen, recompress_jpeg_lossy,
+    recompress_jpeg_lossy_relative,
+};
 
 // A tiny real-photo baseline JPEG (96x96, 3-component, ~3.8 KB).
 const TINY_JPEG: &[u8] = include_bytes!("fixtures/tiny.jpg");
@@ -64,6 +67,62 @@ fn relative_loop_looser_target_is_smaller() {
         loose.len(),
         strict.len()
     );
+}
+
+#[test]
+fn reencode_path_decodes_and_is_monotone() {
+    // The pixel re-encode (VarDCT) path: looser MSE target -> <= stricter bytes,
+    // and the output decodes to the source dimensions.
+    let strict = recompress_jpeg_lossy(
+        TINY_JPEG,
+        JpegRecompressMethod::Reencode,
+        30.0,
+        false,
+        &mse,
+        5,
+    )
+    .expect("reencode strict");
+    let loose = recompress_jpeg_lossy(
+        TINY_JPEG,
+        JpegRecompressMethod::Reencode,
+        300.0,
+        false,
+        &mse,
+        5,
+    )
+    .expect("reencode loose");
+    assert_eq!(decode_dims(&strict), (96, 96));
+    assert_eq!(decode_dims(&loose), (96, 96));
+    assert!(
+        loose.len() <= strict.len(),
+        "reencode: looser ({}) must be <= stricter ({})",
+        loose.len(),
+        strict.len()
+    );
+}
+
+#[test]
+fn auto_router_picks_the_smaller_path() {
+    // Auto = min(Coarsen, Reencode) at the same target. It must be no larger
+    // than either single path, and decode to the source dimensions.
+    let t = 120.0;
+    let coarsen =
+        recompress_jpeg_lossy(TINY_JPEG, JpegRecompressMethod::Coarsen, t, false, &mse, 5)
+            .expect("coarsen");
+    let reencode =
+        recompress_jpeg_lossy(TINY_JPEG, JpegRecompressMethod::Reencode, t, false, &mse, 5)
+            .expect("reencode");
+    let auto = recompress_jpeg_lossy(TINY_JPEG, JpegRecompressMethod::Auto, t, false, &mse, 5)
+        .expect("auto");
+    assert_eq!(decode_dims(&auto), (96, 96));
+    assert!(
+        auto.len() <= coarsen.len() && auto.len() <= reencode.len(),
+        "auto ({}) must be <= coarsen ({}) and reencode ({})",
+        auto.len(),
+        coarsen.len(),
+        reencode.len()
+    );
+    assert!(auto.len() == coarsen.len() || auto.len() == reencode.len());
 }
 
 #[test]
