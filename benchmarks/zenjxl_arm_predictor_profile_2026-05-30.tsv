@@ -1,0 +1,3 @@
+bench	metric	value	note
+prune_all_predictors	median_ms	156.41	criterion median, 100 samples; synthetic in-memory modular image
+prune_all_predictors	range_ms	155.84-157.05	criterion [low mid high]
