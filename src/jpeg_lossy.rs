@@ -34,6 +34,7 @@
 use alloc::vec::Vec;
 
 use jxl_encoder::jpeg::encode_jpeg_recompress_auto_codestream;
+use zenjpeg::decoder::extract_icc_profile;
 use zenpixels::PixelDescriptor;
 
 use crate::decode::decode;
@@ -89,6 +90,14 @@ pub fn recompress_jpeg_lossy(
     let lossless = encode_coarsen(jpeg_bytes, 1.0, effort)?;
     let (ref_px, w, h) = decode_rgb8(&lossless)?;
 
+    // The Coarsen path (encode_jpeg_recompress_auto_codestream) already lifts the
+    // source's APP2 ICC into the codestream (want_icc=true). The Reencode path
+    // re-encodes the *decoded* pixels, which are in the source's color space, so
+    // the source's ICC must be carried through here too — otherwise a wide-gamut
+    // JPEG (e.g. Display-P3) would be silently relabeled sRGB. None for an
+    // untagged JPEG (sRGB-assumed is then correct).
+    let src_icc = extract_icc_profile(jpeg_bytes);
+
     let meets = |score: f32| {
         if higher_is_better {
             score >= target
@@ -125,7 +134,7 @@ pub fn recompress_jpeg_lossy(
     let reencode = || {
         run_loop(
             |dist| {
-                let cs = encode_pixel(&ref_px, w, h, dist, effort)?;
+                let cs = encode_pixel(&ref_px, w, h, dist, effort, src_icc.as_deref())?;
                 let sc = score_of(&cs)?;
                 Ok((cs, sc))
             },
@@ -429,22 +438,42 @@ fn encode_coarsen(jpeg_bytes: &[u8], scale: f32, effort: u8) -> Result<Vec<u8>, 
 /// (0 = lossless, larger = coarser). The pixels are the source's own decoded
 /// image (lossless-transcode reference), so this is the "decode → re-encode"
 /// path without resurrecting frequencies the source already discarded.
+///
+/// `src_icc` is the source JPEG's embedded ICC profile (if any). The decoded
+/// pixels are in that color space, so when present it is written into the JXL
+/// codestream — preserving the source's color exactly, matching what the
+/// Coarsen path does. When absent (untagged JPEG), the bare encode is correct:
+/// an untagged JPEG is sRGB by convention and JXL's default is sRGB.
 fn encode_pixel(
     ref_px: &[u8],
     w: u32,
     h: u32,
     distance: f32,
     effort: u8,
+    src_icc: Option<&[u8]>,
 ) -> Result<Vec<u8>, At<JxlError>> {
     let cfg = jxl_encoder::LossyConfig::new(distance).with_effort(effort);
-    let pixels: Vec<rgb::Rgb<u8>> = ref_px
-        .chunks_exact(3)
-        .map(|c| rgb::Rgb {
-            r: c[0],
-            g: c[1],
-            b: c[2],
-        })
-        .collect();
-    let img = imgref::ImgRef::new(&pixels, w as usize, h as usize);
-    jxl_encoder::convenience::encode_rgb8(img, &cfg).map_err(|e| whereat::at!(JxlError::Encode(e)))
+
+    let Some(icc) = src_icc else {
+        // No source profile: bare sRGB-assumed codestream (the prior behavior).
+        let pixels: Vec<rgb::Rgb<u8>> = ref_px
+            .chunks_exact(3)
+            .map(|c| rgb::Rgb {
+                r: c[0],
+                g: c[1],
+                b: c[2],
+            })
+            .collect();
+        let img = imgref::ImgRef::new(&pixels, w as usize, h as usize);
+        return jxl_encoder::convenience::encode_rgb8(img, &cfg)
+            .map_err(|e| whereat::at!(JxlError::Encode(e)));
+    };
+
+    // Source carried an ICC: embed it via the full request API so the JXL
+    // declares the source's color space instead of defaulting to sRGB.
+    let meta = jxl_encoder::ImageMetadata::new().with_icc_profile(icc);
+    cfg.encode_request(w, h, jxl_encoder::PixelLayout::Rgb8)
+        .with_metadata(&meta)
+        .encode(ref_px)
+        .map_err(|e| whereat::at!(JxlError::Encode(e.decompose().0)))
 }

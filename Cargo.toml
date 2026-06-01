@@ -21,8 +21,8 @@ whereat = { version = "0.1.5"}
 rgb = { version = "0.8.53", default-features = false, features = ["as-bytes"] }
 imgref = "1.12.0"
 enough = "0.4.3"
-zencodec = { version = "0.1.19" }
-zenpixels = { version = "0.2.10", default-features = false, features = ["rgb"] }
+zencodec = { version = "0.1.21" }
+zenpixels = { version = "0.2.11", default-features = false, features = ["rgb"] }
 linear-srgb = { version = "0.6.7"}
 jxl = { version = "0.3.7", package = "zenjxl-decoder", optional = true }
 jxl-encoder = { version = "0.3.2", optional = true, default-features = false, features = ["std", "convenience"] }
@@ -43,6 +43,10 @@ zenjpeg = { path = "../zenjpeg/zenjpeg" }
 
 [dev-dependencies]
 archmage = { version = "0.9.19", features = ["std"] }
+# Synthesizes a real Display-P3 ICC for the jpeg-lossy color-preservation test
+# (`tests/jpeg_lossy.rs`). Matches the moxcms the jpeg-lossy feature already
+# pulls via zenjpeg, so no extra version in the graph.
+moxcms = { version = "0.8.1" }
 
 [features]
 default = ["encode", "decode"]
@@ -59,7 +63,11 @@ butteraugli-loop = ["encode", "jxl-encoder/butteraugli-loop"]
 # Needs both encode (jxl-encoder's coefficient-domain coarsener, behind its
 # `jpeg-reencoding` feature) AND decode (to score each candidate in-process).
 # Metric-agnostic: the caller supplies a scorer callback over decoded RGB8.
-jpeg-lossy = ["encode", "decode", "jxl-encoder/jpeg-reencoding", "dep:zenjpeg"]
+# zenjpeg/decoder provides the source-ICC extractor (`extract_icc_profile`, a pure
+# APP2 byte-scanner) so the Reencode path preserves a wide-gamut source's color
+# profile instead of silently relabeling it sRGB. (No `zenjpeg/moxcms` needed — the
+# extractor does no color management; its re-export was ungated in zenjpeg.)
+jpeg-lossy = ["encode", "decode", "jxl-encoder/jpeg-reencoding", "dep:zenjpeg", "zenjpeg/decoder"]
 # Expert / unstable: forwards jxl-encoder's `__expert` feature so picker
 # training and codec calibration sweeps can apply
 # `LossyConfig::with_effort_profile_override(EffortProfile)` /

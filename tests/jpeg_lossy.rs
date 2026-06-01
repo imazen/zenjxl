@@ -36,6 +36,52 @@ fn decode_dims(cs: &[u8]) -> (u32, u32) {
     (out.info.width, out.info.height)
 }
 
+/// Decode a JXL codestream and return its embedded ICC profile (if any).
+fn decode_icc(cs: &[u8]) -> Option<Vec<u8>> {
+    let out = zenjxl::decode(cs, None, &[zenpixels::PixelDescriptor::RGB8])
+        .expect("decode recompressed output");
+    out.info.icc_profile
+}
+
+/// Build a real Display-P3 ICC profile (a non-sRGB, wide-gamut profile) via
+/// moxcms — the same color library the `jpeg-lossy` feature already pulls.
+fn display_p3_icc() -> Vec<u8> {
+    moxcms::ColorProfile::new_display_p3()
+        .encode()
+        .expect("encode Display-P3 ICC")
+}
+
+/// Splice an ICC profile into a baseline JPEG as APP2 `ICC_PROFILE` marker
+/// chunk(s), inserted right after SOI (the format `zenjpeg::extract_icc_profile`
+/// reads back: 12-byte `ICC_PROFILE\0` signature + 1-based chunk index + total
+/// chunk count + chunk bytes). `src` must start with SOI (`FF D8`).
+fn inject_icc(src: &[u8], icc: &[u8]) -> Vec<u8> {
+    assert_eq!(&src[..2], &[0xFF, 0xD8], "source must start with SOI");
+    // APP2 segment length is a 16-bit field that counts itself; reserve room for
+    // the length bytes (2) + signature (12) + chunk index (1) + total (1) = 16.
+    const MAX_CHUNK_DATA: usize = 0xFFFF - 2 - 14;
+    let chunks: Vec<&[u8]> = if icc.is_empty() {
+        Vec::new()
+    } else {
+        icc.chunks(MAX_CHUNK_DATA).collect()
+    };
+    let total = chunks.len() as u8;
+
+    let mut out = Vec::with_capacity(src.len() + icc.len() + chunks.len() * 18 + 4);
+    out.extend_from_slice(&src[..2]); // SOI
+    for (i, chunk) in chunks.iter().enumerate() {
+        let seg_len = (2 + 14 + chunk.len()) as u16; // length field counts itself
+        out.extend_from_slice(&[0xFF, 0xE2]);
+        out.extend_from_slice(&seg_len.to_be_bytes());
+        out.extend_from_slice(b"ICC_PROFILE\0");
+        out.push((i + 1) as u8); // chunk index is 1-based
+        out.push(total);
+        out.extend_from_slice(chunk);
+    }
+    out.extend_from_slice(&src[2..]); // rest of the JPEG (DQT/SOF/.../SOS/scan)
+    out
+}
+
 #[test]
 fn coarsen_is_monotone_and_decodes() {
     let lossless = recompress_jpeg_coarsen(TINY_JPEG, 1.0, 5).expect("scale 1.0");
@@ -181,4 +227,104 @@ fn unreachable_target_returns_lossless_floor() {
     let lossless = recompress_jpeg_coarsen(TINY_JPEG, 1.0, 5).expect("lossless");
     assert_eq!(out.len(), lossless.len(), "unreachable -> lossless floor");
     assert_eq!(decode_dims(&out), (96, 96));
+}
+
+// ── Color preservation: the source JPEG's ICC must survive recompression ──
+
+/// Sanity check on the fixtures: the Display-P3 profile is a real, non-sRGB
+/// profile and the injected tag actually changes the decoded color. Without a
+/// source ICC, JXL signals enum-sRGB (the decoder reconstructs a synthesized
+/// sRGB ICC) — distinct from the injected P3 — so the tagged/untagged tests
+/// below genuinely distinguish "preserved P3" from "defaulted sRGB".
+#[test]
+fn icc_fixture_changes_decoded_color() {
+    let p3 = display_p3_icc();
+    assert!(p3.len() > 100, "Display-P3 ICC should be a real profile");
+    let tagged = inject_icc(TINY_JPEG, &p3);
+    // Both decode/recompress to the source dimensions.
+    let tagged_cs = recompress_jpeg_coarsen(&tagged, 1.0, 5).expect("tagged scale 1.0");
+    let bare_cs = recompress_jpeg_coarsen(TINY_JPEG, 1.0, 5).expect("bare scale 1.0");
+    assert_eq!(decode_dims(&tagged_cs), (96, 96));
+    assert_eq!(decode_dims(&bare_cs), (96, 96));
+    // The tagged output carries the P3 profile; the untagged one does not.
+    assert_eq!(decode_icc(&tagged_cs).as_deref(), Some(p3.as_slice()));
+    assert_ne!(
+        decode_icc(&bare_cs).as_deref(),
+        Some(p3.as_slice()),
+        "an untagged JPEG must not decode as Display-P3"
+    );
+}
+
+/// REGRESSION (the path that already worked): the coefficient-domain Coarsen
+/// path lifts the source's APP2 ICC into the JXL codestream. Recompress a
+/// Display-P3-tagged JPEG via Coarsen and confirm the profile survives.
+#[test]
+fn coarsen_preserves_source_icc() {
+    let p3 = display_p3_icc();
+    let tagged = inject_icc(TINY_JPEG, &p3);
+    let cs = recompress_jpeg_coarsen(&tagged, 1.0, 5).expect("coarsen tagged");
+    let got = decode_icc(&cs).expect("coarsen output must carry the source ICC");
+    assert_eq!(
+        got, p3,
+        "Coarsen must preserve the source Display-P3 ICC byte-for-byte"
+    );
+}
+
+/// THE BUG FIX: the pixel Reencode path must also carry the source's ICC. Force
+/// the Reencode path on a Display-P3-tagged JPEG and confirm the profile is in
+/// the output JXL (previously it was a bare codestream → silently relabeled sRGB).
+#[test]
+fn reencode_preserves_source_icc() {
+    let p3 = display_p3_icc();
+    let tagged = inject_icc(TINY_JPEG, &p3);
+    // Reencode path, explicitly (a loose MSE target so the loop coarsens freely).
+    let cs = recompress_jpeg_lossy(
+        &tagged,
+        JpegRecompressMethod::Reencode,
+        300.0,
+        false,
+        &mse,
+        5,
+    )
+    .expect("reencode tagged");
+    assert_eq!(decode_dims(&cs), (96, 96));
+    let got = decode_icc(&cs).expect("Reencode output must carry the source ICC");
+    assert_eq!(
+        got, p3,
+        "Reencode must preserve the source Display-P3 ICC byte-for-byte"
+    );
+}
+
+/// The Reencode path on an untagged JPEG must stay sRGB — not gain the wrong
+/// (e.g. P3) profile. An untagged JPEG is sRGB by convention, and JXL's enum
+/// color already signals sRGB (jxl-rs reconstructs a synthesized sRGB ICC on
+/// decode). The untagged Reencode output must therefore match the untagged
+/// Coarsen default sRGB and never the injected P3 — guarding the no-source-ICC
+/// branch of the fix (where the bare convenience encode is still correct).
+#[test]
+fn reencode_untagged_jpeg_stays_srgb() {
+    let p3 = display_p3_icc();
+    let reencode = recompress_jpeg_lossy(
+        TINY_JPEG,
+        JpegRecompressMethod::Reencode,
+        300.0,
+        false,
+        &mse,
+        5,
+    )
+    .expect("reencode untagged");
+    assert_eq!(decode_dims(&reencode), (96, 96));
+    // Not relabeled to the wide-gamut profile.
+    assert_ne!(
+        decode_icc(&reencode).as_deref(),
+        Some(p3.as_slice()),
+        "untagged source must not be relabeled Display-P3"
+    );
+    // Same default sRGB the Coarsen path emits for an untagged source.
+    let coarsen = recompress_jpeg_coarsen(TINY_JPEG, 1.0, 5).expect("coarsen untagged");
+    assert_eq!(
+        decode_icc(&reencode),
+        decode_icc(&coarsen),
+        "untagged Reencode must signal the same sRGB as untagged Coarsen"
+    );
 }

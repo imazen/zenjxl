@@ -81,6 +81,11 @@ mod encoding {
         .with_icc(true)
         .with_exif(true)
         .with_xmp(true)
+        // JXL's codestream enum color is a standardized CICP carrier, and it is
+        // safe as the sole color carrier (matches libjxl's want_icc=false).
+        .with_cicp(true)
+        .with_cicp_is_valid_carrier(true)
+        .with_cicp_safe_sole_carrier(true)
         .with_gain_map(true)
         .with_enforces_max_pixels(true)
         .with_enforces_max_memory(true)
@@ -512,16 +517,18 @@ mod encoding {
     }
 
     impl JxlEncoder {
-        /// Build jxl-encoder ImageMetadata from the zencodec Metadata,
-        /// respecting the EncodePolicy for what to embed.
-        fn build_jxl_metadata(&self) -> Option<jxl_encoder::ImageMetadata<'_>> {
+        /// Build jxl-encoder ImageMetadata from the zencodec Metadata.
+        ///
+        /// `embed_icc` is resolved by [`resolve_jxl_color`](Self::resolve_jxl_color)
+        /// — it is `false` when the color is carried by the codestream enum
+        /// encoding and the ICC was a redundant duplicate (the JXL Balanced
+        /// default). EXIF/XMP still follow the [`EncodePolicy`].
+        fn build_jxl_metadata(&self, embed_icc: bool) -> Option<jxl_encoder::ImageMetadata<'_>> {
             let meta = self.metadata.as_ref()?;
             let mut jxl_meta = jxl_encoder::ImageMetadata::new();
             let mut has_any = false;
 
-            if self.policy.resolve_icc(true)
-                && let Some(ref icc) = meta.icc_profile
-            {
+            if embed_icc && let Some(ref icc) = meta.icc_profile {
                 jxl_meta = jxl_meta.with_icc_profile(icc);
                 has_any = true;
             }
@@ -539,6 +546,109 @@ mod encoding {
             }
 
             has_any.then_some(jxl_meta)
+        }
+
+        /// Resolve JXL color emission: whether to drive the codestream enum
+        /// color encoding from `Metadata::cicp` (or an ICC that maps to CICP),
+        /// and whether the ICC is then a redundant duplicate to drop.
+        ///
+        /// Routes through [`zencodec::resolve_color_emit`] under the caller's
+        /// color preset (`self.policy.resolve_color`, default
+        /// [`Balanced`](zencodec::ColorEmitPolicy::Balanced)). JXL is
+        /// `cicp_safe_sole_carrier`, so a representable color drops the ICC
+        /// (matching libjxl's `want_icc=false`). Returns the enum encoding to
+        /// apply (if any) and whether to embed the ICC.
+        fn resolve_jxl_color(
+            &self,
+            layout: PixelLayout,
+        ) -> (Option<jxl_encoder::ColorEncoding>, bool) {
+            let policy_icc = self.policy.resolve_icc(true);
+            let Some(meta) = self.metadata.as_ref() else {
+                return (None, policy_icc);
+            };
+            let channel_count = if Self::layout_is_gray(layout) { 1 } else { 3 };
+            let mut src = zencodec::SourceColor::default().with_channel_count(channel_count);
+            if let Some(cicp) = meta.cicp {
+                src = src.with_cicp(cicp);
+            }
+            if let Some(ref icc) = meta.icc_profile {
+                src = src.with_icc_profile(icc.clone());
+            }
+            let plan = zencodec::resolve_color_emit(
+                &src,
+                &JXL_ENCODE_CAPS,
+                self.policy
+                    .resolve_color(zencodec::ColorEmitPolicy::Balanced),
+            );
+            let color_encoding = plan
+                .cicp
+                .as_ref()
+                .and_then(Self::cicp_to_jxl_color_encoding);
+            // Drop the ICC only when the enum color actually carries the color
+            // *and* the plan judged it redundant.
+            let embed_icc = policy_icc
+                && !(color_encoding.is_some()
+                    && matches!(plan.icc, zencodec::IccDisposition::Drop));
+            (color_encoding, embed_icc)
+        }
+
+        /// Whether a pixel layout is grayscale (CICP is RGB-centric and must be
+        /// suppressed for gray so [`resolve_jxl_color`](Self::resolve_jxl_color)
+        /// keeps the ICC instead of emitting an RGB color description).
+        fn layout_is_gray(layout: PixelLayout) -> bool {
+            matches!(
+                layout,
+                PixelLayout::Gray8
+                    | PixelLayout::Gray16
+                    | PixelLayout::GrayLinearF32
+                    | PixelLayout::GrayLinearF16
+                    | PixelLayout::GrayAlpha8
+                    | PixelLayout::GrayAlpha16
+                    | PixelLayout::GrayAlphaLinearF32
+                    | PixelLayout::GrayAlphaLinearF16
+            )
+        }
+
+        /// Map a CICP color description to a jxl-encoder enum [`ColorEncoding`],
+        /// when the primaries and transfer are both expressible in JXL's enums
+        /// (else `None` → keep the ICC). Rendering intent defaults to Perceptual
+        /// (CICP carries none); `want_icc = false` (the enum is authoritative).
+        fn cicp_to_jxl_color_encoding(cicp: &zencodec::Cicp) -> Option<jxl_encoder::ColorEncoding> {
+            use jxl_encoder::headers::color_encoding::{
+                ColorEncoding, ColorSpace, Primaries, RenderingIntent, TransferFunction, WhitePoint,
+            };
+            let primaries = match cicp.color_primaries {
+                1 => Primaries::Srgb,
+                9 => Primaries::Bt2100,
+                11 | 12 => Primaries::P3,
+                _ => return None,
+            };
+            let transfer_function = match cicp.transfer_characteristics {
+                1 => TransferFunction::Bt709,
+                8 => TransferFunction::Linear,
+                13 => TransferFunction::Srgb,
+                16 => TransferFunction::Pq,
+                17 => TransferFunction::Dci,
+                18 => TransferFunction::Hlg,
+                _ => return None,
+            };
+            // CICP primaries 11 = DCI-P3 (DCI white); 12 = Display-P3 (D65).
+            let white_point = if cicp.color_primaries == 11 {
+                WhitePoint::Dci
+            } else {
+                WhitePoint::D65
+            };
+            Some(ColorEncoding {
+                color_space: ColorSpace::Rgb,
+                white_point,
+                custom_white_point: None,
+                primaries,
+                custom_primaries: None,
+                transfer_function,
+                rendering_intent: RenderingIntent::Perceptual,
+                want_icc: false,
+                gamma: None,
+            })
         }
 
         /// Check ResourceLimits against the given dimensions and bytes-per-pixel.
@@ -573,9 +683,15 @@ mod encoding {
             height: u32,
             layout: PixelLayout,
         ) -> Result<Vec<u8>, At<JxlError>> {
-            let jxl_meta = self.build_jxl_metadata();
+            let (color_encoding, embed_icc) = self.resolve_jxl_color(layout);
+            let jxl_meta = self.build_jxl_metadata(embed_icc);
 
             let encode = |req: jxl_encoder::EncodeRequest<'_>| -> Result<Vec<u8>, At<JxlError>> {
+                let req = if let Some(ref ce) = color_encoding {
+                    req.with_color_encoding(ce.clone())
+                } else {
+                    req
+                };
                 let req = if let Some(ref meta) = jxl_meta {
                     req.with_metadata(meta)
                 } else {
@@ -2178,6 +2294,48 @@ mod tests {
         }
     }
 
+    #[cfg(all(feature = "encode", feature = "decode", feature = "zencodec"))]
+    #[test]
+    fn metadata_cicp_round_trips_via_enum_color() {
+        use zencodec::decode::{DecodeJob, DecoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::{Cicp, Metadata};
+
+        let width = 16u32;
+        let height = 16u32;
+        let pixels: Vec<rgb::Rgb<u8>> = (0..width * height)
+            .map(|i| {
+                let v = (i % 256) as u8;
+                rgb::Rgb {
+                    r: v,
+                    g: 0,
+                    b: 255 - v,
+                }
+            })
+            .collect();
+        let buf =
+            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, width, height).unwrap();
+
+        // Encode with a Display-P3 CICP in the metadata (no ICC). It must drive
+        // the codestream enum color encoding (the JXL CICP fix).
+        let meta = Metadata::none().with_cicp(Cicp::DISPLAY_P3);
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let encoder = config
+            .job()
+            .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
+            .encoder()
+            .unwrap();
+        let output = encoder.encode(buf.as_slice().into()).unwrap();
+
+        // The P3 CICP must survive via the codestream enum color.
+        let info = JxlDecoderConfig::new().job().probe(output.data()).unwrap();
+        assert_eq!(
+            info.source_color.cicp,
+            Some(Cicp::DISPLAY_P3),
+            "Display-P3 CICP should round-trip through the JXL codestream enum color"
+        );
+    }
+
     #[cfg(feature = "decode")]
     #[test]
     fn streaming_decoder_unsupported() {
@@ -2695,7 +2853,11 @@ mod tests {
         let meta = zencodec::Metadata::none().with_exif(exif_data);
 
         let config = JxlEncoderConfig::new().with_lossless(true);
-        let encoder = config.job().with_metadata(meta).encoder().unwrap();
+        let encoder = config
+            .job()
+            .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
+            .encoder()
+            .unwrap();
         let output = encoder.encode(buf.as_slice().into()).unwrap();
 
         // Output must be container format (EXIF is stored in a container box).
@@ -2732,7 +2894,11 @@ mod tests {
         let meta = zencodec::Metadata::none().with_xmp(xmp_data);
 
         let config = JxlEncoderConfig::new().with_lossless(true);
-        let encoder = config.job().with_metadata(meta).encoder().unwrap();
+        let encoder = config
+            .job()
+            .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
+            .encoder()
+            .unwrap();
         let output = encoder.encode(buf.as_slice().into()).unwrap();
 
         assert!(
@@ -2768,7 +2934,11 @@ mod tests {
             .with_xmp(xmp_data);
 
         let config = JxlEncoderConfig::new().with_lossless(true);
-        let encoder = config.job().with_metadata(meta).encoder().unwrap();
+        let encoder = config
+            .job()
+            .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
+            .encoder()
+            .unwrap();
         let output = encoder.encode(buf.as_slice().into()).unwrap();
 
         let result = crate::decode::decode(output.data(), None, &[]).unwrap();
@@ -2859,7 +3029,11 @@ mod tests {
             .with_xmp(xmp_data);
 
         let config = JxlEncoderConfig::new().with_lossless(true);
-        let encoder = config.job().with_metadata(meta).encoder().unwrap();
+        let encoder = config
+            .job()
+            .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
+            .encoder()
+            .unwrap();
         let output = encoder.encode(buf.as_slice().into()).unwrap();
 
         // Decode via zencodec trait path.

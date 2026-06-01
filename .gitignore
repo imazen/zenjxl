@@ -58,3 +58,4 @@ Cargo.toml.original.txt
 *.profdata
 fuzz-*.log
 .workongoing
+.cargo/config.toml
