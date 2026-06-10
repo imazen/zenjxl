@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Added
+- Versioned public-API surface snapshot at `docs/public-api/zenjxl.txt`,
+  regenerated on every `cargo test` by `tests/public_api_doc.rs`
+  (`ZEN_API_DOC=check` verifies in CI's clippy job, `=off` skips); justfile
+  recipes `api-doc` / `api-doc-check`.
 - `zencodec::GainMapRender` wired through the decode trait path (job builder
   `with_gain_map_render` + trait/dyn parity): `BaseOnly` (default) attaches
   nothing; `Components` recursively decodes the jhgm gain-map codestream

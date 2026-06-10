@@ -54,6 +54,8 @@ jxl-encoder = { version = "0.3.2", default-features = false, features = [
 # (`tests/jpeg_lossy.rs`). Matches the moxcms the jpeg-lossy feature already
 # pulls via zenjpeg, so no extra version in the graph.
 moxcms = { version = "0.8.1" }
+# Parses `cargo metadata` in tests/public_api_doc.rs (feature-list discovery).
+serde_json = "1.0.150"
 
 [features]
 default = ["encode", "decode"]
