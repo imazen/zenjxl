@@ -3,6 +3,31 @@
 ## [Unreleased]
 
 ### Added
+- **Variant generation (`__expert`): sweep planner + fingerprints + plan
+  introspection**, porting zenjpeg's `VARIANT_GENERATION.md` patterns
+  (see `docs/VARIANT_GENERATION.md` for the jxl adoption + the
+  dominance/trial/metric audit). `zenjxl::sweep`: mode-discriminated
+  `LossyVariant`/`LosslessVariant` (knobs live on the mode that uses
+  them), `SweepAxes` × `QualityGrid` → deduplicated, main-effects-first
+  `SweepPlan` with a budget ladder and no-silent-caps drop reporting,
+  and an FNV-1a byte-identity `fingerprint` over resolved state (the
+  generic-quality calibration plateau q ≤ 20 → distance 8.5 dedupes five
+  step-5 grid points per stratum). `JxlEncoderConfig::resolve_plan()` →
+  `JxlEncodePlan::{Lossy,Lossless}` reads the same stored upstream
+  config the encode consumes (no second resolution implementation);
+  lossless plans report dead knobs. Empirical harness
+  `examples/sweep_validate.rs` (inert-step / fingerprint-contract /
+  lossless-roundtrip-exactness / ordering hard gates), results in
+  `benchmarks/sweep_validate_jxl_2026-06-10.tsv`. New `__expert`
+  re-exports: `EncoderStrategy`, `ProgressiveMode`, `RctType`,
+  `ANSHistogramStrategy`. The maiden harness run found jxl-encoder#68
+  (e9+ lossless emits undecodable bitstreams on photo content — the
+  harness stays red on those cells deliberately) and jxl-encoder#69
+  (lossless lz77/lz77_method/patches/palette setters +
+  tree_sample_fraction override silently unconsumed), plus five
+  mis-curated probes that were fixed from the run's evidence (see
+  docs/VARIANT_GENERATION.md §6).
+
 - Versioned public-API surface snapshot at `docs/public-api/zenjxl.txt`,
   regenerated on every `cargo test` by `tests/public_api_doc.rs`
   (`ZEN_API_DOC=check` verifies in CI's clippy job, `=off` skips); justfile
@@ -19,6 +44,15 @@
   feature).
 - zencodec 0.1.21 color-emit + metadata-policy adoption: `resolve_jxl_color` drives the ICC-vs-enum-color decision through `resolve_color_emit`; resolved CICP lowers to the codestream enum `ColorEncoding`; JPEG→JXL `Reencode` recompression preserves the source ICC instead of relabeling sRGB. Deps bumped to published zencodec 0.1.21 / zenpixels 0.2.11; butteraugli lock 0.9.0→0.9.3 (780d45eb).
 - Native HDR decode signaling: decode-side output descriptors (probe `output_info` and full decode) carry the transfer function and primaries from the codestream CICP — a BT.2100-PQ JXL decodes as a PQ/BT.2020-tagged buffer. This also corrects the blanket `_LINEAR` claim on f32 output: when CICP is present the decoder renders into the signaled encoding for every depth (linear-sRGB float fallback only applies to XYB images with ICC-only profiles). Test `decode_descriptor_carries_cicp_pq_hdr`.
+
+### Changed
+- `JxlEncoderConfig::validate()` now rejects `with_noise(true)` combined
+  with lossless mode (`ValidationError::NoiseInLosslessMode`, additive
+  `#[non_exhaustive]` variant): noise synthesis is a lossy-VarDCT
+  feature and was a silent no-op under the modular path. Generic
+  quality knobs under lossless remain tolerated (zencodec pipelines set
+  quality before toggling lossless) and are reported via
+  `resolve_plan()`'s `inert_knobs` instead.
 
 ### Fixed
 - CI: clone the `[patch.crates-io]` siblings (jxl-encoder, zenjpeg) at the paths the patch section names; the old workflow cloned to `../jxl-encoder--expert` and perl-stripped inline path deps, so every job failed manifest resolution since the patch section landed (d630212a). Known remaining red: `expert_forwarding::lossless_expert_override_propagates_through_zenjxl`, a pre-existing jxl-encoder lossless regression tracked in imazen/jxl-encoder#67.
