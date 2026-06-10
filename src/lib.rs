@@ -26,6 +26,20 @@ mod validate;
 // #[cfg(feature = "zennode")]
 // pub mod zennode_defs;
 
+/// Budgeted sweep-plan construction over the encoder knob space
+/// (variant generation for calibration sweeps and picker training).
+///
+/// Ports zenjpeg's variant-generation patterns — mode-discriminated
+/// variants, resolved-state fingerprints, budgeted main-effects-first
+/// sweep plans — to JXL. See `docs/VARIANT_GENERATION.md` in this repo
+/// and the module docs for the axis provenance table.
+///
+/// **Private — do not depend on this in production code.** Gated behind
+/// `__expert` (it drives jxl-encoder's internal-params escape hatch);
+/// anything here can change without a semver bump.
+#[cfg(all(feature = "encode", feature = "__expert"))]
+pub mod sweep;
+
 pub use error::JxlError;
 pub use validate::ValidationError;
 
@@ -94,6 +108,21 @@ pub use jxl_encoder::{calibrated_jxl_quality, quality_to_distance};
 /// without a semver bump.
 #[cfg(feature = "__expert")]
 pub use jxl_encoder::{EncoderMode, EntropyMulTable, LosslessInternalParams, LossyInternalParams};
+
+/// Additional `__expert` re-exports used by [`sweep`]'s public axis
+/// types: the W44-128 improvements bundle ([`EncoderStrategy`]), the
+/// progressive-rendering selector ([`ProgressiveMode`]), the RCT
+/// selector for `LosslessInternalParams::forced_rct` ([`RctType`]), and
+/// the ANS histogram-normalization strategy for
+/// `LossyInternalParams::ans_histogram_strategy_vardct`
+/// ([`ANSHistogramStrategy`]). Same stability caveat as everything
+/// behind `__expert`: no semver guarantees.
+#[cfg(all(feature = "encode", feature = "__expert"))]
+pub use jxl_encoder::api::EncoderStrategy;
+#[cfg(all(feature = "encode", feature = "__expert"))]
+pub use jxl_encoder::entropy_coding::ans::ANSHistogramStrategy;
+#[cfg(all(feature = "encode", feature = "__expert"))]
+pub use jxl_encoder::{ProgressiveMode, RctType};
 
 /// Re-export of [`jxl_encoder::ValidationError`] under an aliased name so it
 /// sits as a sibling of zenjxl's own [`ValidationError`] without shadowing it.
