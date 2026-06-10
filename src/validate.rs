@@ -55,6 +55,13 @@ pub enum ValidationError {
         valid: RangeInclusive<i32>,
     },
 
+    /// `with_noise(true)` combined with lossless mode. Noise synthesis
+    /// is a lossy-VarDCT feature with no defined meaning on the modular
+    /// path; the combination would silently no-op, so `validate()`
+    /// rejects it instead of remapping it.
+    #[error("noise synthesis is a lossy-mode knob with no effect in lossless mode")]
+    NoiseInLosslessMode,
+
     /// Validation error from jxl-encoder propagated through a re-exported
     /// upstream Config (`LossyConfig`, `LosslessConfig`, or any
     /// `*InternalParams`).

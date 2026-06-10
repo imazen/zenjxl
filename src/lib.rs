@@ -63,6 +63,11 @@ pub use codec::{
     GainMapData, JxlAnimationFrameEncoder, JxlEncodeJob, JxlEncoder, JxlEncoderConfig,
 };
 
+// Resolved-plan introspection (JxlEncoderConfig::resolve_plan). Same
+// stability caveat as everything behind `__expert`.
+#[cfg(all(feature = "zencodec", feature = "encode", feature = "__expert"))]
+pub use codec::{DistanceSource, JxlEncodePlan, LosslessPlan, LossyPlan};
+
 #[cfg(all(feature = "zencodec", feature = "decode"))]
 pub use codec::{JxlAnimationFrameDecoder, JxlDecodeJob, JxlDecoder, JxlDecoderConfig};
 

@@ -266,6 +266,10 @@ mod encoding {
         /// - `generic_quality` in `0.0..=100.0` (and not NaN)
         /// - `distance_override` in `0.0..=25.0` (and not NaN)
         /// - `effort` in `1..=10`
+        /// - `noise` is not combined with lossless mode (noise synthesis
+        ///   is a lossy-VarDCT feature; under the modular path it would
+        ///   be a silent no-op, so the combination is rejected rather
+        ///   than remapped)
         ///
         /// The opaque `gain_map` payload is not parsed here — its validity
         /// surfaces during encode.
@@ -285,6 +289,9 @@ mod encoding {
                 &crate::validate::EFFORT_RANGE,
                 |value, valid| crate::ValidationError::EffortOutOfRange { value, valid },
             )?;
+            if self.lossless && self.noise {
+                return Err(crate::ValidationError::NoiseInLosslessMode);
+            }
             Ok(())
         }
 
@@ -312,6 +319,130 @@ mod encoding {
             }
             self.mode = JxlEncMode::Lossless(cfg);
         }
+
+        /// Resolve every knob to what the encoder will actually run —
+        /// the introspection counterpart of an encode call.
+        ///
+        /// There is no second resolution implementation that could
+        /// drift: the values are read off the **same**
+        /// `LossyConfig`/`LosslessConfig` object the encode path
+        /// consumes (the mode is rebuilt by every setter, so it already
+        /// reflects quality→distance calibration, effort clamping, and
+        /// upstream defaults). What this plan does NOT report is the
+        /// effort→tool resolution inside jxl-encoder (which DCT classes,
+        /// tree knobs, etc. an effort level enables) — that lives in
+        /// jxl-encoder's `EffortProfile` and is deliberately not
+        /// duplicated here; override it per-knob via the `__expert`
+        /// internal-params types instead.
+        ///
+        /// Static plans report only what is statically knowable:
+        /// content-dependent encoder decisions (auto EPF strength, auto
+        /// resampling at high distance, noise modelling) are not
+        /// guessed.
+        #[cfg(feature = "__expert")]
+        pub fn resolve_plan(&self) -> JxlEncodePlan {
+            let container_forced = self.gain_map.is_some();
+            match &self.mode {
+                JxlEncMode::Lossy(c) => JxlEncodePlan::Lossy(LossyPlan {
+                    distance: c.distance(),
+                    distance_source: if self.distance_override.is_some() {
+                        DistanceSource::Override
+                    } else if self.calibrated_quality.is_some() {
+                        DistanceSource::CalibratedQuality
+                    } else {
+                        DistanceSource::Default
+                    },
+                    generic_quality: self.generic_quality,
+                    calibrated_native_quality: self.calibrated_quality,
+                    effort: c.effort(),
+                    noise: c.noise(),
+                    container_forced,
+                }),
+                JxlEncMode::Lossless(c) => {
+                    let mut inert_knobs = Vec::new();
+                    if self.noise {
+                        inert_knobs.push("noise");
+                    }
+                    if self.distance_override.is_some() {
+                        inert_knobs.push("distance_override");
+                    }
+                    if self.generic_quality.is_some() {
+                        inert_knobs.push("generic_quality");
+                    }
+                    JxlEncodePlan::Lossless(LosslessPlan {
+                        effort: c.effort(),
+                        container_forced,
+                        inert_knobs,
+                    })
+                }
+            }
+        }
+    }
+
+    /// Where a [`LossyPlan`]'s resolved distance came from.
+    #[cfg(feature = "__expert")]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum DistanceSource {
+        /// [`JxlEncoderConfig::with_distance`] — calibration bypassed.
+        Override,
+        /// `with_generic_quality` through the
+        /// `calibrated_jxl_quality` → `quality_to_distance` chain.
+        CalibratedQuality,
+        /// Neither set: the constructor default (distance 1.0).
+        Default,
+    }
+
+    /// Resolved lossy (VarDCT) encode plan. Knobs that are dead on the
+    /// lossy path do not exist here — mirrors the sweep module's
+    /// variant discrimination.
+    #[cfg(feature = "__expert")]
+    #[derive(Clone, Debug)]
+    pub struct LossyPlan {
+        /// The butteraugli distance the encoder will run with (read off
+        /// the stored `LossyConfig`).
+        pub distance: f32,
+        /// How `distance` was produced.
+        pub distance_source: DistanceSource,
+        /// The generic quality as given (0–100), when quality-driven.
+        pub generic_quality: Option<f32>,
+        /// The calibrated JXL-native quality (the intermediate value of
+        /// the same chain the encoder ran), when quality-driven.
+        pub calibrated_native_quality: Option<f32>,
+        /// Resolved effort (upstream default 7 when unset).
+        pub effort: u8,
+        /// Noise synthesis (live on this path).
+        pub noise: bool,
+        /// A gain map forces JXL container framing around the
+        /// codestream.
+        pub container_forced: bool,
+    }
+
+    /// Resolved lossless (modular) encode plan.
+    #[cfg(feature = "__expert")]
+    #[derive(Clone, Debug)]
+    pub struct LosslessPlan {
+        /// Resolved effort (upstream default 7 when unset).
+        pub effort: u8,
+        /// A gain map forces JXL container framing around the
+        /// codestream.
+        pub container_forced: bool,
+        /// Knobs set on the config that are **dead** in lossless mode
+        /// (`"noise"`, `"distance_override"`, `"generic_quality"`).
+        /// `validate()` rejects the noise case outright; the quality
+        /// knobs are tolerated for generic zencodec pipelines that set
+        /// quality before toggling lossless, and reported here instead.
+        pub inert_knobs: Vec<&'static str>,
+    }
+
+    /// Mode-discriminated resolved encode plan — see
+    /// [`JxlEncoderConfig::resolve_plan`].
+    #[cfg(feature = "__expert")]
+    #[derive(Clone, Debug)]
+    pub enum JxlEncodePlan {
+        /// Lossy VarDCT plan.
+        Lossy(LossyPlan),
+        /// Lossless modular plan.
+        Lossless(LosslessPlan),
     }
 
     impl Default for JxlEncoderConfig {
@@ -2092,6 +2223,9 @@ mod decoding {
 pub use encoding::{
     GainMapData, JxlAnimationFrameEncoder, JxlEncodeJob, JxlEncoder, JxlEncoderConfig,
 };
+
+#[cfg(all(feature = "encode", feature = "__expert"))]
+pub use encoding::{DistanceSource, JxlEncodePlan, LosslessPlan, LossyPlan};
 
 #[cfg(feature = "decode")]
 pub use decoding::{JxlAnimationFrameDecoder, JxlDecodeJob, JxlDecoder, JxlDecoderConfig};

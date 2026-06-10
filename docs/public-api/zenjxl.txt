@@ -5,7 +5,7 @@
 # all-features section.
 # DO NOT EDIT BY HAND — commit regenerated changes together with the code.
 
-## default features (181 items)
+## default features (182 items)
 
 pub mod zenjxl
 pub use zenjxl::GainMapBundle
@@ -90,6 +90,7 @@ pub zenjxl::ValidationError::EffortOutOfRange::value: i32
 pub zenjxl::ValidationError::GenericQualityOutOfRange
 pub zenjxl::ValidationError::GenericQualityOutOfRange::valid: core::ops::range::RangeInclusive<f32>
 pub zenjxl::ValidationError::GenericQualityOutOfRange::value: f32
+pub zenjxl::ValidationError::NoiseInLosslessMode
 impl core::clone::Clone for zenjxl::ValidationError
 pub fn zenjxl::ValidationError::clone(&self) -> zenjxl::ValidationError
 impl core::error::Error for zenjxl::ValidationError
@@ -189,7 +190,7 @@ pub fn zenjxl::decode_with_options(&[u8], core::option::Option<&zenjxl::JxlLimit
 pub fn zenjxl::decode_with_parallel(&[u8], core::option::Option<&zenjxl::JxlLimits>, &[zenpixels::descriptor::PixelDescriptor], core::option::Option<bool>) -> core::result::Result<zenjxl::JxlDecodeOutput, whereat::at::At<zenjxl::JxlError>>
 pub fn zenjxl::probe(&[u8]) -> core::result::Result<zenjxl::JxlInfo, whereat::at::At<zenjxl::JxlError>>
 
-## all features except _* (431 items)
+## all features except _* (432 items)
 
 pub mod zenjxl
 pub use zenjxl::GainMapBundle
@@ -349,6 +350,7 @@ pub zenjxl::ValidationError::EffortOutOfRange::value: i32
 pub zenjxl::ValidationError::GenericQualityOutOfRange
 pub zenjxl::ValidationError::GenericQualityOutOfRange::valid: core::ops::range::RangeInclusive<f32>
 pub zenjxl::ValidationError::GenericQualityOutOfRange::value: f32
+pub zenjxl::ValidationError::NoiseInLosslessMode
 impl core::clone::Clone for zenjxl::ValidationError
 pub fn zenjxl::ValidationError::clone(&self) -> zenjxl::ValidationError
 impl core::error::Error for zenjxl::ValidationError
