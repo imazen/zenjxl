@@ -101,17 +101,22 @@ fn lossy_expert_override_propagates_through_zenjxl() {
 }
 
 /// Build a custom `LosslessInternalParams` via zenjxl's re-exports, override
-/// `nb_rcts_to_try` (e7 default = 7; forcing 0 skips the RCT search entirely
-/// and falls back to the unconditional YCoCg pick, which definitively changes
-/// the bitstream — matches jxl-encoder's
-/// `effort_expert_tests::lossless_override_nb_rcts_to_try`), and confirm the
-/// override propagates.
+/// `nb_rcts_to_try`, and confirm the override propagates.
+///
+/// `Some(1)`, NOT `Some(0)`: since jxl-encoder `99162a2a` the 0-fallback is
+/// `GBR_SUBGR` (RCT-10), which is also what the default e7 7-candidate
+/// search picks on `synthetic_rgb8()` — so 0 vs default is byte-identical
+/// by content coincidence, not because the override is dead
+/// (jxl-encoder#67). `Some(1)` limits the search to candidate 0 (identity
+/// RCT), which always differs from the GBR_SUBGR winner. Mirrors the
+/// W44-137 fix to jxl-encoder's own
+/// `effort_expert_tests::lossless_override_nb_rcts_to_try` (`fda3c3f2`).
 #[test]
 fn lossless_expert_override_propagates_through_zenjxl() {
     let pixels = synthetic_rgb8();
 
     let mut params = LosslessInternalParams::default();
-    params.nb_rcts_to_try = Some(0);
+    params.nb_rcts_to_try = Some(1);
 
     let cfg_override = baseline_lossless().with_internal_params(params);
     let bytes_override = encode_lossless(&cfg_override, &pixels);
@@ -123,7 +128,7 @@ fn lossless_expert_override_propagates_through_zenjxl() {
 
     assert_ne!(
         bytes_override, bytes_baseline,
-        "LosslessInternalParams override (nb_rcts_to_try=Some(0)) must change the bitstream \
+        "LosslessInternalParams override (nb_rcts_to_try=Some(1)) must change the bitstream \
          when applied through zenjxl's re-exported LosslessConfig::with_internal_params"
     );
 }
