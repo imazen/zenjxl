@@ -1,15 +1,15 @@
 # Cross configuration for cross-compilation and testing.
 # See: https://github.com/cross-rs/cross
 #
-# The JXL_ENCODER_EXPERT_DIR volume mount is temporary — required while
-# the [patch.crates-io] entry in Cargo.toml points at the
-# ../jxl-encoder--expert/ sibling worktree (the feat/expert-internal-params
-# branch of jxl-encoder). Once jxl-encoder 0.3.1 publishes the __expert
-# rename, the patch and this volume entry both go away.
+# The sibling volume mounts are temporary — required while the
+# [patch.crates-io] entries in Cargo.toml point at the ../jxl-encoder and
+# ../zenjpeg sibling checkouts (jxl-encoder 0.3.2 / zenjpeg 0.8.7 are not
+# yet on crates.io). Once the chain publishes, the patch section and these
+# volume entries both go away.
 
 [build.env]
 passthrough = [
     "RUST_BACKTRACE",
     "RUST_LOG",
 ]
-volumes = ["JXL_ENCODER_EXPERT_DIR"]
+volumes = ["JXL_ENCODER_DIR", "ZENJPEG_DIR"]

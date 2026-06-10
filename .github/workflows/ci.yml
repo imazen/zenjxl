@@ -25,15 +25,13 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest, windows-11-arm]
     steps:
       - uses: actions/checkout@v6
-      - name: Clone jxl-encoder main (sibling for [patch.crates-io])
-        shell: bash
-        run: git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder--expert
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Patch path deps for CI
+      - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
         run: |
-          perl -i -pe 's/, path = "[^"]*"//g' Cargo.toml
+          git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder
+          git clone --depth 1 --branch main https://github.com/imazen/zenjpeg ../zenjpeg
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Check (no default features)
         run: cargo check --no-default-features
       - name: Test (no default features)
@@ -57,17 +55,15 @@ jobs:
       - name: Clone zenjxl-decoder (test resources)
         shell: bash
         run: git clone --depth 1 https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
-      - name: Clone jxl-encoder main (sibling for [patch.crates-io])
+      - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
-        run: git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder--expert
+        run: |
+          git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder
+          git clone --depth 1 --branch main https://github.com/imazen/zenjpeg ../zenjpeg
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           key: features
-      - name: Patch path deps for CI
-        shell: bash
-        run: |
-          perl -i -pe 's/, path = "[^"]*"//g' Cargo.toml
       - name: Check (decode only)
         run: cargo check --no-default-features --features decode
       - name: Test (decode only)
@@ -84,9 +80,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Clone jxl-encoder main (sibling for [patch.crates-io])
+      - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
-        run: git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder--expert
+        run: |
+          git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder
+          git clone --depth 1 --branch main https://github.com/imazen/zenjpeg ../zenjpeg
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: i686-unknown-linux-gnu
@@ -94,16 +92,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: cross-i686
-      - name: Patch path deps for CI
-        shell: bash
-        run: |
-          perl -i -pe 's/, path = "[^"]*"//g' Cargo.toml
       - name: Test (i686, no default features)
         env:
-          # Mount sibling jxl-encoder--expert into the cross container so
-          # the [patch.crates-io] path dep resolves. Cross only mounts the
+          # Mount the patched siblings into the cross container so the
+          # [patch.crates-io] path deps resolve. Cross only mounts the
           # project dir by default; volumes in Cross.toml extend that.
-          JXL_ENCODER_EXPERT_DIR: ${{ github.workspace }}/../jxl-encoder--expert
+          JXL_ENCODER_DIR: ${{ github.workspace }}/../jxl-encoder
+          ZENJPEG_DIR: ${{ github.workspace }}/../zenjpeg
         run: cross test --target i686-unknown-linux-gnu --no-default-features
 
   wasm:
@@ -111,17 +106,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Clone jxl-encoder main (sibling for [patch.crates-io])
+      - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
-        run: git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder--expert
+        run: |
+          git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder
+          git clone --depth 1 --branch main https://github.com/imazen/zenjpeg ../zenjpeg
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip1
       - uses: Swatinem/rust-cache@v2
-      - name: Patch path deps for CI
-        shell: bash
-        run: |
-          perl -i -pe 's/, path = "[^"]*"//g' Cargo.toml
       - name: Check WASM (no default features)
         run: cargo check --target wasm32-wasip1 --no-default-features
 
@@ -130,17 +123,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Clone jxl-encoder main (sibling for [patch.crates-io])
+      - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
-        run: git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder--expert
+        run: |
+          git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder
+          git clone --depth 1 --branch main https://github.com/imazen/zenjpeg ../zenjpeg
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Patch path deps for CI
-        shell: bash
-        run: |
-          perl -i -pe 's/, path = "[^"]*"//g' Cargo.toml
       - name: Clippy (no default features)
         run: cargo clippy --no-default-features --all-targets -- -D warnings
       - name: Clippy (zencodec only)
@@ -168,16 +159,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Clone jxl-encoder main (sibling for [patch.crates-io])
+      - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
-        run: git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder--expert
+        run: |
+          git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder
+          git clone --depth 1 --branch main https://github.com/imazen/zenjpeg ../zenjpeg
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
-      - name: Patch path deps for CI
-        shell: bash
-        run: |
-          perl -i -pe 's/, path = "[^"]*"//g' Cargo.toml
       - name: Check MSRV (no default features)
         run: cargo hack check --rust-version --no-default-features
       - name: Check MSRV (all features)
@@ -190,16 +179,14 @@ jobs:
       - uses: actions/checkout@v6
       - name: Clone zenjxl-decoder (test resources)
         run: git clone --depth 1 https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
-      - name: Clone jxl-encoder main (sibling for [patch.crates-io])
+      - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
-        run: git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder--expert
+        run: |
+          git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder
+          git clone --depth 1 --branch main https://github.com/imazen/zenjpeg ../zenjpeg
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: Swatinem/rust-cache@v2
-      - name: Patch path deps for CI
-        shell: bash
-        run: |
-          perl -i -pe 's/, path = "[^"]*"//g' Cargo.toml
       - name: Generate coverage
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
       - name: Upload coverage
