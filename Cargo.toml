@@ -56,6 +56,14 @@ jxl-encoder = { version = "0.3.2", default-features = false, features = [
 moxcms = { version = "0.8.1" }
 # Parses `cargo metadata` in tests/public_api_doc.rs (feature-list discovery).
 serde_json = "1.0.150"
+# SSIMULACRA2 scoring for the sweep-validation harness
+# (examples/sweep_validate.rs).
+fast-ssim2 = "0.8.2"
+# Corpus loading (CID22-512) + synthetic generators for the same harness.
+# Path-only dev-dep (publish = false upstream): stripped on `cargo publish`,
+# so it only binds local builds — which already require the sibling checkouts
+# via [patch.crates-io].
+zenjpeg-bench-utils = { path = "../zenjpeg/zenjpeg-bench-utils", default-features = false }
 
 [features]
 default = ["encode", "decode"]
@@ -89,3 +97,12 @@ __expert = ["encode", "jxl-encoder/__expert"]
 zencodec = []
 # Enable zennode node definitions (EncodeJxl, DecodeJxl)
 # zennode = ["dep:zennode"]
+
+# Empirical validation of the curated sweep axes + fingerprint contract
+# (see docs/VARIANT_GENERATION.md). Run:
+#   GIT_COMMIT=$(git rev-parse --short HEAD) cargo run --release \
+#     --example sweep_validate --features __expert -- \
+#     --out benchmarks/sweep_validate_$(date +%F).tsv
+[[example]]
+name = "sweep_validate"
+required-features = ["encode", "decode", "__expert"]

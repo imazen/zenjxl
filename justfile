@@ -29,6 +29,14 @@ api-doc:
 api-doc-check:
     ZEN_API_DOC=check cargo test -p zenjxl --test public_api_doc
 
+# Empirical sweep-axes + fingerprint-contract validation harness
+# (docs/VARIANT_GENERATION.md §6). Writes a dated TSV under benchmarks/.
+sweep-validate:
+    CODEC_CORPUS_DIR="${CODEC_CORPUS_DIR:-$HOME/work/codec-eval/codec-corpus}" \
+    GIT_COMMIT="$(git rev-parse --short HEAD)" \
+    cargo run --release --example sweep_validate --features __expert -- \
+        --out "benchmarks/sweep_validate_jxl_$(date +%F).tsv"
+
 # Test feature permutations (requires local path deps for encode/decode)
 feature-check:
     cargo check --no-default-features

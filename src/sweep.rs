@@ -55,22 +55,21 @@
 //! | gaborish | bool | default, off | effort-profile default; user-disableable mode |
 //! | ans | bool | default, off | `with_ans`; off = prefix coding |
 //! | progressive | enum | Single, QuantizedAcFullAc, DcVlfLfAc | `ProgressiveMode` variants |
-//! | faster_decoding | 0–4 | 0, 2, 4 | libjxl `--faster_decoding` tiers |
+//! | faster_decoding | 0–4 | lossy: 0, 4; lossless: 0, 2 | libjxl tiers. Lossy tier 2 = patches-off only, which never fires on photo content (validated inert); lossless tier 2 forces small groups (live; byte-aliases `group_size_shift = 0`) |
 //! | noise | bool | off, on | `with_noise` synthesis |
 //! | k_info_loss_mul_base | > 0 | 1.3 probe | libjxl PR #4506 experimental value (reference = 1.2) |
 //! | entropy_mul_table | preset | experimental() probe | PR #4506 constructor; reference() is the Reference-mode default |
-//! | lossy_search_seeds | ≥ 1 | 2 probe | RFC#45: e9+ default |
-//! | nb_rcts_to_try | 0–19 | 1, 19 probes | effort schedule (0/4/5/7/9/19); `Some(1)` per jxl-encoder#67 (identity-RCT-only — `Some(0)` falls back to GBR_SUBGR and can coincide with the search winner) |
+//! | lossy_search_seeds | ≥ 1 | (none — see note) | RFC#45: e9+ default. Live only under jxl-encoder's `butteraugli-loop` feature, which the default `__expert` build does not enable; not a default probe because it would be structurally inert |
+//! | nb_rcts_to_try | 0–19 | 1 probe | `Some(1)` per jxl-encoder#67 (identity-RCT-only — `Some(0)` falls back to GBR_SUBGR and can coincide with the search winner). A 19-wide probe was dropped 2026-06-10: zero new winners over the 7-candidate e7 default across the validation corpus |
 //! | wp_num_param_sets | 0–5 | 5 probe | effort schedule (0 at e<8, 2 at e8, 5 at e9+) |
 //! | tree_max_buckets | ≥ 1 | 256 probe | effort schedule (32/48/64/96/128/256) |
 //! | tree_num_properties | 1–16 | 16 probe | effort schedule (3/4/5/7/10/16) |
-//! | tree_sample_fraction | 0–1 | 0.65 probe | effort schedule (0.15 at e≤4 → 0.65 at e9+) |
+//! | tree_sample_fraction | 0–1 | (none) | effort schedule (0.15 at e≤4 → 0.65 at e9+); the override is not consumed upstream (jxl-encoder#69) — re-add when plumbed |
 //! | tree_learn_seeds | ≥ 1 | 2 probe | RFC#45 chunk 5 (1 at e≤9, 2 at e10) |
 //! | lloyd_max_buckets | bool | on probe | EX-J5 Lloyd-Max bucket boundaries |
-//! | gather_dedup | bool | on probe | issue #41 Phase 2 (bytes differ from sort-only path by design) |
-//! | modular predictor | 0–15 | 5 (Gradient), 15 (Variable) | upstream predictor ids; None = per-effort search |
+//! | gather_dedup | bool | (none) | issue #41 Phase 2. Validated byte-identical to the sort-only path on the whole 2026-06-10 corpus (the post-sort dedup converges); stays in the fingerprint, not worth an axis slot |
+//! | modular predictor | 0–15 | 6 (Weighted), 0 (Zero) | upstream predictor ids; None = per-effort selection. 5 (Gradient) and 15 byte-alias the e7 default (validated 2026-06-10) — the #67 trap |
 //! | group_size_shift | 0–3 | 0 (128), 3 (1024) | `128 << shift`; None = 256 default |
-//! | palette_colors | 0–1024 | 0 (off) probe | `with_modular_palette_colors`; None = effort default |
 //! | quality | 0–100 | grids in [`QualityGrid`] | step-5 floor / training-dense per the sweep discipline |
 //!
 //! **Deliberately excluded axes** (no silent caps — exclusions are
@@ -79,7 +78,10 @@
 //! are rejected by the encoder today — issue #47 chunk 4 pending),
 //! `alpha_distance` / `alpha_squeeze` / `simplify_invisible` (alpha
 //! axes need an alpha corpus), `photon_noise_iso` / `manual_noise_lut`
-//! (parameterized noise needs its own grid), `splines` / `force_strategy`
+//! (parameterized noise needs its own grid), lossless `lz77` /
+//! `lz77_method` / `patches` / `palette_colors` (setters accepted but
+//! not consumed by the modular path — jxl-encoder#69; they return as
+//! axes when plumbed), `splines` / `force_strategy`
 //! / `max_strategy_size` (debug knobs), `lossy_palette` (changes pixels
 //! under a "lossless" config; needs metric-class treatment),
 //! `butteraugli_iters` and the perceptual-loop family (feature-gated,
@@ -251,25 +253,37 @@ impl LossyVariant {
 /// One lossless (modular) encode variant.
 ///
 /// No distance, no noise, no VarDCT knobs — those are structurally
-/// unspellable here.
+/// unspellable here. Also deliberately absent: `lz77`, `lz77_method`,
+/// `patches`, and `palette_colors` — those `LosslessConfig` setters are
+/// accepted but not consumed by the modular path today
+/// (jxl-encoder#69, proven inert in both directions by
+/// `sweep_validate` 2026-06-10, including palette's best-case 2-color
+/// checkerboard). Knobs live on the variant only when they act; these
+/// return as axes when upstream plumbs them.
 #[derive(Clone, Debug)]
 pub struct LosslessVariant {
     /// Effort 1–10 (7 = upstream default).
     pub effort: u8,
-    /// Reference vs Experimental.
+    /// Reference vs Experimental. NOTE: `EffortProfile::lossless` is
+    /// currently mode-invariant (validated inert at e7 across the
+    /// harness corpus), so curated axes sweep `Reference` only; the
+    /// field stays because the upstream profile constructor consumes
+    /// it and Experimental divergences may ship later.
     pub encoder_mode: EncoderMode,
     /// Expert internal-params overrides (label + bundle).
     pub internal: NamedLosslessParams,
-    /// `None` = effort-profile default; `Some(false)` disables LZ77.
-    pub lz77: Option<bool>,
-    /// `None` = per-effort predictor search; `Some(0..=15)` forces one
-    /// (5 = Gradient, 14 = Best, 15 = Variable).
+    /// `None` = per-effort predictor selection; `Some(0..=15)` forces
+    /// one. Plumbing validated 2026-06-10: `Some(0)` (Zero) inflates a
+    /// CID22-512 photo 3×; beware default-aliases — `Some(5)`
+    /// (Gradient) IS the e7 default selection and byte-aliases `None`
+    /// (the jxl-encoder#67 "override equals fallback" trap).
     pub predictor: Option<u8>,
     /// Modular group dimension `128 << shift`; `None` = 256 default.
     pub group_size_shift: Option<u8>,
-    /// `None` = effort default; `Some(0)` disables palette detection.
-    pub palette_colors: Option<i64>,
-    /// libjxl `--faster_decoding` tier 0–4.
+    /// libjxl `--faster_decoding` tier 0–4. Tier 2 forces small groups
+    /// on the modular path (its output aliases `group_size_shift =
+    /// Some(0)` — distinct fingerprints, identical bytes; an accepted
+    /// under-merge).
     pub faster_decoding: u8,
 }
 
@@ -278,18 +292,13 @@ impl LosslessVariant {
     /// knobs after (same re-derivation caveat as [`LossyVariant::build`]).
     #[must_use]
     pub fn build(&self) -> LosslessConfig {
-        let mut c = LosslessConfig::new()
+        LosslessConfig::new()
             .with_effort(self.effort)
             .with_mode(self.encoder_mode)
             .with_modular_predictor(self.predictor)
             .with_modular_group_size(self.group_size_shift)
-            .with_modular_palette_colors(self.palette_colors)
             .with_faster_decoding(self.faster_decoding)
-            .with_internal_params(self.internal.params.clone());
-        if let Some(l) = self.lz77 {
-            c = c.with_lz77(l);
-        }
-        c
+            .with_internal_params(self.internal.params.clone())
     }
 }
 
@@ -365,22 +374,20 @@ pub struct LossyAxes {
 }
 
 /// Concrete values per lossless categorical axis, most-important first.
+/// (`lz77` / `palette_colors` are deliberately absent — jxl-encoder#69.)
 #[derive(Clone, Debug)]
 pub struct LosslessAxes {
     /// Effort levels (floor 3 under the budget ladder).
     pub efforts: Vec<u8>,
-    /// Reference / Experimental.
+    /// Reference / Experimental (curated axes use Reference only —
+    /// the lossless profile is mode-invariant today).
     pub encoder_modes: Vec<EncoderMode>,
     /// Expert internal-params probes (labelled; floor 1 = `"def"`).
     pub internal: Vec<NamedLosslessParams>,
-    /// LZ77 pin (None = effort default).
-    pub lz77: Vec<Option<bool>>,
-    /// Forced predictors (None = per-effort search).
+    /// Forced predictors (None = per-effort selection).
     pub predictors: Vec<Option<u8>>,
     /// Group-size shifts (None = 256 default).
     pub group_size_shifts: Vec<Option<u8>>,
-    /// Palette-color caps (None = effort default).
-    pub palette_colors: Vec<Option<i64>>,
     /// Faster-decoding tiers.
     pub faster_decoding: Vec<u8>,
 }
@@ -432,7 +439,12 @@ impl LossyAxes {
             ProgressiveMode::DcVlfLfAc,
         ]);
         axes.noise.push(true);
-        axes.faster_decoding.extend([2, 4]);
+        // Tier 4 only: tier 2's lossy-side effect is patches-off, and
+        // the patches detector produces nothing on photo-class content
+        // (validated inert 0/42 on the harness corpus — the lossless
+        // path keeps tier 2, where it forces small groups and fires
+        // everywhere).
+        axes.faster_decoding.push(4);
         axes.ans.push(Some(false));
         axes.internal.extend(lossy_internal_probes());
         axes
@@ -445,29 +457,37 @@ impl LossyAxes {
 #[must_use]
 pub fn lossy_internal_probes() -> Vec<NamedLossyParams> {
     let mut probes = Vec::new();
+    // Labels are id tokens: no '-' (the flag separator) or '_' (the
+    // token separator) inside a label, or downstream id parsing breaks.
     let mut p = LossyInternalParams::default();
     p.entropy_mul_table = Some(EntropyMulTable::experimental());
-    probes.push(NamedLossyParams::new("emul-exp", p));
+    probes.push(NamedLossyParams::new("emulexp", p));
 
-    for (label, set) in [
-        ("dct16off", 16u8),
-        ("dct32off", 32),
-        ("dct64off", 64),
-        ("dct4x8off", 48),
-    ] {
+    // try_dct32 is NOT probed: 32×32-class merges never won on the
+    // validation corpus at e7 (0/42 byte changes — W44-68/W44-123
+    // suppression composes on gated content and 16/64-class merges
+    // shadow the rest), so the probe carried no signal. dct16off and
+    // dct64off keep the DCT-class coverage; sweep try_dct32 under a
+    // Libjxl-strategy stratum when studying the gate interactions.
+    for (label, set) in [("dct16off", 16u8), ("dct64off", 64), ("dct4x8off", 48)] {
         let mut p = LossyInternalParams::default();
         match set {
             16 => p.try_dct16 = Some(false),
-            32 => p.try_dct32 = Some(false),
             64 => p.try_dct64 = Some(false),
             _ => p.try_dct4x8_afv = Some(false),
         }
         probes.push(NamedLossyParams::new(label, p));
     }
 
+    // chromacity_adjustment defaults ON at e7+ and acts per-pixel —
+    // live on every content class (unlike the gate-shadowed dct32).
+    let mut p = LossyInternalParams::default();
+    p.chromacity_adjustment = Some(false);
+    probes.push(NamedLossyParams::new("chroma0", p));
+
     let mut p = LossyInternalParams::default();
     p.non_aligned_eval = Some(false);
-    probes.push(NamedLossyParams::new("nonalign-off", p));
+    probes.push(NamedLossyParams::new("nonalign0", p));
 
     let mut p = LossyInternalParams::default();
     p.cfl_two_pass = Some(false);
@@ -477,9 +497,13 @@ pub fn lossy_internal_probes() -> Vec<NamedLossyParams> {
     p.k_info_loss_mul_base = Some(1.3);
     probes.push(NamedLossyParams::new("kinfo1.3", p));
 
-    let mut p = LossyInternalParams::default();
-    p.lossy_search_seeds = Some(2);
-    probes.push(NamedLossyParams::new("seeds2", p));
+    // NOTE: `lossy_search_seeds` is deliberately NOT a default probe —
+    // it acts inside the butteraugli quality loop, which only exists
+    // when jxl-encoder's `butteraugli-loop` feature is compiled in
+    // (zenjxl's `__expert` build does not enable it). A knob that is
+    // structurally dead under the build config would be a guaranteed
+    // inert step. Add it to custom axes only when sweeping a
+    // `butteraugli-loop` build.
 
     let mut p = LossyInternalParams::default();
     p.ans_histogram_strategy_vardct = Some(ANSHistogramStrategy::Fast);
@@ -492,32 +516,40 @@ impl LosslessAxes {
     /// Lossless RD core: the effort ladder {7, 5, 9} at production
     /// defaults. Lossless output is pixel-exact by definition, so
     /// "RD" here is bytes-vs-CPU.
+    ///
+    /// KNOWN UPSTREAM BUG: e9+ lossless currently emits bitstreams no
+    /// decoder accepts on photographic content (jxl-encoder#68; all of
+    /// zenjxl-decoder / jxl-oxide / djxl reject them). The e9 axis
+    /// value stays — `sweep_validate`'s roundtrip gate is what caught
+    /// it and must keep screaming until the fix lands.
     #[must_use]
     pub fn rd_core() -> Self {
         Self {
             efforts: vec![7, 5, 9],
             encoder_modes: vec![EncoderMode::Reference],
             internal: vec![NamedLosslessParams::default_probe()],
-            lz77: vec![None],
             predictors: vec![None],
             group_size_shifts: vec![None],
-            palette_colors: vec![None],
             faster_decoding: vec![0],
         }
     }
 
-    /// Every user-disableable lossless mode axis on top of
+    /// Every *live* user-disableable lossless mode axis on top of
     /// [`rd_core`](Self::rd_core), plus the expert internal-params
-    /// probes from the provenance table.
+    /// probes from the provenance table. (lz77 / palette / patches
+    /// setters are not consumed by the modular path today —
+    /// jxl-encoder#69 — and Experimental mode is profile-invariant for
+    /// lossless, so none of those are axes.)
     #[must_use]
     pub fn modes_full() -> Self {
         let mut axes = Self::rd_core();
         axes.efforts.extend([3, 1]);
-        axes.encoder_modes.push(EncoderMode::Experimental);
-        axes.lz77.push(Some(false));
-        axes.predictors.extend([Some(5), Some(15)]);
+        // Predictor probes chosen for proven liveness (validated
+        // 2026-06-10): 6 = Weighted (a real alternative selection),
+        // 0 = Zero (extreme negative control, ~3× bytes on photos).
+        // 5 (Gradient) and 15 (Variable) byte-alias the e7 default.
+        axes.predictors.extend([Some(6), Some(0)]);
         axes.group_size_shifts.extend([Some(0), Some(3)]);
-        axes.palette_colors.push(Some(0));
         axes.faster_decoding.push(2);
         axes.internal.extend(lossless_internal_probes());
         axes
@@ -529,6 +561,18 @@ impl LosslessAxes {
 /// — as the override-propagation signal per jxl-encoder#67 (`Some(0)`
 /// falls back to GBR_SUBGR, which the default search often picks anyway,
 /// so 0-vs-default can be byte-identical by content coincidence).
+///
+/// Dropped after the 2026-06-10 validation run, each with its reason:
+/// - `rct19` (search width 7→19): zero new winners across the 7-image
+///   corpus — the probe carried no signal; `rct1` keeps the
+///   override-liveness coverage.
+/// - `frac065` (`tree_sample_fraction`): the override is not consumed
+///   upstream (jxl-encoder#69) — a structurally-dead probe.
+/// - `gatherdedup`: byte-identical to the sort-only path on the whole
+///   corpus (the post-`pre_quantize` sort dedup converges to the same
+///   surviving set). It REMAINS in the fingerprint (upstream documents
+///   content where bytes can differ); it is just not worth a curated
+///   axis slot.
 #[must_use]
 pub fn lossless_internal_probes() -> Vec<NamedLosslessParams> {
     let mut probes = Vec::new();
@@ -536,10 +580,6 @@ pub fn lossless_internal_probes() -> Vec<NamedLosslessParams> {
     let mut p = LosslessInternalParams::default();
     p.nb_rcts_to_try = Some(1);
     probes.push(NamedLosslessParams::new("rct1", p));
-
-    let mut p = LosslessInternalParams::default();
-    p.nb_rcts_to_try = Some(19);
-    probes.push(NamedLosslessParams::new("rct19", p));
 
     let mut p = LosslessInternalParams::default();
     p.wp_num_param_sets = Some(5);
@@ -554,20 +594,12 @@ pub fn lossless_internal_probes() -> Vec<NamedLosslessParams> {
     probes.push(NamedLosslessParams::new("props16", p));
 
     let mut p = LosslessInternalParams::default();
-    p.tree_sample_fraction = Some(0.65);
-    probes.push(NamedLosslessParams::new("frac065", p));
-
-    let mut p = LosslessInternalParams::default();
     p.tree_learn_seeds = Some(2);
     probes.push(NamedLosslessParams::new("seeds2", p));
 
     let mut p = LosslessInternalParams::default();
     p.lloyd_max_buckets = Some(true);
     probes.push(NamedLosslessParams::new("lloyd", p));
-
-    let mut p = LosslessInternalParams::default();
-    p.gather_dedup = Some(true);
-    probes.push(NamedLosslessParams::new("gatherdedup", p));
 
     probes
 }
@@ -768,8 +800,8 @@ impl SweepBuilder {
     /// collapses lossy mode axes lowest-tier-first (ans,
     /// faster_decoding, noise, progressive, epf, gaborish,
     /// encoder_modes, internal probes, strategies to a floor of 2),
-    /// then the lossless axes (faster_decoding, palette, group size,
-    /// predictors, lz77, encoder_modes, internal probes), then
+    /// then the lossless axes (faster_decoding, group size,
+    /// predictors, encoder_modes, internal probes), then
     /// coarsens the quality grid (uniformly, endpoints kept, ≥ 11
     /// points). Efforts are never reduced below their rd_core floor of
     /// 3. Every reduction is recorded.
@@ -911,10 +943,8 @@ fn collapse_one_axis(axes: &mut SweepAxes) -> Option<DroppedAxis> {
     }
     if let Some(ll) = axes.lossless.as_mut() {
         let d = collapse("lossless.faster_decoding", &mut ll.faster_decoding, 1)
-            .or_else(|| collapse("lossless.palette_colors", &mut ll.palette_colors, 1))
             .or_else(|| collapse("lossless.group_size_shifts", &mut ll.group_size_shifts, 1))
             .or_else(|| collapse("lossless.predictors", &mut ll.predictors, 1))
-            .or_else(|| collapse("lossless.lz77", &mut ll.lz77, 1))
             .or_else(|| collapse("lossless.encoder_modes", &mut ll.encoder_modes, 1))
             .or_else(|| {
                 collapse_named("lossless.internal", &mut ll.internal, 1, |p| {
@@ -1009,19 +1039,11 @@ impl LosslessVariant {
         if self.encoder_mode == EncoderMode::Experimental {
             s.push_str("-exp");
         }
-        match self.lz77 {
-            None => {}
-            Some(true) => s.push_str("-lz1"),
-            Some(false) => s.push_str("-lz0"),
-        }
         if let Some(p) = self.predictor {
             s.push_str(&format!("-pred{p}"));
         }
         if let Some(g) = self.group_size_shift {
             s.push_str(&format!("-gss{g}"));
-        }
-        if let Some(p) = self.palette_colors {
-            s.push_str(&format!("-pal{p}"));
         }
         if self.faster_decoding != 0 {
             s.push_str(&format!("-fd{}", self.faster_decoding));
@@ -1115,41 +1137,32 @@ fn cross(
         for (ei, &effort) in ll.efforts.iter().enumerate() {
             for (mi, &encoder_mode) in ll.encoder_modes.iter().enumerate() {
                 for (ii, internal) in ll.internal.iter().enumerate() {
-                    for (li, &lz77) in ll.lz77.iter().enumerate() {
-                        for (pi, &predictor) in ll.predictors.iter().enumerate() {
-                            for (gi, &group_size_shift) in ll.group_size_shifts.iter().enumerate() {
-                                for (ci, &palette_colors) in ll.palette_colors.iter().enumerate() {
-                                    for (fi, &faster_decoding) in
-                                        ll.faster_decoding.iter().enumerate()
-                                    {
-                                        let idxs = [ei, mi, ii, li, pi, gi, ci, fi];
-                                        let v = LosslessVariant {
-                                            effort,
-                                            encoder_mode,
-                                            internal: internal.clone(),
-                                            lz77,
-                                            predictor,
-                                            group_size_shift,
-                                            palette_colors,
-                                            faster_decoding,
-                                        };
-                                        let base_id = v.base_id();
-                                        if v.build().validate().is_err() {
-                                            invalid.push(base_id);
-                                            continue;
-                                        }
-                                        entries.push(Entry {
-                                            variant: SweepVariant::Lossless(v),
-                                            base_id,
-                                            deviations: idxs.iter().filter(|&&x| x != 0).count()
-                                                as u8,
-                                            mode_rank: 1,
-                                            idx_sum: idxs.iter().sum(),
-                                            seq,
-                                        });
-                                        seq += 1;
-                                    }
+                    for (pi, &predictor) in ll.predictors.iter().enumerate() {
+                        for (gi, &group_size_shift) in ll.group_size_shifts.iter().enumerate() {
+                            for (fi, &faster_decoding) in ll.faster_decoding.iter().enumerate() {
+                                let idxs = [ei, mi, ii, pi, gi, fi];
+                                let v = LosslessVariant {
+                                    effort,
+                                    encoder_mode,
+                                    internal: internal.clone(),
+                                    predictor,
+                                    group_size_shift,
+                                    faster_decoding,
+                                };
+                                let base_id = v.base_id();
+                                if v.build().validate().is_err() {
+                                    invalid.push(base_id);
+                                    continue;
                                 }
+                                entries.push(Entry {
+                                    variant: SweepVariant::Lossless(v),
+                                    base_id,
+                                    deviations: idxs.iter().filter(|&&x| x != 0).count() as u8,
+                                    mode_rank: 1,
+                                    idx_sum: idxs.iter().sum(),
+                                    seq,
+                                });
+                                seq += 1;
                             }
                         }
                     }
@@ -1256,9 +1269,6 @@ impl Fnv {
         self.write(&v.to_le_bytes());
     }
     fn u32(&mut self, v: u32) {
-        self.write(&v.to_le_bytes());
-    }
-    fn u64(&mut self, v: u64) {
         self.write(&v.to_le_bytes());
     }
     fn f32(&mut self, v: f32) {
@@ -1399,16 +1409,8 @@ pub fn fingerprint(variant: &SweepVariant) -> u64 {
                 EncoderMode::Reference => 0,
                 EncoderMode::Experimental => 1,
             });
-            h.opt_bool(v.lz77);
             h.opt_u8(v.predictor);
             h.opt_u8(v.group_size_shift);
-            match v.palette_colors {
-                None => h.u8(0),
-                Some(x) => {
-                    h.u8(1);
-                    h.u64(x as u64);
-                }
-            }
             h.u8(v.faster_decoding);
 
             let p = &v.internal.params;
@@ -1563,13 +1565,38 @@ mod tests {
         let lossy = axes.lossy.as_ref().unwrap();
         assert!(lossy.epf_levels.contains(&0) && lossy.epf_levels.contains(&3));
         assert!(lossy.faster_decoding.contains(&4));
-        assert!(lossy.internal.iter().any(|p| p.label == "emul-exp"));
+        assert!(lossy.internal.iter().any(|p| p.label == "emulexp"));
+        // Labels are id tokens: '-' is the flag separator and '_' the
+        // token separator, so neither may appear inside a label.
+        for p in lossy.internal.iter().map(|p| p.label.as_str()).chain(
+            axes.lossless
+                .as_ref()
+                .unwrap()
+                .internal
+                .iter()
+                .map(|p| p.label.as_str()),
+        ) {
+            assert!(
+                !p.contains('-') && !p.contains('_'),
+                "label {p} contains an id-separator character"
+            );
+        }
+        // lossy_search_seeds must NOT be a default probe: it is dead
+        // without jxl-encoder's `butteraugli-loop` feature, and a
+        // structurally-dead knob is a guaranteed inert step.
         assert!(
             lossy
                 .internal
                 .iter()
-                .any(|p| p.params.lossy_search_seeds == Some(2)),
-            "seeds2 probe missing"
+                .all(|p| p.params.lossy_search_seeds.is_none()),
+            "lossy_search_seeds probe present but dead under this build"
+        );
+        assert!(
+            lossy
+                .internal
+                .iter()
+                .any(|p| p.params.k_info_loss_mul_base == Some(1.3)),
+            "kinfo1.3 probe missing"
         );
         let ll = axes.lossless.as_ref().unwrap();
         assert!(
@@ -1578,7 +1605,10 @@ mod tests {
                 .any(|p| p.params.nb_rcts_to_try == Some(1)),
             "rct1 probe (jxl-encoder#67 signal) missing"
         );
-        assert!(ll.predictors.contains(&Some(5)));
+        assert!(
+            ll.predictors.contains(&Some(6)) && ll.predictors.contains(&Some(0)),
+            "live predictor probes (Weighted/Zero) missing"
+        );
         // Internal probe labels must be unique (they are id tokens).
         let mut seen = alloc::collections::BTreeSet::new();
         for p in &lossy.internal {
@@ -1621,10 +1651,8 @@ mod tests {
             effort: 7,
             encoder_mode: EncoderMode::Reference,
             internal: NamedLosslessParams::default_probe(),
-            lz77: None,
             predictor: None,
             group_size_shift: None,
-            palette_colors: None,
             faster_decoding: 0,
         };
         let mut b = a.clone();
@@ -1653,10 +1681,8 @@ mod tests {
             effort: 10,
             encoder_mode: EncoderMode::Reference,
             internal: NamedLosslessParams::default_probe(),
-            lz77: None,
             predictor: None,
             group_size_shift: None,
-            palette_colors: None,
             faster_decoding: 0,
         };
         let mut seeded = base.clone();
