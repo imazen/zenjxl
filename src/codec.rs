@@ -1708,7 +1708,8 @@ mod decoding {
             // enrich_descriptor_from_cicp): the decoder rendered into the
             // signaled encoding, so PQ/HLG/wide-gamut sources keep their
             // code-value meaning in the output descriptor.
-            let enriched = enrich_descriptor_from_cicp(result.pixels.descriptor(), result.info.cicp);
+            let enriched =
+                enrich_descriptor_from_cicp(result.pixels.descriptor(), result.info.cicp);
             let pixels = result.pixels.with_descriptor(enriched);
             let mut output =
                 DecodeOutput::new(pixels, info).with_source_encoding_details(result.info);
