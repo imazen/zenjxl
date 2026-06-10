@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Added
+- zencodec 0.1.21 color-emit + metadata-policy adoption: `resolve_jxl_color` drives the ICC-vs-enum-color decision through `resolve_color_emit`; resolved CICP lowers to the codestream enum `ColorEncoding`; JPEG→JXL `Reencode` recompression preserves the source ICC instead of relabeling sRGB. Deps bumped to published zencodec 0.1.21 / zenpixels 0.2.11; butteraugli lock 0.9.0→0.9.3 (780d45eb).
+- Native HDR decode signaling: decode-side output descriptors (probe `output_info` and full decode) carry the transfer function and primaries from the codestream CICP — a BT.2100-PQ JXL decodes as a PQ/BT.2020-tagged buffer. This also corrects the blanket `_LINEAR` claim on f32 output: when CICP is present the decoder renders into the signaled encoding for every depth (linear-sRGB float fallback only applies to XYB images with ICC-only profiles). Test `decode_descriptor_carries_cicp_pq_hdr`.
+
+### Fixed
+- CI: clone the `[patch.crates-io]` siblings (jxl-encoder, zenjpeg) at the paths the patch section names; the old workflow cloned to `../jxl-encoder--expert` and perl-stripped inline path deps, so every job failed manifest resolution since the patch section landed (d630212a). Known remaining red: `expert_forwarding::lossless_expert_override_propagates_through_zenjxl`, a pre-existing jxl-encoder lossless regression tracked in imazen/jxl-encoder#67.
+
 - **`jpeg-lossy` feature: lossy JPEG → JXL recompression closed loop**
   (`zenjxl::jpeg_lossy`). Drives a perceptual-quality **target** by bisecting a
   quality knob and scoring each candidate **in-process** (encode → decode →

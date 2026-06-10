@@ -1476,7 +1476,7 @@ mod decoding {
             let is_float = bit_depth_u8 == 32;
             let is_16 = bit_depth_u8 > 8 && !is_float;
 
-            match (info.is_gray, info.has_alpha, is_float, is_16) {
+            let base = match (info.is_gray, info.has_alpha, is_float, is_16) {
                 // f32
                 (true, true, true, _) => PixelDescriptor::GRAYAF32_LINEAR,
                 (true, false, true, _) => PixelDescriptor::GRAYF32_LINEAR,
@@ -1492,8 +1492,36 @@ mod decoding {
                 (true, false, _, _) => PixelDescriptor::GRAY8_SRGB,
                 (false, true, _, _) => PixelDescriptor::RGBA8_SRGB,
                 (false, false, _, _) => PixelDescriptor::RGB8_SRGB,
-            }
+            };
+            enrich_descriptor_from_cicp(base, info.cicp)
         }
+    }
+
+    /// Re-tag an output descriptor with the transfer function and color
+    /// primaries from the codestream's CICP color encoding, when present.
+    ///
+    /// When the JXL signals an enum (CICP-expressible) color encoding, the
+    /// decoder renders into exactly that encoding for every output depth —
+    /// including f32, where a PQ or sRGB source yields PQ-/sRGB-coded floats,
+    /// NOT linear (zenjxl-decoder only falls back to linear sRGB floats for
+    /// XYB images whose embedded profile is ICC-only, i.e. `cicp == None`).
+    /// So tagging from CICP both signals HDR (PQ/HLG) and corrects the
+    /// blanket `_SRGB`/`_LINEAR` claims of the base descriptors. With no
+    /// CICP the base claim stands (ICC rides along in the metadata).
+    fn enrich_descriptor_from_cicp(
+        mut desc: PixelDescriptor,
+        cicp: Option<(u8, u8, u8, bool)>,
+    ) -> PixelDescriptor {
+        let Some((cp, tc, _, _)) = cicp else {
+            return desc;
+        };
+        if let Some(tf) = zenpixels::TransferFunction::from_cicp(tc) {
+            desc = desc.with_transfer(tf);
+        }
+        if let Some(p) = zenpixels::ColorPrimaries::from_cicp(cp) {
+            desc = desc.with_primaries(p);
+        }
+        desc
     }
 
     impl<'a> zencodec::decode::DecodeJob<'a> for JxlDecodeJob {
@@ -1676,8 +1704,14 @@ mod decoding {
                 JxlDecodeJob::jxl_info_to_image_info(&result.info),
                 &self.policy,
             );
+            // Re-tag color signaling from the codestream CICP (see
+            // enrich_descriptor_from_cicp): the decoder rendered into the
+            // signaled encoding, so PQ/HLG/wide-gamut sources keep their
+            // code-value meaning in the output descriptor.
+            let enriched = enrich_descriptor_from_cicp(result.pixels.descriptor(), result.info.cicp);
+            let pixels = result.pixels.with_descriptor(enriched);
             let mut output =
-                DecodeOutput::new(result.pixels, info).with_source_encoding_details(result.info);
+                DecodeOutput::new(pixels, info).with_source_encoding_details(result.info);
             if self.extract_gain_map
                 && let Some(gm) = result.gain_map
             {
@@ -2334,6 +2368,59 @@ mod tests {
             Some(Cicp::DISPLAY_P3),
             "Display-P3 CICP should round-trip through the JXL codestream enum color"
         );
+    }
+
+    /// A BT.2100-PQ source re-tags the decode descriptor with PQ transfer +
+    /// BT.2020 primaries (native HDR signaling) at both probe (`output_info`)
+    /// and full-decode level. The decoder renders into the signaled encoding,
+    /// so the descriptor must stop claiming sRGB for HDR streams.
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    #[test]
+    fn decode_descriptor_carries_cicp_pq_hdr() {
+        use zencodec::decode::{Decode, DecodeJob, DecoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::{Cicp, Metadata};
+        use zenpixels::{ColorPrimaries, TransferFunction};
+
+        let width = 16u32;
+        let height = 16u32;
+        let pixels: Vec<rgb::Rgb<u8>> = (0..width * height)
+            .map(|i| {
+                let v = (i % 256) as u8;
+                rgb::Rgb { r: v, g: v, b: v }
+            })
+            .collect();
+        let buf =
+            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, width, height).unwrap();
+
+        let meta = Metadata::none().with_cicp(Cicp::BT2100_PQ);
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let encoder = config
+            .job()
+            .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
+            .encoder()
+            .unwrap();
+        let output = encoder.encode(buf.as_slice().into()).unwrap();
+
+        // Probe level: output_info's native format carries PQ + BT.2020.
+        let oi = JxlDecoderConfig::new()
+            .job()
+            .output_info(output.data())
+            .unwrap();
+        assert_eq!(oi.native_format.transfer(), TransferFunction::Pq);
+        assert_eq!(oi.native_format.primaries, ColorPrimaries::Bt2020);
+
+        // Full decode: the buffer descriptor carries PQ + BT.2020 (the
+        // decoder rendered into the signaled encoding).
+        let decoded = JxlDecoderConfig::new()
+            .job()
+            .decoder(Cow::Borrowed(output.data()), &[])
+            .unwrap()
+            .decode()
+            .unwrap();
+        let desc = decoded.into_buffer().descriptor();
+        assert_eq!(desc.transfer(), TransferFunction::Pq);
+        assert_eq!(desc.primaries, ColorPrimaries::Bt2020);
     }
 
     #[cfg(feature = "decode")]
