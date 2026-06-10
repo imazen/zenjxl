@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Added
+- `zencodec::GainMapRender` wired through the decode trait path (job builder
+  `with_gain_map_render` + trait/dyn parity): `BaseOnly` (default) attaches
+  nothing; `Components` recursively decodes the jhgm gain-map codestream
+  (same resource limits as the base decode) and surfaces BOTH
+  `zencodec::decode::DecodedGainMap` and the raw `GainMapSource`;
+  `ReconstructHdr` downgrades to Components per the zencodec contract
+  (zenjxl surfaces, it does not apply — `reconstructs_hdr()` stays false).
+  Unknown future modes error. Tests `tests/gain_map_render.rs` build the
+  jhgm fixture in-test via jxl-encoder's `hdr-gainmap` (new dev-dep
+  feature).
 - zencodec 0.1.21 color-emit + metadata-policy adoption: `resolve_jxl_color` drives the ICC-vs-enum-color decision through `resolve_color_emit`; resolved CICP lowers to the codestream enum `ColorEncoding`; JPEG→JXL `Reencode` recompression preserves the source ICC instead of relabeling sRGB. Deps bumped to published zencodec 0.1.21 / zenpixels 0.2.11; butteraugli lock 0.9.0→0.9.3 (780d45eb).
 - Native HDR decode signaling: decode-side output descriptors (probe `output_info` and full decode) carry the transfer function and primaries from the codestream CICP — a BT.2100-PQ JXL decodes as a PQ/BT.2020-tagged buffer. This also corrects the blanket `_LINEAR` claim on f32 output: when CICP is present the decoder renders into the signaled encoding for every depth (linear-sRGB float fallback only applies to XYB images with ICC-only profiles). Test `decode_descriptor_carries_cicp_pq_hdr`.
 

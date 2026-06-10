@@ -1353,6 +1353,7 @@ mod decoding {
                 stop: None,
                 start_frame_index: 0,
                 extract_gain_map: false,
+                gain_map_render: zencodec::GainMapRender::default(),
             }
         }
     }
@@ -1366,6 +1367,11 @@ mod decoding {
         stop: Option<zencodec::StopToken>,
         start_frame_index: u32,
         extract_gain_map: bool,
+        /// Gain-map rendition intent (zencodec 0.1.21). `Components` (and
+        /// `ReconstructHdr`, downgraded — zenjxl surfaces, it does not apply)
+        /// additionally decodes the jhgm gain-map codestream into a
+        /// [`zencodec::decode::DecodedGainMap`]. Default `BaseOnly`.
+        gain_map_render: zencodec::GainMapRender,
     }
 
     impl JxlDecodeJob {
@@ -1382,6 +1388,15 @@ mod decoding {
         /// always populated regardless of this flag.
         pub fn with_extract_gain_map(mut self, extract: bool) -> Self {
             self.extract_gain_map = extract;
+            self
+        }
+
+        /// zenjxl surfaces gain maps but does not apply them
+        /// (`reconstructs_hdr()` is `false`): `ReconstructHdr` downgrades to
+        /// surfacing [`zencodec::GainMapRender::Components`] — the base stays
+        /// honestly SDR-labeled and the caller applies via ultrahdr-core.
+        pub fn with_gain_map_render(mut self, render: zencodec::GainMapRender) -> Self {
+            self.gain_map_render = render;
             self
         }
 
@@ -1545,6 +1560,13 @@ mod decoding {
             self
         }
 
+        fn with_gain_map_render(self, render: zencodec::GainMapRender) -> Self {
+            // Delegate to the inherent builder (also reachable without the
+            // trait import); keeps the dyn `set_gain_map_render` parity path
+            // working instead of falling through to the provided no-op.
+            JxlDecodeJob::with_gain_map_render(self, render)
+        }
+
         fn with_policy(mut self, policy: DecodePolicy) -> Self {
             self.policy = policy;
             self
@@ -1607,6 +1629,7 @@ mod decoding {
                 stop: self.stop,
                 preferred: preferred.to_vec(),
                 extract_gain_map: self.extract_gain_map,
+                gain_map_render: self.gain_map_render,
             })
         }
 
@@ -1683,6 +1706,7 @@ mod decoding {
         stop: Option<zencodec::StopToken>,
         preferred: Vec<PixelDescriptor>,
         extract_gain_map: bool,
+        gain_map_render: zencodec::GainMapRender,
     }
 
     impl zencodec::decode::Decode for JxlDecoder<'_> {
@@ -1713,10 +1737,46 @@ mod decoding {
             let pixels = result.pixels.with_descriptor(enriched);
             let mut output =
                 DecodeOutput::new(pixels, info).with_source_encoding_details(result.info);
-            if self.extract_gain_map
+            // Gain-map rendition intent. zenjxl surfaces (it does not apply):
+            // Components decodes the jhgm gain-map codestream into a
+            // DecodedGainMap; ReconstructHdr downgrades to Components per the
+            // zencodec contract (reconstructs_hdr() is false — the base stays
+            // honestly SDR/HDR-labeled per its own descriptor). Unknown
+            // future modes are refused, never mis-rendered.
+            let surface_components = match self.gain_map_render {
+                zencodec::GainMapRender::BaseOnly => false,
+                zencodec::GainMapRender::Components
+                | zencodec::GainMapRender::ReconstructHdr { .. } => true,
+                _ => {
+                    return Err(whereat::at!(JxlError::InvalidInput(
+                        "unrecognized GainMapRender mode".into()
+                    )));
+                }
+            };
+            if (self.extract_gain_map || surface_components)
                 && let Some(gm) = result.gain_map
             {
-                output = output.with_extras(bundle_to_gain_map_source(gm));
+                // Components: recursively decode the gain-map JXL codestream
+                // (same resource limits as the base decode). Errors only when
+                // a present gain map is malformed.
+                if surface_components {
+                    let gm_result = decode_with_options(
+                        &gm.gain_map_codestream,
+                        native_limits.as_ref(),
+                        &[],
+                        parallel,
+                        None,
+                    )?;
+                    let source = bundle_to_gain_map_source(gm);
+                    let gm_info = source.metadata.clone();
+                    output = output.with_extras(zencodec::decode::DecodedGainMap::new(
+                        gm_result.pixels,
+                        gm_info,
+                    ));
+                    output = output.with_extras(source);
+                } else {
+                    output = output.with_extras(bundle_to_gain_map_source(gm));
+                }
             }
             Ok(output)
         }

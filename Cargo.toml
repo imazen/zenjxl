@@ -43,6 +43,13 @@ zenjpeg = { path = "../zenjpeg/zenjpeg" }
 
 [dev-dependencies]
 archmage = { version = "0.9.19", features = ["std"] }
+# Builds the jhgm gain-map fixture for tests/gain_map_render.rs
+# (GainMapBundle + append_gain_map_bundle).
+jxl-encoder = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "convenience",
+    "hdr-gainmap",
+] }
 # Synthesizes a real Display-P3 ICC for the jpeg-lossy color-preservation test
 # (`tests/jpeg_lossy.rs`). Matches the moxcms the jpeg-lossy feature already
 # pulls via zenjpeg, so no extra version in the graph.
