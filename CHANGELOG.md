@@ -21,12 +21,18 @@
   `benchmarks/sweep_validate_jxl_2026-06-10.tsv`. New `__expert`
   re-exports: `EncoderStrategy`, `ProgressiveMode`, `RctType`,
   `ANSHistogramStrategy`. The maiden harness run found jxl-encoder#68
-  (e9+ lossless emits undecodable bitstreams on photo content — the
-  harness stays red on those cells deliberately) and jxl-encoder#69
-  (lossless lz77/lz77_method/patches/palette setters +
-  tree_sample_fraction override silently unconsumed), plus five
-  mis-curated probes that were fixed from the run's evidence (see
-  docs/VARIANT_GENERATION.md §6).
+  (e9+ lossless emitted undecodable bitstreams — TWO independent
+  causes, both root-caused via the harness's bisect trail and fixed
+  upstream same-day: mid-group ref-property stride truncation in
+  `5eefe5f7`, and spec-divergent group_id stream numbering in
+  `329f207d`, the latter exposed by the harness re-run after the first
+  fix; final harness run fully green against the stock published
+  decoder) and jxl-encoder#69 (lossless
+  lz77/lz77_method deliberately dropped by the multi-group section
+  writer, fraction stride-quantized, palette/patches unimplemented on
+  the lossless path — setter docs truthed upstream, issue rescoped to
+  the wiring work), plus five mis-curated probes fixed from the run's
+  evidence (see docs/VARIANT_GENERATION.md §6).
 
 - Versioned public-API surface snapshot at `docs/public-api/zenjxl.txt`,
   regenerated on every `cargo test` by `tests/public_api_doc.rs`

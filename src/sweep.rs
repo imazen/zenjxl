@@ -517,11 +517,13 @@ impl LosslessAxes {
     /// defaults. Lossless output is pixel-exact by definition, so
     /// "RD" here is bytes-vs-CPU.
     ///
-    /// KNOWN UPSTREAM BUG: e9+ lossless currently emits bitstreams no
-    /// decoder accepts on photographic content (jxl-encoder#68; all of
-    /// zenjxl-decoder / jxl-oxide / djxl reject them). The e9 axis
-    /// value stays — `sweep_validate`'s roundtrip gate is what caught
-    /// it and must keep screaming until the fix lands.
+    /// jxl-encoder#68 (e9+ lossless emitted undecodable bitstreams)
+    /// was caught by `sweep_validate`'s roundtrip gate on 2026-06-10
+    /// and fixed upstream same-day — two independent causes
+    /// (`5eefe5f7` mid-group ref-property stride truncation,
+    /// `329f207d` spec-divergent group_id stream numbering). The
+    /// harness runs fully green since; the e9 axis value staying put
+    /// through the red phase is what forced both root causes out.
     #[must_use]
     pub fn rd_core() -> Self {
         Self {

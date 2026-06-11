@@ -199,22 +199,42 @@ The maiden run found one critical encoder bug, one API-liveness bug
 class, and five mis-curated probes — none visible to unit tests that
 only check plan structure:
 
-1. **jxl-encoder#68 — e9+ lossless emits undecodable bitstreams** on
+1. **jxl-encoder#68 — e9+ lossless emitted undecodable bitstreams** on
    photographic content (`SectionTooShort` from zenjxl-decoder;
-   jxl-oxide and libjxl djxl reject the same streams, so the bitstream
-   itself is malformed). Caught by the lossless-roundtrip-exactness
-   gate. Bisect from the public API ruled out every individually
-   overridable e8→e9 knob; the remaining suspects (`lz77_method`
-   Greedy→Optimal, `tree_sample_fraction` 0.55→0.65) are exactly the
-   ones whose overrides don't propagate (#69). The e9 axis value
-   deliberately stays; the harness stays red on those cells until the
-   fix lands.
-2. **jxl-encoder#69 — silently unconsumed setters**: lossless
-   `with_lz77` / `with_lz77_method` / `with_patches` /
-   `with_modular_palette_colors` and the
-   `tree_sample_fraction` override change nothing in either direction
-   (including palette's best-case 2-color checkerboard). The lz77 and
-   palette axes were removed from `LosslessAxes` until plumbed.
+   jxl-oxide and libjxl djxl rejected the same streams — the bitstream
+   itself was malformed). Caught by the lossless-roundtrip-exactness
+   gate; the first cause was root-caused and **fixed upstream the same
+   day** (jxl-encoder `5eefe5f7`): the encode-side tree walk sized its per-pixel property
+   record at `max_tree_prop + 1` while the ref-property writer fills
+   whole 4-slot groups behind a `base + 3 < stride` guard, so a tree
+   whose max property id landed mid-group (only reachable at e9+) read
+   zeros where every decoder computes real values — context desync.
+   Byte-neutral for e≤8. The harness re-run then proved that fix
+   incomplete — photo-content e9 encodes were byte-identical pre/post
+   (their trees never hit the mid-group case) and still undecodable.
+   The second cause (`329f207d`): the encoder numbered pass-group
+   streams `meta_offset + group_idx` for tree property 1 (`group_id`)
+   while every decoder evaluates the spec ModularStreamId
+   (`1 + 3·num_lf_groups + 17 quant tables + group`) — internally
+   consistent, spec-divergent, and only observable when an e9+ tree
+   splits on group_id on a multi-group image. Both regression gates
+   live upstream (`issue68_regression_tests.rs`, the group-distinct one
+   verified to fail under the old ids). After both fixes this harness
+   runs fully green against the stock published decoder (0.3.8) —
+   every lossless cell roundtrips exactly. The lesson that earned its
+   own scar: one-content-class verification of a fix is not
+   verification; the multi-class corpus is what kept it honest, twice.
+2. **jxl-encoder#69 — inert lossless knobs** (corrected diagnosis after
+   in-tree investigation): `with_lz77`/`with_lz77_method` are plumbed
+   config→options→section but the lossless multi-group writer
+   *deliberately* drops them (global-tree ANS vs per-group histogram
+   mismatch — the effort schedule's Greedy@e8/Optimal@e9 is aspirational
+   on that path today); `tree_sample_fraction` is consumed but
+   stride-quantized (`ceil(1/f)` — overrides in (0.5, 1.0) are
+   byte-identical to 0.5); patches/palette detection isn't implemented
+   on the lossless path yet. Setter docs upstream now state all of
+   this; #69 is rescoped to the actual wiring work. The lz77 and
+   palette axes stay out of `LosslessAxes` until then.
 3. **Default-alias probes** (the #67 trap, twice more): predictor
    `Some(5)`/`Some(15)` byte-alias the e7 default selection (replaced
    with 6 = Weighted and 0 = Zero, both proven live); `rct19` never
@@ -239,12 +259,17 @@ e7/e8 round-trip exactly on all seven corpus images.
 
 ## Known limits / open items
 
-- **jxl-encoder#68**: e9+ lossless output is undecodable on photo
-  content — sweeps over lossless e9/e10 cells produce garbage training
-  rows until fixed (sizes are real, decodes fail loudly).
-- **jxl-encoder#69**: lz77 / lz77_method / patches / palette /
-  tree_sample_fraction are config surface without effect; they rejoin
-  the axes when plumbed.
+- **jxl-encoder#68 is fully fixed upstream** (`5eefe5f7` + `329f207d`,
+  two independent causes) but not yet in a crates.io release —
+  path-dep builds carry it; published-dep consumers get it with the
+  next jxl-encoder release. Harness verified green end-to-end
+  2026-06-11 against the stock published zenjxl-decoder 0.3.8.
+- **jxl-encoder#69** (rescoped): lossless LZ77 needs per-section
+  support before the lz77/lz77_method knobs can act (byte-changing,
+  hash-lock-rebake work); palette/patches detection on the lossless
+  path is unimplemented. Those knobs rejoin the axes when wired.
+  `tree_sample_fraction` works but is stride-quantized — sweep it at
+  values ≤ 0.5 where strides are distinct.
 - **No exact trials shipped.** The audit above identifies the
   candidates (entropy-stage knobs, lossless candidate sets); the
   adoption order in the zenjpeg doc puts trials last for exactly the
