@@ -61,7 +61,7 @@
   `resolve_plan()`'s `inert_knobs` instead.
 
 ### Fixed
-- CI: clone the `[patch.crates-io]` siblings (jxl-encoder, zenjpeg) at the paths the patch section names; the old workflow cloned to `../jxl-encoder--expert` and perl-stripped inline path deps, so every job failed manifest resolution since the patch section landed (d630212a). Known remaining red: `expert_forwarding::lossless_expert_override_propagates_through_zenjxl`, a pre-existing jxl-encoder lossless regression tracked in imazen/jxl-encoder#67.
+- CI: clone the `[patch.crates-io]` siblings (jxl-encoder, zenjpeg) at the paths the patch section names; the old workflow cloned to `../jxl-encoder--expert` and perl-stripped inline path deps, so every job failed manifest resolution since the patch section landed (d630212a). The expert-forwarding red that note originally carried (`lossless_expert_override_propagates_through_zenjxl`, imazen/jxl-encoder#67) was fixed upstream and the test passes — verified locally 2026-06-11 across multiple full-suite runs.
 
 - **`jpeg-lossy` feature: lossy JPEG → JXL recompression closed loop**
   (`zenjxl::jpeg_lossy`). Drives a perceptual-quality **target** by bisecting a
