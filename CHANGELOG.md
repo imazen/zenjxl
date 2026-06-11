@@ -3,6 +3,19 @@
 ## [Unreleased]
 
 ### Added
+
+- Pattern 7 (cell ids as durable identity): `sweep::variant_from_cell_id`
+  reconstructs the exact `SweepVariant` from a cell id alone — both
+  grammars (vd-/mod-), `_q` tokens resolved through the same calibrated
+  distance chain the planner used, internal-params labels via the new
+  registry lookups (`lossy_params_by_label` / `lossless_params_by_label`;
+  `"def"` + every curated probe). Content-hashed `custom#…` bundles and
+  unknown labels error (not self-describing). Grammar-totality test:
+  every planner-emitted id (canonical + alias, q- and d-grids) parses
+  back fingerprint-identical. Unblocks checklist step 8 (zenmetrics
+  executor wiring).
+
+
 - **Native `ReconstructHdr` behind the new `reconstruct-hdr` feature**
   (zencodec adapter): `GainMapRender::ReconstructHdr` now applies jhgm gain
   maps natively instead of downgrading to `Components`. ISO 21496-1

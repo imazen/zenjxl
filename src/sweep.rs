@@ -1252,6 +1252,192 @@ fn cross(
 // ============================================================================
 // Byte-identity fingerprint
 // ============================================================================
+// Cell-id grammar: the stable identity contract (playbook pattern 7)
+// ============================================================================
+
+/// Reconstruct the [`SweepVariant`] a plan cell id denotes — including
+/// the trailing quality/distance token, since a lossy variant carries
+/// its resolved distance.
+///
+/// Grammar (see `LossyVariant::base_id` / `LosslessVariant::base_id`,
+/// which this parser must mirror in lockstep — the
+/// `cell_ids_roundtrip_to_their_variants` test enforces totality over
+/// everything the planner emits):
+///
+/// ```text
+/// lossy    = vd-e<u8>_<strategy>_<label>[-flag…](_q<f32> | _d<f32>)
+/// lossless = mod-e<u8>_<label>[-flag…]
+/// strategy = libjxl | lean | zen | aggr        (custom#… errors)
+/// lossy flags    = exp | gab0 | gab1 | epf<i8> | prog1 | prog2
+///                | noise | fd<u8> | ans0 | ans1
+/// lossless flags = exp | pred<u8> | gss<u8> | fd<u8>
+/// ```
+///
+/// Internal-params labels resolve through the curated probe registries
+/// (`lossy_internal_probes` / `lossless_internal_probes`, plus `"def"`)
+/// — a label not in the registry errors, as do `custom#…` strategy
+/// bundles (content-hashed, not self-describing). `_q` tokens resolve
+/// distance through [`resolve_distance_for_quality`], the same chain
+/// the planner used. Numbers render via `Display` (lossless), so the
+/// reconstruction is exact; consumers carrying the cell fingerprint
+/// should verify `fingerprint(&variant)` equals it after parsing.
+pub fn variant_from_cell_id(id: &str) -> Result<SweepVariant, String> {
+    if id.contains('#') {
+        return Err(format!(
+            "cell id {id:?} carries a content-hashed custom bundle and is not self-describing"
+        ));
+    }
+    if let Some(rest) = id.strip_prefix("vd-e") {
+        let mut toks = rest.splitn(3, '_');
+        let (Some(eff_s), Some(strat_s), Some(tail)) = (toks.next(), toks.next(), toks.next())
+        else {
+            return Err(format!("lossy id {id:?} missing tokens"));
+        };
+        let effort: u8 = eff_s
+            .parse()
+            .map_err(|e| format!("bad effort in {id:?}: {e}"))?;
+        let strategy = match strat_s {
+            "libjxl" => EncoderStrategy::Libjxl,
+            "lean" => EncoderStrategy::LeanFaster,
+            "zen" => EncoderStrategy::Zenjxl,
+            "aggr" => EncoderStrategy::Aggressive,
+            other => return Err(format!("unknown strategy token {other:?} in {id:?}")),
+        };
+        // tail = label[-flags…][_q<q> | _d<d>] — but splitn(3, '_') keeps
+        // the q/d token inside `tail`; split it back off.
+        let (flags_part, q_part) = match tail.rsplit_once('_') {
+            Some((f, q)) if q.starts_with('q') || q.starts_with('d') => (f, Some(q)),
+            _ => (tail, None),
+        };
+        let Some(q_tok) = q_part else {
+            return Err(format!("lossy id {id:?} missing _q/_d quality token"));
+        };
+        let distance = if let Some(q) = q_tok.strip_prefix('q') {
+            let q: f32 = q.parse().map_err(|e| format!("bad q in {id:?}: {e}"))?;
+            resolve_distance_for_quality(q)
+        } else if let Some(d) = q_tok.strip_prefix('d') {
+            d.parse()
+                .map_err(|e| format!("bad distance in {id:?}: {e}"))?
+        } else {
+            return Err(format!("bad quality token {q_tok:?} in {id:?}"));
+        };
+        let mut parts = flags_part.split('-');
+        let label = parts.next().unwrap_or_default();
+        let internal = lossy_params_by_label(label)
+            .ok_or_else(|| format!("internal-params label {label:?} not in the registry"))?;
+        let mut v = LossyVariant {
+            distance,
+            effort,
+            strategy,
+            encoder_mode: EncoderMode::Reference,
+            internal,
+            gaborish: None,
+            epf_level: -1,
+            progressive: ProgressiveMode::Single,
+            noise: false,
+            faster_decoding: 0,
+            ans: None,
+        };
+        for f in parts {
+            match f {
+                "exp" => v.encoder_mode = EncoderMode::Experimental,
+                "gab1" => v.gaborish = Some(true),
+                "gab0" => v.gaborish = Some(false),
+                "prog1" => v.progressive = ProgressiveMode::QuantizedAcFullAc,
+                "prog2" => v.progressive = ProgressiveMode::DcVlfLfAc,
+                "noise" => v.noise = true,
+                "ans1" => v.ans = Some(true),
+                "ans0" => v.ans = Some(false),
+                f if f.starts_with("epf") => {
+                    v.epf_level = f[3..]
+                        .parse()
+                        .map_err(|e| format!("bad epf in {id:?}: {e}"))?;
+                }
+                f if f.starts_with("fd") => {
+                    v.faster_decoding = f[2..]
+                        .parse()
+                        .map_err(|e| format!("bad fd in {id:?}: {e}"))?;
+                }
+                other => return Err(format!("unknown lossy flag {other:?} in {id:?}")),
+            }
+        }
+        Ok(SweepVariant::Lossy(v))
+    } else if let Some(rest) = id.strip_prefix("mod-e") {
+        let mut toks = rest.splitn(2, '_');
+        let (Some(eff_s), Some(tail)) = (toks.next(), toks.next()) else {
+            return Err(format!("lossless id {id:?} missing tokens"));
+        };
+        let effort: u8 = eff_s
+            .parse()
+            .map_err(|e| format!("bad effort in {id:?}: {e}"))?;
+        let mut parts = tail.split('-');
+        let label = parts.next().unwrap_or_default();
+        let internal = lossless_params_by_label(label)
+            .ok_or_else(|| format!("internal-params label {label:?} not in the registry"))?;
+        let mut v = LosslessVariant {
+            effort,
+            encoder_mode: EncoderMode::Reference,
+            internal,
+            predictor: None,
+            group_size_shift: None,
+            faster_decoding: 0,
+        };
+        for f in parts {
+            match f {
+                "exp" => v.encoder_mode = EncoderMode::Experimental,
+                f if f.starts_with("pred") => {
+                    v.predictor = Some(
+                        f[4..]
+                            .parse()
+                            .map_err(|e| format!("bad pred in {id:?}: {e}"))?,
+                    );
+                }
+                f if f.starts_with("gss") => {
+                    v.group_size_shift = Some(
+                        f[3..]
+                            .parse()
+                            .map_err(|e| format!("bad gss in {id:?}: {e}"))?,
+                    );
+                }
+                f if f.starts_with("fd") => {
+                    v.faster_decoding = f[2..]
+                        .parse()
+                        .map_err(|e| format!("bad fd in {id:?}: {e}"))?;
+                }
+                other => return Err(format!("unknown lossless flag {other:?} in {id:?}")),
+            }
+        }
+        Ok(SweepVariant::Lossless(v))
+    } else {
+        Err(format!(
+            "cell id {id:?} is neither a vd- (lossy) nor mod- (lossless) id"
+        ))
+    }
+}
+
+/// Registry lookup: the curated lossy probe labels plus `"def"`.
+#[must_use]
+pub fn lossy_params_by_label(label: &str) -> Option<NamedLossyParams> {
+    if label == "def" {
+        return Some(NamedLossyParams::default_probe());
+    }
+    lossy_internal_probes()
+        .into_iter()
+        .find(|p| p.label == label)
+}
+
+/// Registry lookup: the curated lossless probe labels plus `"def"`.
+#[must_use]
+pub fn lossless_params_by_label(label: &str) -> Option<NamedLosslessParams> {
+    if label == "def" {
+        return Some(NamedLosslessParams::default_probe());
+    }
+    lossless_internal_probes()
+        .into_iter()
+        .find(|p| p.label == label)
+}
+
+// ============================================================================
 
 struct Fnv(u64);
 impl Fnv {
@@ -1457,6 +1643,61 @@ pub fn fingerprint(variant: &SweepVariant) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cell_ids_roundtrip_to_their_variants() {
+        // Grammar-totality gate (playbook pattern 7): every id the
+        // planner emits — canonical AND alias spellings, both modes,
+        // q- and d-grids — parses back to a variant whose fingerprint
+        // is IDENTICAL. Renderer and parser move in lockstep.
+        use super::*;
+        let mut checked = 0usize;
+        for (axes, grid) in [
+            (SweepAxes::rd_core(), QualityGrid::Step5),
+            (
+                SweepAxes::modes_full(),
+                QualityGrid::ExplicitQuality(vec![10.0, 85.0]),
+            ),
+            (
+                SweepAxes::rd_core(),
+                QualityGrid::ExplicitDistance(vec![0.5, 8.5]),
+            ),
+        ] {
+            let plan = SweepBuilder::new(axes, grid).plan();
+            for cell in &plan.cells {
+                for id in core::iter::once(&cell.id).chain(cell.aliases.iter()) {
+                    let v = variant_from_cell_id(id).unwrap_or_else(|e| panic!("{id}: {e}"));
+                    assert_eq!(
+                        fingerprint(&v),
+                        cell.fingerprint,
+                        "fingerprint drift for {id}"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert!(
+            checked > 50,
+            "grammar coverage suspiciously thin: {checked}"
+        );
+    }
+
+    #[test]
+    fn malformed_and_non_self_describing_ids_error() {
+        use super::*;
+        for bad in [
+            "vd-e7_custom#1a2b_def_q85", // content-hashed bundle
+            "vd-e7_zen_nolabel_q85",     // unknown registry label
+            "vd-e7_zen_def",             // missing quality token
+            "mod-e7_def-warp",           // unknown flag
+            "px-e7_zen_def_q85",         // unknown mode prefix
+        ] {
+            assert!(
+                variant_from_cell_id(bad).is_err(),
+                "{bad:?} must be rejected"
+            );
+        }
+    }
+
     use super::*;
 
     fn tiny_lossy_axes() -> LossyAxes {
