@@ -1335,14 +1335,18 @@ mod decoding {
     use zencodec::Unsupported;
     use zencodec::decode::{DecodeCapabilities, DecodeOutput, DecodePolicy, OutputInfo, SinkError};
     use zencodec::{AnimationFrame, OwnedAnimationFrame};
-    use zencodec::{ContentLightLevel, ImageInfo, ResourceLimits, UnsupportedOperation};
-    use zenpixels::{Cicp, ColorAuthority};
+    use zencodec::{
+        ContentLightLevel, ImageInfo, Orientation, OrientationHint, ResourceLimits,
+        UnsupportedOperation,
+    };
+    use zenpixels::{Cicp, ColorAuthority, PixelBuffer};
 
     use enough::Stop;
 
     use crate::decode::{
         JxlInfo, JxlLimits, build_pixel_data, choose_pixel_format, decode_with_options,
-        extract_color_info, is_hdr_or_wide_gamut, probe,
+        decode_with_options_oriented, extract_color_info, is_hdr_or_wide_gamut, probe,
+        probe_with_orientation,
     };
 
     /// Determine the decoder `parallel` flag from limits.
@@ -1601,6 +1605,7 @@ mod decoding {
                 start_frame_index: 0,
                 extract_gain_map: false,
                 gain_map_render: zencodec::GainMapRender::default(),
+                orientation: OrientationHint::Preserve,
             }
         }
     }
@@ -1619,6 +1624,21 @@ mod decoding {
         /// additionally decodes the jhgm gain-map codestream into a
         /// [`zencodec::decode::DecodedGainMap`]. Default `BaseOnly`.
         gain_map_render: zencodec::GainMapRender,
+        /// How to handle the image's stored EXIF/container orientation.
+        ///
+        /// Default [`OrientationHint::Preserve`] — the zencodec ecosystem
+        /// default. Under `Preserve` the JXL decoder does **not** bake the
+        /// orientation: pixels are emitted in their stored orientation and
+        /// [`ImageInfo`] reports the coded dimensions plus the intrinsic EXIF
+        /// [`Orientation`]. Under [`Correct`](OrientationHint::Correct) the
+        /// decoder bakes the stored orientation natively (display dims,
+        /// `Identity` residual). [`CorrectAndTransform`] and
+        /// [`ExactTransform`] additionally apply the requested transform on top
+        /// of the decoder's native bake.
+        ///
+        /// [`CorrectAndTransform`]: OrientationHint::CorrectAndTransform
+        /// [`ExactTransform`]: OrientationHint::ExactTransform
+        orientation: OrientationHint,
     }
 
     impl JxlDecodeJob {
@@ -1689,8 +1709,19 @@ mod decoding {
                 });
             }
 
+            // `info.orientation` is the *residual* EXIF orientation of the
+            // emitted pixels (mode-aware): Identity when the JXL decoder baked
+            // the stored orientation (Correct path, `adjust_orientation = true`),
+            // and the intrinsic stored orientation when it did not (Preserve
+            // path). Reporting the residual — not the intrinsic tag — is what
+            // avoids the double-rotation hazard: paired with `info.width`/
+            // `info.height` (also the emitted geometry), a consumer that applies
+            // the reported orientation lands upright exactly once. The extra
+            // transform of `CorrectAndTransform`/`ExactTransform` is applied (and
+            // the report rewritten to Identity) by `apply_orientation_to_output`
+            // / `report_probe_for_hint` after this base conversion.
             image_info = image_info.with_orientation(
-                zencodec::Orientation::from_exif(info.orientation).unwrap_or_default(),
+                Orientation::from_exif(info.orientation).unwrap_or_default(),
             );
 
             if let Some((cp, tc, mc, fr)) = info.cicp {
@@ -1793,6 +1824,199 @@ mod decoding {
         desc
     }
 
+    // ── Orientation handling ─────────────────────────────────────────────
+    //
+    // The JXL decoder can bake the image's *intrinsic* (stored) orientation
+    // natively via `JxlDecoderOptions::adjust_orientation`. The zencodec
+    // `OrientationHint` is richer — it can also request an arbitrary extra
+    // transform on top — so we split each hint into two parts:
+    //
+    //   1. the decoder's `adjust_orientation` flag (does the decoder bake the
+    //      intrinsic orientation, or emit stored pixels?), and
+    //   2. an *extra* post-decode [`Orientation`] applied to the decoder's
+    //      output (Identity for the common cases; a real transform only for
+    //      `ExactTransform`/`CorrectAndTransform`).
+    //
+    // This leans on the decoder's native bake for `Correct` (the common case)
+    // — no pixel copy at all — and only falls back to an explicit buffer
+    // transform when the caller asks for a transform the codestream can't
+    // express on its own.
+    impl JxlDecodeJob {
+    /// Whether `hint` bakes the pixels at all (transform → report `Identity`)
+    /// vs. leaves them in their stored orientation (`Preserve`).
+    ///
+    /// This is the local equivalent of `OrientationHint::bakes()` — inlined so
+    /// the adapter does not require an unreleased zencodec (published 0.1.21
+    /// lacks `bakes()`; it is committed for 0.1.22 at `6136ff6`). [`Preserve`]
+    /// is the only hint that leaves pixels untouched; every other hint bakes.
+    ///
+    /// Unlike codecs that bake every transform themselves, zenjxl splits the
+    /// work: the JXL decoder bakes the intrinsic orientation natively
+    /// ([`decoder_adjust_orientation`](Self::decoder_adjust_orientation)) and we
+    /// apply only the residual transform
+    /// ([`extra_orientation`](Self::extra_orientation)). So those two precise
+    /// predicates — not this coarse one — drive the decode path; `hint_bakes` is
+    /// kept as the single source of truth for "is this the preserve path?"
+    /// (used in debug assertions and as the documented gate).
+    ///
+    /// [`Preserve`]: OrientationHint::Preserve
+    fn hint_bakes(hint: OrientationHint) -> bool {
+        !matches!(hint, OrientationHint::Preserve)
+    }
+
+    /// The `adjust_orientation` flag to pass to the JXL decoder for `hint`.
+    ///
+    /// `true` makes the decoder bake the stored orientation natively (so for
+    /// [`Correct`](OrientationHint::Correct) and
+    /// [`CorrectAndTransform`](OrientationHint::CorrectAndTransform) the pixels
+    /// come back already EXIF-corrected). `false` emits stored pixels
+    /// untransformed — used by [`Preserve`](OrientationHint::Preserve) and by
+    /// [`ExactTransform`](OrientationHint::ExactTransform), which ignores EXIF
+    /// and applies its literal transform to the raw stored pixels.
+    ///
+    /// Invariant: on the preserve path ([`hint_bakes`](Self::hint_bakes) is
+    /// `false`) the result is always `false` and
+    /// [`extra_orientation`](Self::extra_orientation) is `Identity` — i.e. the
+    /// pixels are emitted exactly as stored.
+    fn decoder_adjust_orientation(hint: OrientationHint) -> bool {
+        match hint {
+            OrientationHint::Preserve => false,
+            OrientationHint::Correct => true,
+            OrientationHint::CorrectAndTransform(_) => true,
+            OrientationHint::ExactTransform(_) => false,
+            // `OrientationHint` is `#[non_exhaustive]`; a future variant is
+            // treated as preserve (no native bake) — the extra-transform
+            // resolver below also returns Identity for it, so the net effect is
+            // "leave pixels stored", the safest default.
+            _ => false,
+        }
+    }
+
+    /// The extra [`Orientation`] to apply to the decoder's output for `hint`,
+    /// on top of whatever the decoder did natively (per
+    /// [`decoder_adjust_orientation`]).
+    ///
+    /// - [`Preserve`](OrientationHint::Preserve): nothing extra (decoder emitted
+    ///   stored pixels; we surface them as-is) → [`Identity`](Orientation::Identity).
+    /// - [`Correct`](OrientationHint::Correct): the decoder already baked the
+    ///   intrinsic orientation → [`Identity`](Orientation::Identity).
+    /// - [`CorrectAndTransform(t)`](OrientationHint::CorrectAndTransform): the
+    ///   decoder baked the intrinsic correction; apply `t` on top.
+    /// - [`ExactTransform(t)`](OrientationHint::ExactTransform): the decoder
+    ///   emitted stored pixels (EXIF ignored); apply `t` literally.
+    fn extra_orientation(hint: OrientationHint) -> Orientation {
+        match hint {
+            OrientationHint::Preserve | OrientationHint::Correct => Orientation::Identity,
+            OrientationHint::CorrectAndTransform(t) | OrientationHint::ExactTransform(t) => t,
+            // Future `#[non_exhaustive]` variant: no extra transform.
+            _ => Orientation::Identity,
+        }
+    }
+
+    /// The total [`Orientation`] the decode pipeline applies to the *stored*
+    /// pixels for `hint` — the decoder's native bake composed with the extra
+    /// transform. This is what [`OutputInfo::orientation_applied`] wants (the
+    /// framework derives "remaining for the caller" from it).
+    ///
+    /// `info` must come from a probe in the matching orientation mode so its
+    /// [`JxlInfo::intrinsic_orientation`] is populated.
+    ///
+    /// - [`Preserve`](OrientationHint::Preserve): nothing applied →
+    ///   [`Identity`](Orientation::Identity); the caller still owns the intrinsic
+    ///   orientation.
+    /// - [`Correct`](OrientationHint::Correct): the decoder applied the intrinsic
+    ///   correction.
+    /// - [`ExactTransform(t)`](OrientationHint::ExactTransform): only `t` (EXIF
+    ///   ignored).
+    /// - [`CorrectAndTransform(t)`](OrientationHint::CorrectAndTransform): the
+    ///   intrinsic correction then `t`.
+    fn total_applied_orientation(info: &JxlInfo, hint: OrientationHint) -> Orientation {
+        let intrinsic = Orientation::from_exif(info.intrinsic_orientation).unwrap_or_default();
+        match hint {
+            OrientationHint::Preserve => Orientation::Identity,
+            OrientationHint::Correct => intrinsic,
+            OrientationHint::ExactTransform(t) => t,
+            OrientationHint::CorrectAndTransform(t) => intrinsic.then(t),
+            // Future `#[non_exhaustive]` variant: nothing applied.
+            _ => Orientation::Identity,
+        }
+    }
+
+    /// Rewrite a probe [`ImageInfo`] so it agrees with what `decode` will emit
+    /// for `hint`.
+    ///
+    /// The base `info` comes from a probe whose `adjust_orientation` already
+    /// matched [`decoder_adjust_orientation`], so its dims + reported
+    /// orientation are correct for the decoder-native part:
+    ///
+    /// - On the **preserve path** ([`hint_bakes`](Self::hint_bakes) is `false`)
+    ///   the info is returned untouched — stored dims + the intrinsic tag the
+    ///   caller must still apply.
+    /// - On a **bake path** the pixels are declared final, so the reported
+    ///   orientation becomes [`Identity`](Orientation::Identity) (even when the
+    ///   net transform is Identity, e.g. `ExactTransform(Identity)` or `Correct`
+    ///   on an upright image — a consumer must never re-apply a stale tag). The
+    ///   *extra* transform's axis-swap is folded into the reported dims.
+    fn report_probe_for_hint(mut info: ImageInfo, hint: OrientationHint) -> ImageInfo {
+        if !Self::hint_bakes(hint) {
+            return info;
+        }
+        let extra = Self::extra_orientation(hint);
+        let (ow, oh) = extra.output_dimensions(info.width, info.height);
+        info.width = ow;
+        info.height = oh;
+        info.with_orientation(Orientation::Identity)
+    }
+
+    /// Apply the extra orientation transform for `hint` to a decoded pixel
+    /// buffer + its [`ImageInfo`], rewriting the reported geometry + orientation
+    /// to match what the caller asked for.
+    ///
+    /// The decoder already handled the intrinsic-orientation bake (per
+    /// [`decoder_adjust_orientation`]); this applies only the residual transform
+    /// of `ExactTransform`/`CorrectAndTransform`:
+    ///
+    /// - On the **preserve path** the inputs are returned untouched (stored
+    ///   pixels, intrinsic tag).
+    /// - On a **bake path** the reported orientation becomes
+    ///   [`Identity`](Orientation::Identity) (the pixels are final). The pixel
+    ///   *copy* is performed only when the extra transform is non-Identity; when
+    ///   it is Identity (e.g. `Correct`, or `ExactTransform(Identity)`) the
+    ///   buffer is kept as-is and only the tag is normalized to Identity.
+    ///
+    /// Operating on `(PixelBuffer, ImageInfo)` rather than a built
+    /// [`DecodeOutput`] keeps the source-encoding details and any gain-map
+    /// extensions intact — those are reattached by the caller after this
+    /// transform.
+    fn apply_orientation_to_pixels(
+        pixels: PixelBuffer,
+        mut info: ImageInfo,
+        hint: OrientationHint,
+    ) -> (PixelBuffer, ImageInfo) {
+        if !Self::hint_bakes(hint) {
+            // Preserve: stored pixels, intrinsic tag — leave both untouched.
+            return (pixels, info);
+        }
+        let extra = Self::extra_orientation(hint);
+        if extra.is_identity() {
+            // Bake path with no net transform (Correct, or
+            // ExactTransform(Identity)): the decoder already produced the final
+            // pixels; just declare them final so no stale tag is re-applied.
+            info = info.with_orientation(Orientation::Identity);
+            return (pixels, info);
+        }
+        // Pixel-exact orientation transform — no resampling, no rounding.
+        let baked = zenpixels_convert::orient::apply_orientation(pixels.as_slice(), extra);
+        // `ImageInfo` has no dimension setter; the fields are public. Report the
+        // baked buffer's geometry + Identity (pixels are now final, so no
+        // consumer can double-apply a stale tag).
+        info.width = baked.width();
+        info.height = baked.height();
+        info = info.with_orientation(Orientation::Identity);
+        (baked, info)
+    }
+    }
+
     impl<'a> zencodec::decode::DecodeJob<'a> for JxlDecodeJob {
         type Error = At<JxlError>;
         type Dec = JxlDecoder<'a>;
@@ -1826,6 +2050,11 @@ mod decoding {
             self
         }
 
+        fn with_orientation(mut self, hint: OrientationHint) -> Self {
+            self.orientation = hint;
+            self
+        }
+
         fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<JxlError>> {
             // Enforce input size limit.
             if let Some(ref limits) = self.limits {
@@ -1833,14 +2062,21 @@ mod decoding {
                     .check_input_size(data.len() as u64)
                     .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
             }
-            let info = probe(data)?;
-            // Enforce dimension limits after probing the header.
+            // Probe in the same orientation mode the decode will use, so the
+            // reported dims + orientation match what `decode` emits.
+            let info = probe_with_orientation(data, Self::decoder_adjust_orientation(self.orientation))?;
+            // Enforce dimension limits after probing the header. The post-decode
+            // extra transform (ExactTransform/CorrectAndTransform) only reorders
+            // pixels, so the buffer size to bound is the emitted geometry here.
             if let Some(ref limits) = self.limits {
                 limits
                     .check_dimensions(info.width, info.height)
                     .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
             }
             let image_info = Self::jxl_info_to_image_info(&info).with_source_encoding_details(info);
+            // Fold in the extra transform's dims/Identity for the bake hints
+            // that the decoder can't express natively.
+            let image_info = Self::report_probe_for_hint(image_info, self.orientation);
             Ok(Self::apply_policy(image_info, &self.policy))
         }
 
@@ -1851,18 +2087,29 @@ mod decoding {
                     .check_input_size(data.len() as u64)
                     .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
             }
-            let info = probe(data)?;
-            // Enforce dimension limits after probing the header.
+            // Probe in the chosen orientation mode so `info` carries the emitted
+            // (decoder-native) geometry; the extra transform is folded in below.
+            let info = probe_with_orientation(data, Self::decoder_adjust_orientation(self.orientation))?;
+            // Bound the actual decode against the decoder-native geometry (the
+            // extra transform only reorders pixels, never grows the buffer).
             if let Some(ref limits) = self.limits {
                 limits
                     .check_dimensions(info.width, info.height)
                     .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
             }
             let native_desc = Self::native_descriptor(&info);
-            Ok(
-                OutputInfo::full_decode(info.width, info.height, native_desc)
-                    .with_alpha(info.has_alpha),
-            )
+            // Final emitted geometry = decoder-native geometry with the extra
+            // transform's axis-swap folded in.
+            let extra = Self::extra_orientation(self.orientation);
+            let (ow, oh) = extra.output_dimensions(info.width, info.height);
+            // Total orientation the pipeline applies to the *stored* pixels —
+            // the decoder's native bake (intrinsic on the bake path, Identity on
+            // preserve) composed with the extra transform. Reported so the
+            // framework's "remaining for caller" arithmetic stays correct.
+            let applied = Self::total_applied_orientation(&info, self.orientation);
+            Ok(OutputInfo::full_decode(ow, oh, native_desc)
+                .with_alpha(info.has_alpha)
+                .with_orientation_applied(applied))
         }
 
         fn decoder(
@@ -1884,6 +2131,7 @@ mod decoding {
                 preferred: preferred.to_vec(),
                 extract_gain_map: self.extract_gain_map,
                 gain_map_render: self.gain_map_render,
+                orientation: self.orientation,
             })
         }
 
@@ -1961,6 +2209,8 @@ mod decoding {
         preferred: Vec<PixelDescriptor>,
         extract_gain_map: bool,
         gain_map_render: zencodec::GainMapRender,
+        /// Orientation handling inherited from the [`JxlDecodeJob`].
+        orientation: OrientationHint,
     }
 
     impl zencodec::decode::Decode for JxlDecoder<'_> {
@@ -1972,12 +2222,18 @@ mod decoding {
             let stop_arc: Option<Arc<dyn Stop>> = self.stop.map(|s| Arc::new(s) as Arc<dyn Stop>);
             #[cfg(feature = "reconstruct-hdr")]
             let stop_for_apply = stop_arc.clone();
-            let result = decode_with_options(
+            // Decode in the orientation mode the hint selects: the JXL decoder
+            // bakes the intrinsic orientation natively on the `Correct`/
+            // `CorrectAndTransform` path (`adjust_orientation = true`) and emits
+            // stored pixels on `Preserve`/`ExactTransform`. The extra transform
+            // of `ExactTransform`/`CorrectAndTransform` is applied below.
+            let result = decode_with_options_oriented(
                 &self.data,
                 native_limits.as_ref(),
                 &self.preferred,
                 parallel,
                 stop_arc,
+                JxlDecodeJob::decoder_adjust_orientation(self.orientation),
             )?;
 
             let info = JxlDecodeJob::apply_policy(
@@ -2040,6 +2296,15 @@ mod decoding {
                 }
                 _ => (pixels, info),
             };
+
+            // Fold in the extra orientation transform for the bake hints the
+            // decoder can't express natively (`ExactTransform`/
+            // `CorrectAndTransform`). For `Preserve`/`Correct` this is Identity
+            // and returns the pair untouched (no pixel copy). Applied after any
+            // HDR gain-map reconstruction so the final composited image is
+            // upright. Pixel-exact — orientation only reorders pixels.
+            let (pixels, info) =
+                JxlDecodeJob::apply_orientation_to_pixels(pixels, info, self.orientation);
 
             let mut output =
                 DecodeOutput::new(pixels, info).with_source_encoding_details(result.info);
@@ -2143,7 +2408,12 @@ mod decoding {
             };
 
             let basic_info = decoder.basic_info();
+            // Animation decodes use the default options (orientation adjusted):
+            // `size` is the display geometry and `orientation` is the residual
+            // (Identity). `coded_size` / `intrinsic_orientation` report the
+            // stored values.
             let (width, height) = basic_info.size;
+            let (coded_width, coded_height) = basic_info.coded_size;
             let has_alpha = basic_info
                 .extra_channels
                 .iter()
@@ -2152,6 +2422,7 @@ mod decoding {
             let loop_count = basic_info.animation.as_ref().map(|a| a.num_loops);
             let bit_depth_u8 = basic_info.bit_depth.bits_per_sample() as u8;
             let orientation = basic_info.orientation as u8;
+            let intrinsic_orientation = basic_info.intrinsic_orientation as u8;
             let is_gray = crate::decode::profile_is_grayscale(decoder.embedded_color_profile());
             let num_extra = basic_info.extra_channels.len();
             let xyb_encoded = !basic_info.uses_original_profile;
@@ -2187,6 +2458,10 @@ mod decoding {
                 crate::decode::dim_to_u32(width, "width").map_err(|e| whereat::at!(e))?;
             let height_u32 =
                 crate::decode::dim_to_u32(height, "height").map_err(|e| whereat::at!(e))?;
+            let coded_width_u32 = crate::decode::dim_to_u32(coded_width, "coded width")
+                .map_err(|e| whereat::at!(e))?;
+            let coded_height_u32 = crate::decode::dim_to_u32(coded_height, "coded height")
+                .map_err(|e| whereat::at!(e))?;
 
             let (bytes_per_row, frame_buf_bytes) =
                 crate::decode::checked_buf_size(width, height, channels, bytes_per_sample)
@@ -2290,11 +2565,14 @@ mod decoding {
             let jxl_info = JxlInfo {
                 width: width_u32,
                 height: height_u32,
+                coded_width: coded_width_u32,
+                coded_height: coded_height_u32,
                 has_alpha,
                 has_animation,
                 bit_depth: Some(bit_depth_u8),
                 icc_profile,
                 orientation,
+                intrinsic_orientation,
                 cicp,
                 is_gray,
                 exif,

@@ -5,7 +5,7 @@
 # all-features section.
 # DO NOT EDIT BY HAND — commit regenerated changes together with the code.
 
-## default features (182 items)
+## default features (185 items)
 
 pub mod zenjxl
 pub use zenjxl::GainMapBundle
@@ -138,6 +138,8 @@ impl core::panic::unwind_safe::UnwindSafe for zenjxl::JxlExtraChannelInfo
 #[non_exhaustive] pub struct zenjxl::JxlInfo
 pub zenjxl::JxlInfo::bit_depth: core::option::Option<u8>
 pub zenjxl::JxlInfo::cicp: core::option::Option<(u8, u8, u8, bool)>
+pub zenjxl::JxlInfo::coded_height: u32
+pub zenjxl::JxlInfo::coded_width: u32
 pub zenjxl::JxlInfo::exif: core::option::Option<alloc::vec::Vec<u8>>
 pub zenjxl::JxlInfo::extra_channels: alloc::vec::Vec<zenjxl::JxlExtraChannelInfo>
 pub zenjxl::JxlInfo::has_alpha: bool
@@ -145,6 +147,7 @@ pub zenjxl::JxlInfo::has_animation: bool
 pub zenjxl::JxlInfo::height: u32
 pub zenjxl::JxlInfo::icc_profile: core::option::Option<alloc::vec::Vec<u8>>
 pub zenjxl::JxlInfo::intensity_target: f32
+pub zenjxl::JxlInfo::intrinsic_orientation: u8
 pub zenjxl::JxlInfo::intrinsic_size: core::option::Option<(u32, u32)>
 pub zenjxl::JxlInfo::is_gray: bool
 pub zenjxl::JxlInfo::linear_below: f32
@@ -190,7 +193,7 @@ pub fn zenjxl::decode_with_options(&[u8], core::option::Option<&zenjxl::JxlLimit
 pub fn zenjxl::decode_with_parallel(&[u8], core::option::Option<&zenjxl::JxlLimits>, &[zenpixels::descriptor::PixelDescriptor], core::option::Option<bool>) -> core::result::Result<zenjxl::JxlDecodeOutput, whereat::at::At<zenjxl::JxlError>>
 pub fn zenjxl::probe(&[u8]) -> core::result::Result<zenjxl::JxlInfo, whereat::at::At<zenjxl::JxlError>>
 
-## all features except _* (432 items)
+## all features except _* (436 items)
 
 pub mod zenjxl
 pub use zenjxl::GainMapBundle
@@ -425,6 +428,7 @@ pub fn zenjxl::JxlDecodeJob::push_decoder(self, alloc::borrow::Cow<'a, [u8]>, &m
 pub fn zenjxl::JxlDecodeJob::streaming_decoder(self, alloc::borrow::Cow<'a, [u8]>, &[zenpixels::descriptor::PixelDescriptor]) -> core::result::Result<zencodec::traits::unsupported::Unsupported<whereat::at::At<zenjxl::JxlError>>, whereat::at::At<zenjxl::JxlError>>
 pub fn zenjxl::JxlDecodeJob::with_gain_map_render(self, zencodec::gainmap::GainMapRender) -> Self
 pub fn zenjxl::JxlDecodeJob::with_limits(self, zencodec::limits::ResourceLimits) -> Self
+pub fn zenjxl::JxlDecodeJob::with_orientation(self, zencodec::orientation::OrientationHint) -> Self
 pub fn zenjxl::JxlDecodeJob::with_policy(self, zencodec::policy::DecodePolicy) -> Self
 pub fn zenjxl::JxlDecodeJob::with_start_frame_index(self, u32) -> Self
 pub fn zenjxl::JxlDecodeJob::with_stop(self, almost_enough::stop_token::StopToken) -> Self
@@ -573,6 +577,8 @@ impl core::panic::unwind_safe::UnwindSafe for zenjxl::JxlExtraChannelInfo
 #[non_exhaustive] pub struct zenjxl::JxlInfo
 pub zenjxl::JxlInfo::bit_depth: core::option::Option<u8>
 pub zenjxl::JxlInfo::cicp: core::option::Option<(u8, u8, u8, bool)>
+pub zenjxl::JxlInfo::coded_height: u32
+pub zenjxl::JxlInfo::coded_width: u32
 pub zenjxl::JxlInfo::exif: core::option::Option<alloc::vec::Vec<u8>>
 pub zenjxl::JxlInfo::extra_channels: alloc::vec::Vec<zenjxl::JxlExtraChannelInfo>
 pub zenjxl::JxlInfo::has_alpha: bool
@@ -580,6 +586,7 @@ pub zenjxl::JxlInfo::has_animation: bool
 pub zenjxl::JxlInfo::height: u32
 pub zenjxl::JxlInfo::icc_profile: core::option::Option<alloc::vec::Vec<u8>>
 pub zenjxl::JxlInfo::intensity_target: f32
+pub zenjxl::JxlInfo::intrinsic_orientation: u8
 pub zenjxl::JxlInfo::intrinsic_size: core::option::Option<(u32, u32)>
 pub zenjxl::JxlInfo::is_gray: bool
 pub zenjxl::JxlInfo::linear_below: f32

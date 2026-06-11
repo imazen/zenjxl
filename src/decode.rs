@@ -84,10 +84,20 @@ pub struct JxlExtraChannelInfo {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct JxlInfo {
-    /// Image width in pixels.
+    /// Emitted image width in pixels — the buffer the decoder will produce.
+    ///
+    /// In the default (orientation-adjusting) decode this is the *display*
+    /// width; when orientation adjustment is disabled this equals
+    /// [`coded_width`](Self::coded_width). Allocate output buffers against this.
     pub width: u32,
-    /// Image height in pixels.
+    /// Emitted image height in pixels — see [`width`](Self::width).
     pub height: u32,
+    /// Stored (coded) width as written in the codestream, before any
+    /// orientation is applied. Unaffected by orientation adjustment; differs
+    /// from [`width`](Self::width) for axis-swapping orientations.
+    pub coded_width: u32,
+    /// Stored (coded) height — see [`coded_width`](Self::coded_width).
+    pub coded_height: u32,
     /// Whether the image has an alpha channel.
     pub has_alpha: bool,
     /// Whether the image contains animation.
@@ -96,8 +106,21 @@ pub struct JxlInfo {
     pub bit_depth: Option<u8>,
     /// Embedded ICC color profile.
     pub icc_profile: Option<Vec<u8>>,
-    /// EXIF orientation (1-8). 1 = Normal.
+    /// Residual EXIF orientation (1-8) of the *emitted* pixels — the transform
+    /// a caller must still apply to display the image upright. 1 = Normal.
+    ///
+    /// In the default (orientation-adjusting) decode the stored orientation is
+    /// already baked into the pixels, so this is `1` (Identity). When
+    /// orientation adjustment is disabled this equals
+    /// [`intrinsic_orientation`](Self::intrinsic_orientation).
     pub orientation: u8,
+    /// The image's intrinsic (stored) EXIF orientation (1-8) as written in the
+    /// codestream, regardless of whether orientation was adjusted during decode.
+    ///
+    /// Use this to bake the stored orientation later (Preserve mode) or to
+    /// re-tag re-encoded output. In the default decode the pixels are already
+    /// upright even though this may report a non-Identity value.
+    pub intrinsic_orientation: u8,
     /// CICP color description `(color_primaries, transfer_characteristics, matrix_coefficients, full_range)`.
     ///
     /// Derived from JXL's structured color encoding when the image does not use
@@ -560,8 +583,32 @@ pub(crate) fn convert_extra_channels(
 /// The probe only needs to parse the file header and ICC profile; it does not
 /// decode any frame data. Tighter limits prevent malformed inputs from causing
 /// excessive entropy table construction or large ICC allocations.
+///
+/// Reports the orientation-adjusted (display) geometry, matching the default
+/// [`decode`] behavior: [`JxlInfo::width`]/[`height`](JxlInfo::height) are the
+/// display dimensions and [`JxlInfo::orientation`] is `1` (Identity), while
+/// [`JxlInfo::coded_width`]/[`coded_height`](JxlInfo::coded_height) and
+/// [`JxlInfo::intrinsic_orientation`] surface the stored values.
 pub fn probe(data: &[u8]) -> Result<JxlInfo, At<JxlError>> {
+    probe_with_orientation(data, true)
+}
+
+/// Probe JXL metadata with explicit control over orientation reporting.
+///
+/// When `adjust_orientation` is `true` (the default [`probe`] behavior) the
+/// reported `width`/`height` are the display dimensions and `orientation` is
+/// Identity. When `false`, the reported `width`/`height` are the stored (coded)
+/// dimensions and `orientation` equals the intrinsic EXIF orientation — the
+/// "Preserve" contract, used by the zencodec adapter to surface stored pixels.
+///
+/// `coded_width`/`coded_height` and `intrinsic_orientation` are populated the
+/// same way in both modes (always the stored values).
+pub(crate) fn probe_with_orientation(
+    data: &[u8],
+    adjust_orientation: bool,
+) -> Result<JxlInfo, At<JxlError>> {
     let mut options = JxlDecoderOptions::default();
+    options.adjust_orientation = adjust_orientation;
     // Probe-specific limits: only header parsing is needed, so use tight bounds.
     // - ICC 1MB: covers all real-world ICC profiles (typical sRGB is 0.5-3KB)
     // - 64MB memory: bounds total allocations during header+ICC parsing
@@ -587,7 +634,12 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, At<JxlError>> {
     };
 
     let info = decoder.basic_info();
+    // `size` is the emitted geometry (display dims when adjusting, coded dims
+    // when not); `coded_size` is always the stored geometry. `orientation` is
+    // the residual (Identity when adjusting); `intrinsic_orientation` is always
+    // the stored EXIF orientation.
     let (width, height) = info.size;
+    let (coded_width, coded_height) = info.coded_size;
     let has_alpha = info
         .extra_channels
         .iter()
@@ -595,6 +647,7 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, At<JxlError>> {
     let has_animation = info.animation.is_some();
     let bit_depth = info.bit_depth.bits_per_sample() as u8;
     let orientation = info.orientation as u8;
+    let intrinsic_orientation = info.intrinsic_orientation as u8;
 
     let (icc_profile, cicp) = extract_color_info(decoder.embedded_color_profile());
     let is_gray = profile_is_grayscale(decoder.embedded_color_profile());
@@ -609,11 +662,14 @@ pub fn probe(data: &[u8]) -> Result<JxlInfo, At<JxlError>> {
     Ok(JxlInfo {
         width: dim_to_u32(width, "width").map_err(|e| whereat::at!(e))?,
         height: dim_to_u32(height, "height").map_err(|e| whereat::at!(e))?,
+        coded_width: dim_to_u32(coded_width, "coded width").map_err(|e| whereat::at!(e))?,
+        coded_height: dim_to_u32(coded_height, "coded height").map_err(|e| whereat::at!(e))?,
         has_alpha,
         has_animation,
         bit_depth: Some(bit_depth),
         icc_profile,
         orientation,
+        intrinsic_orientation,
         cicp,
         is_gray,
         // Probing only parses headers; EXIF/XMP are in trailing container
@@ -668,6 +724,11 @@ pub fn decode_with_parallel(
 ///
 /// `stop` provides cooperative cancellation — the decoder checks the token
 /// periodically and aborts early if signalled.
+///
+/// Orientation is adjusted (display geometry, Identity residual), matching the
+/// JXL decoder default. The zencodec adapter calls
+/// [`decode_with_options_oriented`] directly when it needs the un-baked
+/// (Preserve) path.
 pub fn decode_with_options(
     data: &[u8],
     limits: Option<&JxlLimits>,
@@ -675,7 +736,31 @@ pub fn decode_with_options(
     parallel: Option<bool>,
     stop: Option<alloc::sync::Arc<dyn enough::Stop>>,
 ) -> Result<JxlDecodeOutput, At<JxlError>> {
+    decode_with_options_oriented(data, limits, preferred, parallel, stop, true)
+}
+
+/// Decode a JXL image with explicit orientation-adjustment control.
+///
+/// `adjust_orientation` mirrors [`jxl::api::JxlDecoderOptions::adjust_orientation`]:
+/// - `true` (the [`decode_with_options`] default): the decoder bakes the stored
+///   orientation into the output pixels — emitted geometry is the display size
+///   and the reported residual [`JxlInfo::orientation`] is Identity.
+/// - `false`: pixels are emitted in their stored orientation — emitted geometry
+///   equals the coded size and [`JxlInfo::orientation`] surfaces the intrinsic
+///   EXIF orientation for a later stage to bake.
+///
+/// In both modes [`JxlInfo::coded_width`]/[`coded_height`](JxlInfo::coded_height)
+/// and [`JxlInfo::intrinsic_orientation`] report the stored values.
+pub(crate) fn decode_with_options_oriented(
+    data: &[u8],
+    limits: Option<&JxlLimits>,
+    preferred: &[PixelDescriptor],
+    parallel: Option<bool>,
+    stop: Option<alloc::sync::Arc<dyn enough::Stop>>,
+    adjust_orientation: bool,
+) -> Result<JxlDecodeOutput, At<JxlError>> {
     let mut options = JxlDecoderOptions::default();
+    options.adjust_orientation = adjust_orientation;
 
     if let Some(p) = parallel {
         options.parallel = p;
@@ -716,7 +801,13 @@ pub fn decode_with_options(
     };
 
     let info = decoder.basic_info();
+    // `size` is the emitted geometry — display dims when `adjust_orientation`
+    // is set, coded dims otherwise — and is the buffer to allocate. `coded_size`
+    // is always the stored geometry. `orientation` is the residual of the
+    // emitted pixels (Identity when adjusting); `intrinsic_orientation` is
+    // always the stored EXIF orientation.
     let (width, height) = info.size;
+    let (coded_width, coded_height) = info.coded_size;
     let has_alpha = info
         .extra_channels
         .iter()
@@ -725,6 +816,7 @@ pub fn decode_with_options(
     let jxl_bit_depth = &info.bit_depth;
     let bit_depth_u8 = jxl_bit_depth.bits_per_sample() as u8;
     let orientation = info.orientation as u8;
+    let intrinsic_orientation = info.intrinsic_orientation as u8;
     let is_gray = profile_is_grayscale(decoder.embedded_color_profile());
 
     let (icc_profile, cicp) = extract_color_info(decoder.embedded_color_profile());
@@ -751,6 +843,8 @@ pub fn decode_with_options(
 
     let width_u32 = dim_to_u32(width, "width").map_err(|e| whereat::at!(e))?;
     let height_u32 = dim_to_u32(height, "height").map_err(|e| whereat::at!(e))?;
+    let coded_width_u32 = dim_to_u32(coded_width, "coded width").map_err(|e| whereat::at!(e))?;
+    let coded_height_u32 = dim_to_u32(coded_height, "coded height").map_err(|e| whereat::at!(e))?;
 
     if let Some(lim) = limits {
         let bpp = (channels * bytes_per_sample) as u32;
@@ -813,11 +907,14 @@ pub fn decode_with_options(
         info: JxlInfo {
             width: width_u32,
             height: height_u32,
+            coded_width: coded_width_u32,
+            coded_height: coded_height_u32,
             has_alpha,
             has_animation,
             bit_depth: Some(bit_depth_u8),
             icc_profile,
             orientation,
+            intrinsic_orientation,
             cicp,
             is_gray,
             exif,

@@ -23,6 +23,11 @@ imgref = "1.12.0"
 enough = "0.4.3"
 zencodec = { version = "0.1.21" }
 zenpixels = { version = "0.2.11", default-features = false, features = ["rgb"] }
+# Pixel-exact orientation baking (`orient::apply_orientation`) for the zencodec
+# decode adapter's OrientationHint handling. Only the `orient` module is used
+# (no CMS / ICC db); `rgb` matches the zenpixels feature already enabled above.
+# Pulled in by the `zencodec` feature (the adapter is gated there), like zenwebp.
+zenpixels-convert = { version = "0.2.13", default-features = false, features = ["rgb"], optional = true }
 linear-srgb = { version = "0.6.7"}
 jxl = { version = "0.3.7", package = "zenjxl-decoder", optional = true }
 jxl-encoder = { version = "0.3.2", optional = true, default-features = false, features = ["std", "convenience"] }
@@ -41,9 +46,18 @@ ultrahdr-core = { version = "0.5.0", optional = true, default-features = false, 
 # same pattern jxl-encoder itself uses for its unpublished zenjpeg dep. Remove
 # these once the chain is published (see docs/zenjxl_jpeg_lossy/README.md in the
 # jxl-encoder repo). Builds require the sibling checkouts.
+#
+# zenjxl-decoder: the mode-aware orientation API (`JxlDecoderOptions::
+# adjust_orientation` made load-bearing, plus `JxlBasicInfo::{coded_size,
+# intrinsic_orientation}`) landed on the decoder's `main` *after* the 0.3.9 tag,
+# so it is unreleased. Path-patch to the local sibling until the decoder
+# publishes 0.3.10; then drop this patch line and bump the `jxl` dep above to
+# `^0.3.10`. (zenjxl already requires the sibling checkouts via the patches
+# above, so this does not change its publishability status.)
 [patch.crates-io]
 jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../zenjpeg/zenjpeg" }
+zenjxl-decoder = { path = "../zenjxl-decoder/zenjxl-decoder" }
 
 [dev-dependencies]
 archmage = { version = "0.9.19", features = ["std"] }
@@ -97,8 +111,10 @@ jpeg-lossy = ["encode", "decode", "jxl-encoder/jpeg-reencoding", "dep:zenjpeg", 
 # not depend on this in production code." Anything in the underlying
 # escape hatch may change without semver bumps.
 __expert = ["encode", "jxl-encoder/__expert"]
-# Enable zencodec trait integration
-zencodec = []
+# Enable zencodec trait integration. Pulls zenpixels-convert for the decode
+# adapter's OrientationHint baking (`orient::apply_orientation`); zencodec
+# itself is a non-optional dep, so this flag only toggles the trait-impl code.
+zencodec = ["dep:zenpixels-convert"]
 # Native HDR reconstruction for `GainMapRender::ReconstructHdr` (zencodec
 # adapter): SDR-base jhgm bundles get the gain map applied via ultrahdr-core
 # (linear f32/f16 output + CLL/MDCV envelope); HDR-base bundles return the
