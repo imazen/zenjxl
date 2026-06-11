@@ -3,6 +3,22 @@
 ## [Unreleased]
 
 ### Added
+- **Native `ReconstructHdr` behind the new `reconstruct-hdr` feature**
+  (zencodec adapter): `GainMapRender::ReconstructHdr` now applies jhgm gain
+  maps natively instead of downgrading to `Components`. ISO 21496-1
+  headrooms decide the direction — an HDR-base bundle (JXL-typical) returns
+  the base, which already carries its own HDR signaling; an SDR-base bundle
+  gets the gain map applied via `ultrahdr_core::gainmap::apply_gainmap` into
+  linear f32 (or f16 when preferred) RGBA, with `target_headroom: None`
+  reconstructing at the gain map's encoded maximum and the output
+  `ImageInfo` carrying a derived content-light-level + mastering-display
+  envelope. `DecodeCapabilities::reconstructs_hdr()` flips to `true` under
+  the feature; without it the downgrade-to-Components behavior is unchanged.
+  Malformed jhgm metadata or an unsupported gain-map form errors — never a
+  silent SDR fallback. New optional dep: `ultrahdr-core 0.5.0`
+  (registry; jhgm parameter parsing stays in zencodec). Tests
+  `reconstruct_*` in `tests/gain_map_render.rs` cover apply, headroom clamp,
+  HDR-base passthrough, and the feature-off downgrade.
 - **Variant generation (`__expert`): sweep planner + fingerprints + plan
   introspection**, porting zenjpeg's `VARIANT_GENERATION.md` patterns
   (see `docs/VARIANT_GENERATION.md` for the jxl adoption + the

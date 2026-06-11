@@ -1385,33 +1385,149 @@ mod decoding {
         GainMapSource::new(bundle.gain_map_codestream, ImageFormat::Jxl, metadata)
     }
 
+    /// Apply a jhgm gain map to the decoded base (`GainMapRender::ReconstructHdr`).
+    ///
+    /// jhgm bundles come in two directions (ISO 21496-1 headrooms decide):
+    /// the JXL-typical HDR-base bundle (alternate is SDR) needs nothing — the
+    /// decoded base already IS the HDR rendition with its own signaling — while
+    /// an SDR-base bundle (Adobe-style) gets the gain map applied via
+    /// ultrahdr-core into linear f32 (or f16 when preferred) RGBA.
+    /// `None` target reconstructs at the gain map's encoded maximum
+    /// (`alternate_hdr_headroom` is log2 of the alternate/SDR peak ratio).
+    /// Malformed metadata or an unsupported gain-map form is an error — the
+    /// caller asked for an HDR rendition, and silently returning SDR would
+    /// misrepresent the image.
+    #[cfg(feature = "reconstruct-hdr")]
+    #[allow(clippy::too_many_arguments)]
+    fn reconstruct_hdr_base(
+        base: zenpixels::PixelBuffer,
+        mut info: ImageInfo,
+        bundle: &jxl::api::GainMapBundle,
+        target_headroom: Option<f32>,
+        preferred: &[PixelDescriptor],
+        native_limits: Option<&JxlLimits>,
+        parallel: Option<bool>,
+        stop: &dyn Stop,
+    ) -> Result<(zenpixels::PixelBuffer, ImageInfo), At<JxlError>> {
+        use ultrahdr_core::gainmap::{HdrOutputFormat, apply_gainmap};
+
+        /// SDR reference white (cd/m²) — 1.0 in the linear output maps here.
+        const SDR_WHITE_NITS: f32 = 203.0;
+
+        let params = zencodec::gainmap::parse_iso21496_fmt(
+            &bundle.metadata,
+            zencodec::gainmap::Iso21496Format::JxlJhgm,
+        )
+        .map_err(|_| {
+            whereat::at!(JxlError::InvalidInput(
+                "ReconstructHdr: jhgm ISO 21496-1 metadata failed to parse".into()
+            ))
+        })?;
+
+        if params.direction() == zencodec::gainmap::GainMapDirection::BaseIsHdr {
+            // The base image IS the HDR rendition (alternate is SDR) —
+            // nothing to apply; the base carries its own HDR signaling.
+            return Ok((base, info));
+        }
+
+        // SDR-base bundle: decode the gain-map codestream (same resource
+        // limits as the base decode) and apply it.
+        let gm_result = decode_with_options(
+            &bundle.gain_map_codestream,
+            native_limits,
+            &[],
+            parallel,
+            None,
+        )?;
+        let gm_pixels = gm_result.pixels;
+        let channels = match gm_pixels.descriptor().pixel_format() {
+            zenpixels::PixelFormat::Gray8 => 1u8,
+            zenpixels::PixelFormat::Rgb8 => 3u8,
+            _ => {
+                return Err(whereat::at!(JxlError::InvalidInput(
+                    "ReconstructHdr: gain-map codestream must decode to gray8 or rgb8".into()
+                )));
+            }
+        };
+        let gm = ultrahdr_core::GainMap {
+            width: gm_pixels.width(),
+            height: gm_pixels.height(),
+            channels,
+            data: gm_pixels.as_slice().contiguous_bytes().into_owned(),
+        };
+
+        // Output form: honor an f16 preference; default linear f32 RGBA.
+        let wants_f16 = preferred
+            .iter()
+            .any(|d| d.channel_type() == zenpixels::ChannelType::F16);
+        let format = if wants_f16 {
+            HdrOutputFormat::LinearF16
+        } else {
+            HdrOutputFormat::LinearFloat
+        };
+
+        // `None` = full reconstruction at the gain map's encoded maximum.
+        let capacity_max = params.linear_alternate_headroom() as f32;
+        let display_boost = target_headroom.unwrap_or(capacity_max).max(1.0);
+
+        let hdr = apply_gainmap(&base, &gm, &params, display_boost, format, stop).map_err(|e| {
+            whereat::at!(JxlError::InvalidInput(alloc::format!(
+                "ReconstructHdr: gain-map apply failed: {e}"
+            )))
+        })?;
+
+        // Envelope: derived peak (capped at the reconstruction boost) +
+        // mastering display matching the base image's primaries
+        // (`apply_gainmap` preserves them).
+        let peak_nits = SDR_WHITE_NITS * capacity_max.min(display_boost);
+        let primaries = match info.source_color.cicp.map(|c| c.color_primaries) {
+            Some(12) => [[0.680, 0.320], [0.265, 0.690], [0.150, 0.060]], // Display P3
+            Some(9) => [[0.708, 0.292], [0.170, 0.797], [0.131, 0.046]],  // BT.2020
+            _ => [[0.640, 0.330], [0.300, 0.600], [0.150, 0.060]],        // BT.709/sRGB
+        };
+        info.source_color.content_light_level =
+            Some(zencodec::ContentLightLevel::new(peak_nits as u16, 0));
+        info.source_color.mastering_display = Some(zencodec::MasteringDisplay::new(
+            primaries,
+            [0.3127, 0.3290],
+            peak_nits,
+            0.005,
+        ));
+        Ok((hdr, info))
+    }
+
     // ── Capabilities ────────────────────────────────────────────────────
 
-    static JXL_DECODE_CAPS: DecodeCapabilities = DecodeCapabilities::new()
-        .with_icc(true)
-        .with_cicp(true)
-        .with_hdr(true)
-        .with_exif(true)
-        .with_xmp(true)
-        .with_gain_map(true)
-        .with_native_gray(true)
-        .with_native_16bit(true)
-        .with_native_f32(true)
-        .with_native_alpha(true)
-        .with_animation(true)
-        .with_cheap_probe(true)
-        .with_enforces_max_pixels(true)
-        .with_enforces_max_memory(true)
-        .with_enforces_max_input_bytes(true)
-        .with_stop(true)
-        .with_threads_supported_range(
-            1,
-            if cfg!(feature = "threads") {
-                u16::MAX
-            } else {
-                1
-            },
-        );
+    static JXL_DECODE_CAPS: DecodeCapabilities = {
+        let caps = DecodeCapabilities::new()
+            .with_icc(true)
+            .with_cicp(true)
+            .with_hdr(true)
+            .with_exif(true)
+            .with_xmp(true)
+            .with_gain_map(true)
+            .with_native_gray(true)
+            .with_native_16bit(true)
+            .with_native_f32(true)
+            .with_native_alpha(true)
+            .with_animation(true)
+            .with_cheap_probe(true)
+            .with_enforces_max_pixels(true)
+            .with_enforces_max_memory(true)
+            .with_enforces_max_input_bytes(true)
+            .with_stop(true)
+            .with_threads_supported_range(
+                1,
+                if cfg!(feature = "threads") {
+                    u16::MAX
+                } else {
+                    1
+                },
+            );
+        #[cfg(feature = "reconstruct-hdr")]
+        let caps = caps.with_reconstructs_hdr(true);
+        caps
+    };
 
     /// Supported pixel descriptors for decoding.
     ///
@@ -1522,10 +1638,17 @@ mod decoding {
             self
         }
 
-        /// zenjxl surfaces gain maps but does not apply them
-        /// (`reconstructs_hdr()` is `false`): `ReconstructHdr` downgrades to
-        /// surfacing [`zencodec::GainMapRender::Components`] — the base stays
-        /// honestly SDR-labeled and the caller applies via ultrahdr-core.
+        /// Gain-map rendition intent for jhgm bundles.
+        ///
+        /// With the `reconstruct-hdr` feature (`reconstructs_hdr()` is
+        /// `true`), `ReconstructHdr` applies natively: an SDR-base bundle
+        /// gets the gain map applied via ultrahdr-core into linear f32/f16
+        /// RGBA with a content-light-level / mastering-display envelope; an
+        /// HDR-base bundle (JXL-typical) returns the base, which already
+        /// carries its own HDR signaling. Without the feature,
+        /// `ReconstructHdr` downgrades to surfacing
+        /// [`zencodec::GainMapRender::Components`] — the base stays honestly
+        /// labeled and the caller applies one layer up.
         pub fn with_gain_map_render(mut self, render: zencodec::GainMapRender) -> Self {
             self.gain_map_render = render;
             self
@@ -1847,6 +1970,8 @@ mod decoding {
             let native_limits = JxlDecodeJob::to_native_limits(&self.limits);
             let parallel = policy_to_parallel(&self.limits);
             let stop_arc: Option<Arc<dyn Stop>> = self.stop.map(|s| Arc::new(s) as Arc<dyn Stop>);
+            #[cfg(feature = "reconstruct-hdr")]
+            let stop_for_apply = stop_arc.clone();
             let result = decode_with_options(
                 &self.data,
                 native_limits.as_ref(),
@@ -1866,24 +1991,58 @@ mod decoding {
             let enriched =
                 enrich_descriptor_from_cicp(result.pixels.descriptor(), result.info.cicp);
             let pixels = result.pixels.with_descriptor(enriched);
+            // Gain-map rendition intent: Components decodes the jhgm gain-map
+            // codestream into a DecodedGainMap; ReconstructHdr applies it
+            // natively when the `reconstruct-hdr` feature is on, and
+            // downgrades to surfacing Components per the zencodec contract
+            // when it is off (reconstructs_hdr() is false — the base stays
+            // honestly labeled per its own descriptor). Unknown future modes
+            // are refused, never mis-rendered.
+            let (surface_components, reconstruct_target): (bool, Option<Option<f32>>) =
+                match self.gain_map_render {
+                    zencodec::GainMapRender::BaseOnly => (false, None),
+                    zencodec::GainMapRender::Components => (true, None),
+                    #[cfg(feature = "reconstruct-hdr")]
+                    zencodec::GainMapRender::ReconstructHdr { target_headroom } => {
+                        (false, Some(target_headroom))
+                    }
+                    #[cfg(not(feature = "reconstruct-hdr"))]
+                    zencodec::GainMapRender::ReconstructHdr { .. } => (true, None),
+                    _ => {
+                        return Err(whereat::at!(JxlError::InvalidInput(
+                            "unrecognized GainMapRender mode".into()
+                        )));
+                    }
+                };
+            #[cfg(not(feature = "reconstruct-hdr"))]
+            let _ = reconstruct_target;
+
+            // Native HDR reconstruction: apply the gain map to the decoded
+            // base. A ReconstructHdr request on a plain (no-jhgm) image is a
+            // normal decode — the base may itself be the HDR rendition.
+            #[cfg(feature = "reconstruct-hdr")]
+            let (pixels, info) = match (reconstruct_target, result.gain_map.as_ref()) {
+                (Some(target), Some(gm)) => {
+                    let stop_ref: &dyn Stop = match &stop_for_apply {
+                        Some(s) => &**s,
+                        None => &enough::Unstoppable,
+                    };
+                    reconstruct_hdr_base(
+                        pixels,
+                        info,
+                        gm,
+                        target,
+                        &self.preferred,
+                        native_limits.as_ref(),
+                        parallel,
+                        stop_ref,
+                    )?
+                }
+                _ => (pixels, info),
+            };
+
             let mut output =
                 DecodeOutput::new(pixels, info).with_source_encoding_details(result.info);
-            // Gain-map rendition intent. zenjxl surfaces (it does not apply):
-            // Components decodes the jhgm gain-map codestream into a
-            // DecodedGainMap; ReconstructHdr downgrades to Components per the
-            // zencodec contract (reconstructs_hdr() is false — the base stays
-            // honestly SDR/HDR-labeled per its own descriptor). Unknown
-            // future modes are refused, never mis-rendered.
-            let surface_components = match self.gain_map_render {
-                zencodec::GainMapRender::BaseOnly => false,
-                zencodec::GainMapRender::Components
-                | zencodec::GainMapRender::ReconstructHdr { .. } => true,
-                _ => {
-                    return Err(whereat::at!(JxlError::InvalidInput(
-                        "unrecognized GainMapRender mode".into()
-                    )));
-                }
-            };
             if (self.extract_gain_map || surface_components)
                 && let Some(gm) = result.gain_map
             {

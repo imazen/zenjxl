@@ -30,6 +30,10 @@ jxl-encoder = { version = "0.3.2", optional = true, default-features = false, fe
 # (jpeg-lossy feature). detect is ungated in zenjpeg; default-features = false
 # keeps it light (no decoder pulled).
 zenjpeg = { version = "0.8.7", optional = true, default-features = false }
+# Gain-map application for GainMapRender::ReconstructHdr (reconstruct-hdr
+# feature). Pure gain-map math; jhgm ISO 21496-1 parameter parsing comes
+# from zencodec, so the registry release suffices.
+ultrahdr-core = { version = "0.5.0", optional = true, default-features = false, features = ["std"] }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 
 # jxl-encoder 0.3.2 (lossy-JPEG recompression API) + zenjpeg 0.8.7 (libjxl-parity
@@ -95,6 +99,13 @@ jpeg-lossy = ["encode", "decode", "jxl-encoder/jpeg-reencoding", "dep:zenjpeg", 
 __expert = ["encode", "jxl-encoder/__expert"]
 # Enable zencodec trait integration
 zencodec = []
+# Native HDR reconstruction for `GainMapRender::ReconstructHdr` (zencodec
+# adapter): SDR-base jhgm bundles get the gain map applied via ultrahdr-core
+# (linear f32/f16 output + CLL/MDCV envelope); HDR-base bundles return the
+# base, which already carries its own HDR signaling. Flips
+# `DecodeCapabilities::reconstructs_hdr()` to true. Without this feature,
+# ReconstructHdr downgrades to surfacing Components per the zencodec contract.
+reconstruct-hdr = ["zencodec", "decode", "dep:ultrahdr-core"]
 # Enable zennode node definitions (EncodeJxl, DecodeJxl)
 # zennode = ["dep:zennode"]
 
