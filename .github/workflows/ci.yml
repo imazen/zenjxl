@@ -13,9 +13,6 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CI: true
-  # Public-API snapshot regen (tests/public_api_doc.rs) needs nightly rustdoc
-  # + cargo-public-api; only the clippy job carries them and runs the check.
-  ZEN_API_DOC: off
 
 jobs:
   # Base tests (no-default-features, zencodec) — run on all platforms.
@@ -102,9 +99,6 @@ jobs:
           # project dir by default; volumes in Cross.toml extend that.
           JXL_ENCODER_DIR: ${{ github.workspace }}/../jxl-encoder
           ZENJPEG_DIR: ${{ github.workspace }}/../zenjpeg
-          # Cross containers don't inherit workflow env; skip the
-          # public-API snapshot test inside the container explicitly.
-          CROSS_CONTAINER_OPTS: "--env ZEN_API_DOC=off"
         run: cross test --target i686-unknown-linux-gnu --no-default-features
 
   wasm:
@@ -148,15 +142,6 @@ jobs:
         run: cargo clippy --no-default-features --features encode --all-targets -- -D warnings
       - name: Clippy (all features)
         run: cargo clippy --all-features --all-targets -- -D warnings
-      - uses: dtolnay/rust-toolchain@nightly # rustdoc JSON for cargo-public-api
-      - uses: dtolnay/rust-toolchain@stable # restore stable as default
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-public-api
-      - name: Public-API snapshot is current
-        run: cargo test -p zenjxl --test public_api_doc
-        env:
-          ZEN_API_DOC: check
 
   fmt:
     name: Format

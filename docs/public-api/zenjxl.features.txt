@@ -1,0 +1,100 @@
+# zenjxl public API — additions from non-default features
+# features: butteraugli-loop,decode,encode,jpeg-lossy,parallel,reconstruct-hdr,threads,zencodec
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   pub modules                                 1
+#   pub types (struct/enum/trait/alias)        13
+#   free functions                              5
+#   inherent methods                           15
+#   struct fields                               7
+#   enum variants                               8
+#   trait roster entries (type × trait)        30
+#   auto-trait-complete types                   7
+#   auto-trait exceptions                       5
+#
+# per-module pub lines:
+#   (root)                           23
+#   jpeg_lossy                       26
+
+## items (49 lines)
+
+pub mod jpeg_lossy
+#[non_exhaustive] pub enum jpeg_lossy::InferredMetric
+pub jpeg_lossy::InferredMetric::Butteraugli
+pub jpeg_lossy::InferredMetric::Cvvdp
+pub jpeg_lossy::InferredMetric::ZensimA
+pub fn jpeg_lossy::InferredMetric::approx_relative_target(self, f32, f32) -> f32
+pub fn jpeg_lossy::InferredMetric::higher_is_better(self) -> bool
+#[non_exhaustive] pub enum jpeg_lossy::JpegRecompressMethod
+pub jpeg_lossy::JpegRecompressMethod::Auto
+pub jpeg_lossy::JpegRecompressMethod::Coarsen
+pub jpeg_lossy::JpegRecompressMethod::Reencode
+#[non_exhaustive] pub enum jpeg_lossy::QualityTarget
+pub jpeg_lossy::QualityTarget::Inferred
+pub jpeg_lossy::QualityTarget::Inferred::abs_level: f32
+pub jpeg_lossy::QualityTarget::Inferred::floor: f32
+pub jpeg_lossy::QualityTarget::Inferred::higher_is_better: bool
+pub jpeg_lossy::QualityTarget::Inferred::relative_target: f32
+pub jpeg_lossy::QualityTarget::Relative
+pub jpeg_lossy::QualityTarget::Relative::higher_is_better: bool
+pub jpeg_lossy::QualityTarget::Relative::level: f32
+pub fn jpeg_lossy::QualityTarget::inferred_preliminary(&[u8], jpeg_lossy::InferredMetric, f32) -> core::option::Option<Self>
+pub fn jpeg_lossy::predict_inferred_floor(&[u8], jpeg_lossy::InferredMetric) -> core::option::Option<f32>
+pub fn jpeg_lossy::recompress_jpeg_coarsen(&[u8], f32, u8) -> core::result::Result<alloc::vec::Vec<u8>, whereat::at::At<JxlError>>
+pub fn jpeg_lossy::recompress_jpeg_lossy(&[u8], jpeg_lossy::JpegRecompressMethod, f32, bool, &jpeg_lossy::RelativeScorer<'_>, u8) -> core::result::Result<alloc::vec::Vec<u8>, whereat::at::At<JxlError>>
+pub fn jpeg_lossy::recompress_jpeg_lossy_relative(&[u8], f32, bool, &jpeg_lossy::RelativeScorer<'_>, u8) -> core::result::Result<alloc::vec::Vec<u8>, whereat::at::At<JxlError>>
+pub fn jpeg_lossy::recompress_jpeg_lossy_target(&[u8], jpeg_lossy::JpegRecompressMethod, jpeg_lossy::QualityTarget, &jpeg_lossy::RelativeScorer<'_>, u8) -> core::result::Result<alloc::vec::Vec<u8>, whereat::at::At<JxlError>>
+pub type jpeg_lossy::RelativeScorer<'a> = (dyn core::ops::function::Fn(&[u8], &[u8], u32, u32) -> f32 + 'a)
+pub struct GainMapData
+pub GainMapData::jhgm_payload: alloc::vec::Vec<u8>
+pub struct JxlAnimationFrameDecoder
+pub struct JxlAnimationFrameEncoder
+pub struct JxlDecodeJob
+pub fn JxlDecodeJob::with_extract_gain_map(self, bool) -> Self
+pub fn JxlDecodeJob::with_gain_map_render(self, zencodec::gainmap::GainMapRender) -> Self
+pub struct JxlDecoder<'a>
+pub struct JxlDecoderConfig
+pub fn JxlDecoderConfig::new() -> Self
+pub fn JxlDecoderConfig::validate(&self) -> core::result::Result<(), ValidationError>
+pub struct JxlEncodeJob
+pub struct JxlEncoder
+pub struct JxlEncoderConfig
+pub fn JxlEncoderConfig::gain_map(&self) -> core::option::Option<&GainMapData>
+pub fn JxlEncoderConfig::lossless_config(&self) -> core::option::Option<&jxl_encoder::api::LosslessConfig>
+pub fn JxlEncoderConfig::lossy_config(&self) -> core::option::Option<&jxl_encoder::api::LossyConfig>
+pub fn JxlEncoderConfig::new() -> Self
+pub fn JxlEncoderConfig::validate(&self) -> core::result::Result<(), ValidationError>
+pub fn JxlEncoderConfig::with_distance(self, f32) -> Self
+pub fn JxlEncoderConfig::with_gain_map(self, alloc::vec::Vec<u8>) -> Self
+pub fn JxlEncoderConfig::with_noise(self, bool) -> Self
+
+## trait impls (12 types)
+
+GainMapData: Clone, Debug
+JxlAnimationFrameDecoder: zencodec::traits::decoder::AnimationFrameDecoder
+JxlAnimationFrameEncoder: zencodec::traits::encoder::AnimationFrameEncoder
+JxlDecodeJob: zencodec::traits::decoding::DecodeJob<'a>
+JxlDecoder<'_>: zencodec::traits::decoder::Decode
+JxlDecoderConfig: Clone, Debug, Default, zencodec::traits::decoding::DecoderConfig
+JxlEncodeJob: zencodec::traits::encoding::EncodeJob
+JxlEncoder: zencodec::traits::encoder::Encoder
+JxlEncoderConfig: Clone, Debug, Default, zencodec::traits::encoding::EncoderConfig
+jpeg_lossy::InferredMetric: Clone, Copy, Debug, Eq, PartialEq
+jpeg_lossy::JpegRecompressMethod: Clone, Copy, Debug, Default, Eq, PartialEq
+jpeg_lossy::QualityTarget: Clone, Copy, Debug
+
+## auto traits
+
+7 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+JxlAnimationFrameDecoder: !RefUnwindSafe !UnwindSafe
+JxlDecodeJob: !RefUnwindSafe !UnwindSafe
+JxlDecoder<'a>: !RefUnwindSafe !UnwindSafe
+JxlEncodeJob: !RefUnwindSafe !UnwindSafe
+JxlEncoder: !RefUnwindSafe !UnwindSafe

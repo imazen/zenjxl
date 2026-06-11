@@ -1,0 +1,235 @@
+# zenjxl public API — doc(hidden) items and excluded-feature surface
+# excluded features: __expert
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   pub modules                                 1
+#   pub types (struct/enum/trait/alias)        18
+#   free functions                              7
+#   inherent methods                           64
+#   struct fields                              64
+#   enum variants                              14
+#   re-exports                                  9
+#   trait roster entries (type × trait)        45
+#   auto-trait-complete types                  18
+#
+# per-module pub lines:
+#   (root)                           44
+#   jpeg_lossy                        2
+#   sweep                           131
+
+## items (177 lines)
+
+pub enum DistanceSource
+pub enum JxlEncodePlan
+pub enum sweep::BuiltConfig
+pub enum sweep::QualityGrid
+pub enum sweep::SweepVariant
+pub fn DistanceSource::assert_fields_are_eq(&self)
+pub fn DistanceSource::clone(&self) -> DistanceSource
+pub fn DistanceSource::eq(&self, &DistanceSource) -> bool
+pub fn DistanceSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn JxlEncodePlan::clone(&self) -> JxlEncodePlan
+pub fn JxlEncodePlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn JxlEncoderConfig::resolve_plan(&self) -> JxlEncodePlan
+pub fn JxlExtraChannelType::assert_fields_are_eq(&self)
+pub fn LosslessPlan::clone(&self) -> LosslessPlan
+pub fn LosslessPlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn LossyPlan::clone(&self) -> LossyPlan
+pub fn LossyPlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn ValidationError::from(jxl_encoder::validation::ValidationError) -> Self
+pub fn ValidationError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+pub fn jpeg_lossy::InferredMetric::assert_fields_are_eq(&self)
+pub fn jpeg_lossy::JpegRecompressMethod::assert_fields_are_eq(&self)
+pub fn sweep::BuiltConfig::clone(&self) -> sweep::BuiltConfig
+pub fn sweep::BuiltConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::BuiltConfig::validate(&self) -> core::result::Result<(), jxl_encoder::validation::ValidationError>
+pub fn sweep::DroppedAxis::clone(&self) -> sweep::DroppedAxis
+pub fn sweep::DroppedAxis::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::LosslessAxes::clone(&self) -> sweep::LosslessAxes
+pub fn sweep::LosslessAxes::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::LosslessAxes::modes_full() -> Self
+pub fn sweep::LosslessAxes::rd_core() -> Self
+pub fn sweep::LosslessVariant::build(&self) -> jxl_encoder::api::LosslessConfig
+pub fn sweep::LosslessVariant::clone(&self) -> sweep::LosslessVariant
+pub fn sweep::LosslessVariant::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::LossyAxes::clone(&self) -> sweep::LossyAxes
+pub fn sweep::LossyAxes::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::LossyAxes::modes_full() -> Self
+pub fn sweep::LossyAxes::rd_core() -> Self
+pub fn sweep::LossyVariant::build(&self) -> jxl_encoder::api::LossyConfig
+pub fn sweep::LossyVariant::clone(&self) -> sweep::LossyVariant
+pub fn sweep::LossyVariant::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::NamedLosslessParams::clone(&self) -> sweep::NamedLosslessParams
+pub fn sweep::NamedLosslessParams::default_probe() -> Self
+pub fn sweep::NamedLosslessParams::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::NamedLosslessParams::new(&str, jxl_encoder::effort::LosslessInternalParams) -> Self
+pub fn sweep::NamedLossyParams::clone(&self) -> sweep::NamedLossyParams
+pub fn sweep::NamedLossyParams::default_probe() -> Self
+pub fn sweep::NamedLossyParams::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::NamedLossyParams::new(&str, jxl_encoder::effort::LossyInternalParams) -> Self
+pub fn sweep::QualityGrid::clone(&self) -> sweep::QualityGrid
+pub fn sweep::QualityGrid::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::QualityGrid::points(&self) -> alloc::vec::Vec<(core::option::Option<f32>, f32)>
+pub fn sweep::SweepAxes::clone(&self) -> sweep::SweepAxes
+pub fn sweep::SweepAxes::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::SweepAxes::modes_full() -> Self
+pub fn sweep::SweepAxes::rd_core() -> Self
+pub fn sweep::SweepBuilder::clone(&self) -> sweep::SweepBuilder
+pub fn sweep::SweepBuilder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::SweepBuilder::new(sweep::SweepAxes, sweep::QualityGrid) -> Self
+pub fn sweep::SweepBuilder::plan(&self) -> sweep::SweepPlan
+pub fn sweep::SweepBuilder::with_budget(self, usize) -> Self
+pub fn sweep::SweepCell::build(&self) -> sweep::BuiltConfig
+pub fn sweep::SweepCell::clone(&self) -> sweep::SweepCell
+pub fn sweep::SweepCell::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::SweepPlan::clone(&self) -> sweep::SweepPlan
+pub fn sweep::SweepPlan::encodes(&self, usize, usize) -> usize
+pub fn sweep::SweepPlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::SweepVariant::build(&self) -> sweep::BuiltConfig
+pub fn sweep::SweepVariant::clone(&self) -> sweep::SweepVariant
+pub fn sweep::SweepVariant::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::fingerprint(&sweep::SweepVariant) -> u64
+pub fn sweep::lossless_internal_probes() -> alloc::vec::Vec<sweep::NamedLosslessParams>
+pub fn sweep::lossless_params_by_label(&str) -> core::option::Option<sweep::NamedLosslessParams>
+pub fn sweep::lossy_internal_probes() -> alloc::vec::Vec<sweep::NamedLossyParams>
+pub fn sweep::lossy_params_by_label(&str) -> core::option::Option<sweep::NamedLossyParams>
+pub fn sweep::resolve_distance_for_quality(f32) -> f32
+pub fn sweep::variant_from_cell_id(&str) -> core::result::Result<sweep::SweepVariant, alloc::string::String>
+pub mod sweep
+pub struct LosslessPlan
+pub struct LossyPlan
+pub struct sweep::DroppedAxis
+pub struct sweep::LosslessAxes
+pub struct sweep::LosslessVariant
+pub struct sweep::LossyAxes
+pub struct sweep::LossyVariant
+pub struct sweep::NamedLosslessParams
+pub struct sweep::NamedLossyParams
+pub struct sweep::SweepAxes
+pub struct sweep::SweepBuilder
+pub struct sweep::SweepCell
+pub struct sweep::SweepPlan
+pub use ANSHistogramStrategy
+pub use EncoderMode
+pub use EncoderStrategy
+pub use EntropyMulTable
+pub use JxlValidationError
+pub use LosslessInternalParams
+pub use LossyInternalParams
+pub use ProgressiveMode
+pub use RctType
+pub DistanceSource::CalibratedQuality
+pub DistanceSource::Default
+pub DistanceSource::Override
+pub JxlEncodePlan::Lossless(LosslessPlan)
+pub JxlEncodePlan::Lossy(LossyPlan)
+pub LosslessPlan::container_forced: bool
+pub LosslessPlan::effort: u8
+pub LosslessPlan::inert_knobs: alloc::vec::Vec<&'static str>
+pub LossyPlan::calibrated_native_quality: core::option::Option<f32>
+pub LossyPlan::container_forced: bool
+pub LossyPlan::distance: f32
+pub LossyPlan::distance_source: DistanceSource
+pub LossyPlan::effort: u8
+pub LossyPlan::generic_quality: core::option::Option<f32>
+pub LossyPlan::noise: bool
+pub ValidationError::JxlEncoder(jxl_encoder::validation::ValidationError)
+pub sweep::BuiltConfig::Lossless(jxl_encoder::api::LosslessConfig)
+pub sweep::BuiltConfig::Lossy(jxl_encoder::api::LossyConfig)
+pub sweep::DroppedAxis::axis: &'static str
+pub sweep::DroppedAxis::dropped: alloc::vec::Vec<alloc::string::String>
+pub sweep::DroppedAxis::kept: alloc::string::String
+pub sweep::LosslessAxes::efforts: alloc::vec::Vec<u8>
+pub sweep::LosslessAxes::encoder_modes: alloc::vec::Vec<jxl_encoder::api::EncoderMode>
+pub sweep::LosslessAxes::faster_decoding: alloc::vec::Vec<u8>
+pub sweep::LosslessAxes::group_size_shifts: alloc::vec::Vec<core::option::Option<u8>>
+pub sweep::LosslessAxes::internal: alloc::vec::Vec<sweep::NamedLosslessParams>
+pub sweep::LosslessAxes::predictors: alloc::vec::Vec<core::option::Option<u8>>
+pub sweep::LosslessVariant::effort: u8
+pub sweep::LosslessVariant::encoder_mode: jxl_encoder::api::EncoderMode
+pub sweep::LosslessVariant::faster_decoding: u8
+pub sweep::LosslessVariant::group_size_shift: core::option::Option<u8>
+pub sweep::LosslessVariant::internal: sweep::NamedLosslessParams
+pub sweep::LosslessVariant::predictor: core::option::Option<u8>
+pub sweep::LossyAxes::ans: alloc::vec::Vec<core::option::Option<bool>>
+pub sweep::LossyAxes::efforts: alloc::vec::Vec<u8>
+pub sweep::LossyAxes::encoder_modes: alloc::vec::Vec<jxl_encoder::api::EncoderMode>
+pub sweep::LossyAxes::epf_levels: alloc::vec::Vec<i8>
+pub sweep::LossyAxes::faster_decoding: alloc::vec::Vec<u8>
+pub sweep::LossyAxes::gaborish: alloc::vec::Vec<core::option::Option<bool>>
+pub sweep::LossyAxes::internal: alloc::vec::Vec<sweep::NamedLossyParams>
+pub sweep::LossyAxes::noise: alloc::vec::Vec<bool>
+pub sweep::LossyAxes::progressive: alloc::vec::Vec<jxl_encoder::api::ProgressiveMode>
+pub sweep::LossyAxes::strategies: alloc::vec::Vec<jxl_encoder::api::EncoderStrategy>
+pub sweep::LossyVariant::ans: core::option::Option<bool>
+pub sweep::LossyVariant::distance: f32
+pub sweep::LossyVariant::effort: u8
+pub sweep::LossyVariant::encoder_mode: jxl_encoder::api::EncoderMode
+pub sweep::LossyVariant::epf_level: i8
+pub sweep::LossyVariant::faster_decoding: u8
+pub sweep::LossyVariant::gaborish: core::option::Option<bool>
+pub sweep::LossyVariant::internal: sweep::NamedLossyParams
+pub sweep::LossyVariant::noise: bool
+pub sweep::LossyVariant::progressive: jxl_encoder::api::ProgressiveMode
+pub sweep::LossyVariant::strategy: jxl_encoder::api::EncoderStrategy
+pub sweep::NamedLosslessParams::label: alloc::string::String
+pub sweep::NamedLosslessParams::params: jxl_encoder::effort::LosslessInternalParams
+pub sweep::NamedLossyParams::label: alloc::string::String
+pub sweep::NamedLossyParams::params: jxl_encoder::effort::LossyInternalParams
+pub sweep::QualityGrid::ExplicitDistance(alloc::vec::Vec<f32>)
+pub sweep::QualityGrid::ExplicitQuality(alloc::vec::Vec<f32>)
+pub sweep::QualityGrid::Step5
+pub sweep::QualityGrid::TrainingDense
+pub sweep::SweepAxes::lossless: core::option::Option<sweep::LosslessAxes>
+pub sweep::SweepAxes::lossy: core::option::Option<sweep::LossyAxes>
+pub sweep::SweepCell::aliases: alloc::vec::Vec<alloc::string::String>
+pub sweep::SweepCell::deviations: u8
+pub sweep::SweepCell::fingerprint: u64
+pub sweep::SweepCell::id: alloc::string::String
+pub sweep::SweepCell::quality: core::option::Option<f32>
+pub sweep::SweepCell::variant: sweep::SweepVariant
+pub sweep::SweepPlan::cells: alloc::vec::Vec<sweep::SweepCell>
+pub sweep::SweepPlan::dropped: alloc::vec::Vec<sweep::DroppedAxis>
+pub sweep::SweepPlan::duplicates_merged: usize
+pub sweep::SweepPlan::invalid_skipped: alloc::vec::Vec<alloc::string::String>
+pub sweep::SweepPlan::over_budget: bool
+pub sweep::SweepPlan::q_coarsenings: u32
+pub sweep::SweepVariant::Lossless(sweep::LosslessVariant)
+pub sweep::SweepVariant::Lossy(sweep::LossyVariant)
+
+## trait impls (23 types)
+
+DistanceSource: Clone, Copy, Debug, Eq, PartialEq, TrivialClone
+JxlEncodePlan: Clone, Debug
+JxlExtraChannelType: TrivialClone
+LosslessPlan: Clone, Debug
+LossyPlan: Clone, Debug
+ValidationError: From<jxl_encoder::validation::ValidationError>
+jpeg_lossy::InferredMetric: TrivialClone
+jpeg_lossy::JpegRecompressMethod: TrivialClone
+jpeg_lossy::QualityTarget: TrivialClone
+sweep::BuiltConfig: Clone, Debug
+sweep::DroppedAxis: Clone, Debug
+sweep::LosslessAxes: Clone, Debug
+sweep::LosslessVariant: Clone, Debug
+sweep::LossyAxes: Clone, Debug
+sweep::LossyVariant: Clone, Debug
+sweep::NamedLosslessParams: Clone, Debug
+sweep::NamedLossyParams: Clone, Debug
+sweep::QualityGrid: Clone, Debug
+sweep::SweepAxes: Clone, Debug
+sweep::SweepBuilder: Clone, Debug
+sweep::SweepCell: Clone, Debug
+sweep::SweepPlan: Clone, Debug
+sweep::SweepVariant: Clone, Debug
+
+## auto traits
+
+18 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

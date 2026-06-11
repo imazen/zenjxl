@@ -1,4 +1,6 @@
 Cargo.lock
+# The apidoc snapshot-runner package commits its lockfile (reproducible regen).
+!apidoc/Cargo.lock
 
 # === Standard exclusions (do not depend on user ~/.gitignore) ===
 
