@@ -1345,7 +1345,7 @@ mod decoding {
 
     use crate::decode::{
         JxlInfo, JxlLimits, build_pixel_data, choose_pixel_format, decode_with_options,
-        decode_with_options_oriented, extract_color_info, is_hdr_or_wide_gamut, probe,
+        decode_with_options_oriented, extract_color_info, is_hdr_or_wide_gamut, map_err, probe,
         probe_with_orientation,
     };
 
@@ -2223,6 +2223,12 @@ mod decoding {
             let stop_arc: Option<Arc<dyn Stop>> = self.stop.map(|s| Arc::new(s) as Arc<dyn Stop>);
             #[cfg(feature = "reconstruct-hdr")]
             let stop_for_apply = stop_arc.clone();
+            // Gate progressive content during decode when the policy forbids it.
+            // `resolve_progressive(true)` is true unless `allow_progressive`
+            // is explicitly `Some(false)`, so we only reject when the caller
+            // opted out. The decoder errors at the first progressive frame
+            // header; the header-only probe is unaffected.
+            let reject_progressive = !self.policy.resolve_progressive(true);
             // Decode in the orientation mode the hint selects: the JXL decoder
             // bakes the intrinsic orientation natively on the `Correct`/
             // `CorrectAndTransform` path (`adjust_orientation = true`) and emits
@@ -2235,6 +2241,7 @@ mod decoding {
                 parallel,
                 stop_arc,
                 JxlDecodeJob::decoder_adjust_orientation(self.orientation),
+                reject_progressive,
             )?;
 
             let info = JxlDecodeJob::apply_policy(
@@ -2371,6 +2378,12 @@ mod decoding {
         fn decode_all_frames(&mut self) -> Result<(), At<JxlError>> {
             let mut options = JxlDecoderOptions::default();
 
+            // Honor the same progressive gate as the single-image decode path:
+            // an animation whose frames are progressive must also be rejected
+            // when the policy forbids it. Header parse below stays unaffected
+            // (the gate fires only at frame headers, of which there are none yet).
+            options.reject_progressive = !self.policy.resolve_progressive(true);
+
             if let Some(p) = policy_to_parallel(&self.limits) {
                 options.parallel = p;
             }
@@ -2495,10 +2508,12 @@ mod decoding {
                         .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
                 }
 
-                // Advance to frame info
+                // Advance to frame info. This is where `reject_progressive`
+                // fires (at the frame header), so route through `map_err` to
+                // surface the dedicated `JxlError::ProgressiveRejected`.
                 let result = decoder
                     .process(&mut input)
-                    .map_err(|e| whereat::at!(JxlError::Decode(e)))?;
+                    .map_err(|e| whereat::at!(map_err(e)))?;
                 let decoder_fi = match result {
                     ProcessingResult::Complete { result } => result,
                     ProcessingResult::NeedsMoreInput { .. } => break,
@@ -2513,7 +2528,7 @@ mod decoding {
 
                 let result = decoder_fi
                     .process(&mut input, &mut [output])
-                    .map_err(|e| whereat::at!(JxlError::Decode(e)))?;
+                    .map_err(|e| whereat::at!(map_err(e)))?;
                 let next_decoder = match result {
                     ProcessingResult::Complete { result } => result,
                     ProcessingResult::NeedsMoreInput { .. } => {

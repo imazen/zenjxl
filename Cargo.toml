@@ -52,6 +52,11 @@ ultrahdr-core = { version = "0.5.0", optional = true, default-features = false, 
 [patch.crates-io]
 jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../zenjpeg/zenjpeg" }
+# The `JxlDecoderOptions::reject_progressive` decode-time gate is on
+# zenjxl-decoder main but unreleased (0.3.10 predates it). Path-patch the
+# sibling so the policy→reject_progressive wiring resolves; bump the `jxl`
+# dep to 0.3.11 + drop this patch when zenjxl-decoder publishes.
+zenjxl-decoder = { path = "../zenjxl-decoder/zenjxl-decoder" }
 
 [dev-dependencies]
 archmage = { version = "0.9.19", features = ["std"] }

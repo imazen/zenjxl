@@ -233,7 +233,13 @@ impl JxlLimits {
 
 use jxl::api::{JxlPrimaries, JxlTransferFunction};
 
-fn map_err(e: jxl::api::Error) -> JxlError {
+pub(crate) fn map_err(e: jxl::api::Error) -> JxlError {
+    // Surface a policy rejection as a dedicated variant so callers can match on
+    // it without string-matching the decoder error. The decoder raises this when
+    // `reject_progressive` is set and a progressive frame header is seen.
+    if matches!(e, jxl::api::Error::ProgressiveRejected) {
+        return JxlError::ProgressiveRejected;
+    }
     JxlError::Decode(e)
 }
 
@@ -736,7 +742,7 @@ pub fn decode_with_options(
     parallel: Option<bool>,
     stop: Option<alloc::sync::Arc<dyn enough::Stop>>,
 ) -> Result<JxlDecodeOutput, At<JxlError>> {
-    decode_with_options_oriented(data, limits, preferred, parallel, stop, true)
+    decode_with_options_oriented(data, limits, preferred, parallel, stop, true, false)
 }
 
 /// Decode a JXL image with explicit orientation-adjustment control.
@@ -751,6 +757,12 @@ pub fn decode_with_options(
 ///
 /// In both modes [`JxlInfo::coded_width`]/[`coded_height`](JxlInfo::coded_height)
 /// and [`JxlInfo::intrinsic_orientation`] report the stored values.
+///
+/// `reject_progressive` mirrors [`jxl::api::JxlDecoderOptions::reject_progressive`]:
+/// when `true`, the decoder errors at the first progressive frame header
+/// (multi-pass or LF frame) instead of decoding it, surfaced here as
+/// [`JxlError::ProgressiveRejected`]. The header-only probe never decodes a
+/// frame, so this gate only matters on the decode path.
 pub(crate) fn decode_with_options_oriented(
     data: &[u8],
     limits: Option<&JxlLimits>,
@@ -758,9 +770,11 @@ pub(crate) fn decode_with_options_oriented(
     parallel: Option<bool>,
     stop: Option<alloc::sync::Arc<dyn enough::Stop>>,
     adjust_orientation: bool,
+    reject_progressive: bool,
 ) -> Result<JxlDecodeOutput, At<JxlError>> {
     let mut options = JxlDecoderOptions::default();
     options.adjust_orientation = adjust_orientation;
+    options.reject_progressive = reject_progressive;
 
     if let Some(p) = parallel {
         options.parallel = p;

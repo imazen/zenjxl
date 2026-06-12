@@ -11,6 +11,16 @@ pub enum JxlError {
     #[error("JXL decode error: {0}")]
     Decode(#[from] jxl::api::Error),
 
+    /// Progressive content was rejected by the decode policy.
+    ///
+    /// Surfaced when the caller's [`DecodePolicy`](zencodec::decode::DecodePolicy)
+    /// sets `allow_progressive == Some(false)` and the JXL codestream carries a
+    /// progressive frame header (multi-pass or LF frame). The decoder reports
+    /// this during the decode pass — the header-only probe never triggers it.
+    #[cfg(feature = "decode")]
+    #[error("progressive content rejected by decode policy")]
+    ProgressiveRejected,
+
     /// JXL encoding error from jxl-encoder.
     #[cfg(feature = "encode")]
     #[error("JXL encode error: {0}")]

@@ -4,6 +4,16 @@
 
 ### Added
 
+- **`DecodePolicy::allow_progressive` now gates JXL during decode** (zencodec
+  adapter). The decode path wires the caller's policy into the decoder's
+  `JxlDecoderOptions::reject_progressive`: with `allow_progressive ==
+  Some(false)` a progressive codestream (multi-pass or LF frame) is rejected at
+  the first frame header with the new `JxlError::ProgressiveRejected`; `None`
+  and `Some(true)` decode as before. Both the single-image and animation decode
+  paths honor it; `probe`/`JxlBasicInfo` are header-only and intentionally
+  untouched. Depends on the unreleased `zenjxl-decoder` `reject_progressive`
+  option (path-patched until 0.3.11). Tests in `tests/progressive_policy.rs`.
+
 - Pattern 7 (cell ids as durable identity): `sweep::variant_from_cell_id`
   reconstructs the exact `SweepVariant` from a cell id alone — both
   grammars (vd-/mod-), `_q` tokens resolved through the same calibrated
