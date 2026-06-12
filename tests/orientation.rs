@@ -32,8 +32,8 @@ use zenjxl::JxlDecoderConfig;
 const FIXTURE_EXIF: u8 = 5;
 
 fn transpose_fixture() -> Vec<u8> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/orientation5_transpose.jxl");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/orientation5_transpose.jxl");
     std::fs::read(&path)
         .unwrap_or_else(|e| panic!("missing committed fixture {}: {e}", path.display()))
 }
@@ -132,7 +132,11 @@ fn assert_pixels_identical(
     b: &zencodec::decode::DecodeOutput,
     msg: &str,
 ) {
-    assert_eq!((a.width(), a.height()), (b.width(), b.height()), "{msg}: geometry");
+    assert_eq!(
+        (a.width(), a.height()),
+        (b.width(), b.height()),
+        "{msg}: geometry"
+    );
     let channels = channels_of(a);
     assert_eq!(channels, channels_of(b), "{msg}: channels");
     let (ap, bp) = (a.pixels(), b.pixels());
@@ -302,11 +306,7 @@ fn exact_transform_identity_equals_preserve() {
         Orientation::Identity,
         "ExactTransform declares the pixels final → Identity tag"
     );
-    assert_pixels_identical(
-        &exact_id,
-        &preserve,
-        "ExactTransform(Identity) vs Preserve",
-    );
+    assert_pixels_identical(&exact_id, &preserve, "ExactTransform(Identity) vs Preserve");
 }
 
 #[test]
