@@ -4,6 +4,20 @@
 
 ### Added
 
+- **SCALAR sweep-axis ladders** for the dense-sweep program (zenmetrics
+  `docs/PLAN_SWEEPS.md` §5 gaps; `zenpicker-train --scalar-axes` heads), as
+  eight new entries in the `__expert` internal-probe registry (d83b1afc):
+  `k_ac_quant` SCALAR ladder `{0.575, 0.65, 0.88, 1.0}` around the 0.765
+  libjxl default (0.65 = the jxl-encoder#25 measured value; the axis is the
+  sanctioned follow-on C learned-dispatch route); `fine_grained_step` SCALAR
+  probes `{1, 3}` (4/8 proven structurally dead — the non-aligned 32×32
+  pass's `(cy|cx) % 4 == 0` skip makes multiple-of-4 steps a no-op, pinned
+  by test); `entropy_mul_table` presets `screenshot_suppressed()` +
+  `high_d_photo_smooth_suppressed()` alongside `experimental()`. All three
+  knobs were already fingerprint-hashed; ids/parser/budget-ladder pick the
+  values up via the registry. Harness re-run fully green, all probes live
+  (`benchmarks/sweep_validate_jxl_2026-06-12.tsv`).
+
 - **`DecodePolicy::allow_progressive` now gates JXL during decode** (zencodec
   adapter). The decode path wires the caller's policy into the decoder's
   `JxlDecoderOptions::reject_progressive`: with `allow_progressive ==

@@ -58,7 +58,9 @@
 //! | faster_decoding | 0–4 | lossy: 0, 4; lossless: 0, 2 | libjxl tiers. Lossy tier 2 = patches-off only, which never fires on photo content (validated inert); lossless tier 2 forces small groups (live; byte-aliases `group_size_shift = 0`) |
 //! | noise | bool | off, on | `with_noise` synthesis |
 //! | k_info_loss_mul_base | > 0 | 1.3 probe | libjxl PR #4506 experimental value (reference = 1.2) |
-//! | entropy_mul_table | preset | experimental() probe | PR #4506 constructor; reference() is the Reference-mode default |
+//! | k_ac_quant (SCALAR) | > 0, finite | 0.575, 0.65, 0.88, 1.0 | default 0.765 = libjxl `kAcQuant` (`enc_adaptive_quantization.cc`); 0.65 = the measured jxl-encoder#25 flip value (RULED OUT as a default, sanctioned as the learned-dispatch axis — follow-on C); the rest extend log-≈symmetrically (×0.75, ×1.15, ×1.31) so the aggressive (coarser-field) end is as dense as the refine end |
+//! | fine_grained_step (SCALAR) | 1–8 (`validation.rs` `FINE_GRAINED_STEP_RANGE`) | 1, 3 | per-effort default 2 (e1–9), 1 at e10 (`effort.rs`); jxl-encoder#43 chunk 2d sweep axis. **4 and 8 are structurally dead**: the only consumer is the non-aligned 32×32-class pass (`ac_strategy.rs` `step_by(step)` + `(cy\|cx) % 4 == 0` skip), so any multiple-of-4 step skips every position ≡ `non_aligned_eval=false`. 3 is the smallest live coarser-than-default value |
+//! | entropy_mul_table | preset (SCALAR ×12) | experimental(), screenshot_suppressed(), high_d_photo_smooth_suppressed() probes | named `EntropyMulTable` constructors: PR #4506 experimental; the GPU-bisected screen-content lift table (default-off pending the wider sweep this axis feeds); the W44-29 smooth-photo 16/32-class lowering table. reference() is the Reference-mode default |
 //! | lossy_search_seeds | ≥ 1 | (none — see note) | RFC#45: e9+ default. Live only under jxl-encoder's `butteraugli-loop` feature, which the default `__expert` build does not enable; not a default probe because it would be structurally inert |
 //! | nb_rcts_to_try | 0–19 | 1 probe | `Some(1)` per jxl-encoder#67 (identity-RCT-only — `Some(0)` falls back to GBR_SUBGR and can coincide with the search winner). A 19-wide probe was dropped 2026-06-10: zero new winners over the 7-candidate e7 default across the validation corpus |
 //! | wp_num_param_sets | 0–5 | 5 probe | effort schedule (0 at e<8, 2 at e8, 5 at e9+) |
@@ -508,6 +510,59 @@ pub fn lossy_internal_probes() -> Vec<NamedLossyParams> {
     let mut p = LossyInternalParams::default();
     p.ans_histogram_strategy_vardct = Some(ANSHistogramStrategy::Fast);
     probes.push(NamedLossyParams::new("ansfast", p));
+
+    // ── SCALAR ladders (dense-sweep program / `--scalar-axes` heads) ──
+    // Appended after the categorical probes so the budget ladder (which
+    // sheds from the END of the axis) drops the newest, least-validated
+    // values first; within the block, nearest-default values come first
+    // so core scalar coverage survives the longest.
+
+    // k_ac_quant: the initial-quant-field constant (libjxl `kAcQuant`,
+    // default 0.765). jxl-encoder#25: the 0.65 default-flip and its
+    // smooth-photo proxy gate are both RULED OUT; learned per-image
+    // dispatch via this very override is the remaining sanctioned route,
+    // and these cells are its training data. Steps are log-≈symmetric
+    // around the default (×0.85, ×1.15, ×0.75, ×1.31), aggressive
+    // (coarser-field) end as dense as the refine end per the house sweep
+    // discipline. Labels use shortest-roundtrip Display (no trailing
+    // zeros) — they are id tokens.
+    for (label, v) in [
+        ("kaq0.65", 0.65f32),
+        ("kaq0.88", 0.88),
+        ("kaq0.575", 0.575),
+        ("kaq1", 1.0),
+    ] {
+        let mut p = LossyInternalParams::default();
+        p.k_ac_quant = Some(v);
+        probes.push(NamedLossyParams::new(label, p));
+    }
+
+    // fine_grained_step: search step of the non-aligned 32×32-class AC
+    // strategy pass (valid 1..=8; per-effort default 2, 1 at e10).
+    // jxl-encoder#43 chunk 2d sweep axis. 1 = the shipped e10 value
+    // (W38-2: finer ≠ better — output-affecting both directions);
+    // 3 = the smallest LIVE coarser value. 4 and 8 are NOT probed:
+    // the consumer's `(cy|cx) % 4 == 0` alignment skip makes every
+    // multiple-of-4 step a structural no-op (byte-identical to
+    // `non_aligned_eval = false` — the quantization-flattened-knob trap,
+    // playbook pattern 10).
+    for (label, v) in [("fgs1", 1u8), ("fgs3", 3)] {
+        let mut p = LossyInternalParams::default();
+        p.fine_grained_step = Some(v);
+        probes.push(NamedLossyParams::new(label, p));
+    }
+
+    // entropy_mul_table presets beyond experimental(): the two named
+    // content-class tables jxl-encoder ships. As raw overrides they
+    // apply unconditionally (the production content-aware gates live
+    // elsewhere), which is exactly what a cost-model sweep wants.
+    let mut p = LossyInternalParams::default();
+    p.entropy_mul_table = Some(EntropyMulTable::screenshot_suppressed());
+    probes.push(NamedLossyParams::new("emulscreen", p));
+
+    let mut p = LossyInternalParams::default();
+    p.entropy_mul_table = Some(EntropyMulTable::high_d_photo_smooth_suppressed());
+    probes.push(NamedLossyParams::new("emulsmooth", p));
 
     probes
 }
@@ -1841,6 +1896,39 @@ mod tests {
                 .any(|p| p.params.k_info_loss_mul_base == Some(1.3)),
             "kinfo1.3 probe missing"
         );
+        // SCALAR ladders (dense-sweep program): k_ac_quant 4 steps,
+        // fine_grained_step 2 live steps, 3 entropy_mul presets.
+        let kaq: alloc::vec::Vec<f32> = lossy
+            .internal
+            .iter()
+            .filter_map(|p| p.params.k_ac_quant)
+            .collect();
+        assert_eq!(
+            kaq,
+            vec![0.65, 0.88, 0.575, 1.0],
+            "k_ac_quant scalar ladder drifted"
+        );
+        let fgs: alloc::vec::Vec<u8> = lossy
+            .internal
+            .iter()
+            .filter_map(|p| p.params.fine_grained_step)
+            .collect();
+        assert_eq!(fgs, vec![1, 3], "fine_grained_step scalar ladder drifted");
+        assert!(
+            fgs.iter().all(|s| (1..=8).contains(s) && s % 4 != 0),
+            "fine_grained_step probes must be in 1..=8 and never a \
+             multiple of 4 (structurally dead — non_aligned pass skips \
+             every (cy|cx) % 4 == 0 position)"
+        );
+        assert_eq!(
+            lossy
+                .internal
+                .iter()
+                .filter(|p| p.params.entropy_mul_table.is_some())
+                .count(),
+            3,
+            "entropy_mul_table preset probes: emulexp + emulscreen + emulsmooth"
+        );
         let ll = axes.lossless.as_ref().unwrap();
         assert!(
             ll.internal
@@ -1882,6 +1970,62 @@ mod tests {
             for a in &cell.aliases {
                 assert!(seen.insert(a.clone()), "duplicate alias id {a}");
             }
+        }
+    }
+
+    #[test]
+    fn scalar_ladder_values_have_distinct_fingerprints_and_ids() {
+        // Every scalar probe (k_ac_quant ladder, fine_grained_step,
+        // entropy_mul presets) must produce a fingerprint distinct from
+        // the default stratum AND from every other probe at the same
+        // (effort, strategy, q) — dedup must not over-merge distinct
+        // scalar values. The fields are hashed (`opt_f32(k_ac_quant)`,
+        // `opt_u8(fine_grained_step)`, the 12 table floats), so this
+        // pins the contract.
+        let base = |internal: NamedLossyParams| LossyVariant {
+            distance: 1.0,
+            effort: 7,
+            strategy: EncoderStrategy::Zenjxl,
+            encoder_mode: EncoderMode::Reference,
+            internal,
+            gaborish: None,
+            epf_level: -1,
+            progressive: ProgressiveMode::Single,
+            noise: false,
+            faster_decoding: 0,
+            ans: None,
+        };
+        let mut fps = alloc::collections::BTreeMap::new();
+        let mut ids = alloc::collections::BTreeSet::new();
+        for probe in
+            core::iter::once(NamedLossyParams::default_probe()).chain(lossy_internal_probes())
+        {
+            let v = base(probe);
+            let id = v.base_id();
+            assert!(ids.insert(id.clone()), "duplicate probe id {id}");
+            let fp = fingerprint(&SweepVariant::Lossy(v));
+            if let Some(prev) = fps.insert(fp, id.clone()) {
+                panic!("fingerprint collision between {prev} and {id}");
+            }
+        }
+        // 1 default + 9 categorical (emulexp, dct16off, dct64off,
+        // dct4x8off, chroma0, nonalign0, cfl1pass, kinfo1.3, ansfast)
+        // + 4 kaq + 2 fgs + 2 emul presets.
+        assert_eq!(fps.len(), 18, "probe registry size drifted");
+        // And the parser round-trips each scalar probe exactly (the
+        // resolve_verified contract: id → variant → identical fp).
+        for (fp, id) in &fps {
+            let cell_id = format!("{id}_q85");
+            let mut v = match variant_from_cell_id(&cell_id).unwrap() {
+                SweepVariant::Lossy(v) => v,
+                SweepVariant::Lossless(_) => unreachable!(),
+            };
+            v.distance = 1.0; // pin back to the probe distance
+            assert_eq!(
+                fingerprint(&SweepVariant::Lossy(v)),
+                *fp,
+                "parser/renderer drift for {id}"
+            );
         }
     }
 

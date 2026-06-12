@@ -257,6 +257,43 @@ quality-vs-distance alias pairs are byte-identical on real encodes,
 (sequential build), `smart_fanout` is byte-neutral at e8, and lossless
 e7/e8 round-trip exactly on all seven corpus images.
 
+### Scalar-axis ladders (2026-06-12)
+
+The dense-sweep program gaps (zenmetrics `docs/PLAN_SWEEPS.md` §5 —
+fingerprinted knobs with no curated axis) closed with eight new
+internal-probe registry entries, all riding the existing id grammar /
+parser / budget-ladder machinery:
+
+- **`k_ac_quant` (SCALAR)**: `kaq0.575 / kaq0.65 / kaq0.88 / kaq1`
+  around the 0.765 libjxl default. 0.65 is the measured jxl-encoder#25
+  flip value (ruled out as a *default*, sanctioned as the follow-on C
+  learned-dispatch axis — these cells are its training data); the rest
+  extend log-≈symmetrically with the aggressive end as dense as the
+  refine end. Harness liveness: 100 % of 42 cells per probe change
+  bytes, monotone direction (mean Δbytes −9.1 % → +11.3 %, mean Δssim2
+  −2.67 → +3.55 across the ladder).
+- **`fine_grained_step` (SCALAR)**: `fgs1` (the shipped e10 value) and
+  `fgs3` (smallest live coarser value); jxl-encoder#43 chunk 2d axis.
+  **Structural-no-op finding (pattern 10, new instance)**: the knob's
+  only consumer is the non-aligned 32×32-class pass, whose
+  `(cy|cx) % 4 == 0` alignment skip discards every position a
+  multiple-of-4 step visits — `fgs4`/`fgs8` would be byte-identical to
+  `non_aligned_eval = false` despite sitting inside the documented
+  1..=8 validation range. The modes_full test pins "in 1..=8 and never
+  a multiple of 4". Liveness: fgs1 38 %, fgs3 55 % of cells differ.
+- **`entropy_mul_table` presets**: `emulscreen`
+  (`screenshot_suppressed()`, the GPU-bisected screen-content lift,
+  default-off pending exactly this kind of wider sweep) and `emulsmooth`
+  (`high_d_photo_smooth_suppressed()`, the W44-29 16/32-class
+  lowering) join `emulexp`. As raw overrides they apply unconditionally
+  — the production content-aware gates live elsewhere — which is what a
+  cost-model sweep wants. Liveness: 50 % / 38 %.
+
+Harness re-run fully green (`ALL HARD CHECKS PASSED`, 1498 cells,
+`benchmarks/sweep_validate_jxl_2026-06-12.tsv`); the two soft WARNs
+(lossy e9-vs-e5 mean bytes, fd4 cost) pre-date this change and involve
+none of the new axes.
+
 ## Known limits / open items
 
 - **jxl-encoder#68 is fully fixed upstream** (`5eefe5f7` + `329f207d`,
