@@ -2,14 +2,15 @@
 # See: https://github.com/cross-rs/cross
 #
 # The sibling volume mounts are temporary — required while the
-# [patch.crates-io] entries in Cargo.toml point at the ../jxl-encoder and
-# ../zenjpeg sibling checkouts (jxl-encoder 0.3.2 / zenjpeg 0.8.7 are not
-# yet on crates.io). Once the chain publishes, the patch section and these
-# volume entries both go away.
+# [patch.crates-io] entries in Cargo.toml point at the ../jxl-encoder,
+# ../zenjpeg, and ../zenjxl-decoder sibling checkouts (jxl-encoder 0.3.2 /
+# zenjpeg 0.8.7 / the zenjxl-decoder reject_progressive gate are not yet on
+# crates.io). Once the chain publishes, the patch section and these volume
+# entries both go away.
 
 [build.env]
 passthrough = [
     "RUST_BACKTRACE",
     "RUST_LOG",
 ]
-volumes = ["JXL_ENCODER_DIR", "ZENJPEG_DIR"]
+volumes = ["JXL_ENCODER_DIR", "ZENJPEG_DIR", "ZENJXL_DECODER_DIR"]

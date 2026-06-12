@@ -30,6 +30,7 @@ jobs:
         run: |
           git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder
           git clone --depth 1 --branch main https://github.com/imazen/zenjpeg ../zenjpeg
+          git clone --depth 1 --branch main https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Check (no default features)
@@ -85,6 +86,7 @@ jobs:
         run: |
           git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder
           git clone --depth 1 --branch main https://github.com/imazen/zenjpeg ../zenjpeg
+          git clone --depth 1 --branch main https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: i686-unknown-linux-gnu
@@ -99,6 +101,7 @@ jobs:
           # project dir by default; volumes in Cross.toml extend that.
           JXL_ENCODER_DIR: ${{ github.workspace }}/../jxl-encoder
           ZENJPEG_DIR: ${{ github.workspace }}/../zenjpeg
+          ZENJXL_DECODER_DIR: ${{ github.workspace }}/../zenjxl-decoder
         run: cross test --target i686-unknown-linux-gnu --no-default-features
 
   wasm:
@@ -111,6 +114,7 @@ jobs:
         run: |
           git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder
           git clone --depth 1 --branch main https://github.com/imazen/zenjpeg ../zenjpeg
+          git clone --depth 1 --branch main https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip1
@@ -128,6 +132,7 @@ jobs:
         run: |
           git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder
           git clone --depth 1 --branch main https://github.com/imazen/zenjpeg ../zenjpeg
+          git clone --depth 1 --branch main https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -164,6 +169,7 @@ jobs:
         run: |
           git clone --depth 1 --branch main https://github.com/imazen/jxl-encoder ../jxl-encoder
           git clone --depth 1 --branch main https://github.com/imazen/zenjpeg ../zenjpeg
+          git clone --depth 1 --branch main https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
