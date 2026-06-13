@@ -817,6 +817,17 @@ mod encoding {
             let (color_encoding, embed_icc) = self.resolve_jxl_color(layout);
             let jxl_meta = self.build_jxl_metadata(embed_icc);
 
+            // Thread the caller's memory budget into the encoder. Without this
+            // the encoder applies its default ~2 GiB budget, which large HDR
+            // frames (≥12 MP at 16-bit) blow through (`memory budget exceeded`).
+            // `ResourceLimits::max_memory_bytes` (e.g. set high for a trusted
+            // batch sweep) → `jxl_encoder::Limits`.
+            let jxl_limits = self
+                .limits
+                .as_ref()
+                .and_then(|l| l.max_memory_bytes)
+                .map(|b| jxl_encoder::Limits::default().with_max_memory_bytes(b));
+
             let encode = |req: jxl_encoder::EncodeRequest<'_>| -> Result<Vec<u8>, At<JxlError>> {
                 let req = if let Some(ref ce) = color_encoding {
                     req.with_color_encoding(ce.clone())
@@ -825,6 +836,11 @@ mod encoding {
                 };
                 let req = if let Some(ref meta) = jxl_meta {
                     req.with_metadata(meta)
+                } else {
+                    req
+                };
+                let req = if let Some(ref lim) = jxl_limits {
+                    req.with_limits(lim)
                 } else {
                     req
                 };
