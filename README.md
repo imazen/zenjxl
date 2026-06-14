@@ -20,14 +20,27 @@ let jxl_bytes: &[u8] = &std::fs::read("photo.jxl").unwrap();
 let info = probe(jxl_bytes).unwrap();
 println!("{}x{}, alpha={}, gray={}", info.width, info.height, info.has_alpha, info.is_gray);
 
-// Full decode with resource limits.
+// Full decode with resource limits. The 3rd arg is a pixel-format preference
+// list (`&[zenpixels::PixelDescriptor]`); `&[]` lets the decoder pick natively.
 let limits = JxlLimits {
-    max_pixels: Some(100_000_000),
+    max_pixels: Some(120_000_000),                  // 108 MP photos are common
     max_memory_bytes: Some(2 * 1024 * 1024 * 1024),
 };
 let output = decode(jxl_bytes, Some(&limits), &[]).unwrap();
-let pixels = output.pixels; // PixelBuffer (zenpixels)
+
+// `output.pixels` is a `zenpixels::PixelBuffer` in the image's NATIVE format
+// (opaque → RGB8, with alpha → RGBA8). Normalize to packed RGBA8 bytes with the
+// `zenpixels-convert` extension trait:
+use zenpixels_convert::PixelBufferConvertTypedExt;
+let rgba: Vec<u8> = output.pixels.to_rgba8().copy_to_contiguous_bytes(); // w*h*4, R,G,B,A
 ```
+
+**Dependencies & errors.** Besides `zenjxl`, add `zenpixels` (`PixelBuffer`/
+`PixelDescriptor`), `zenpixels-convert` (the `.to_rgba8()` trait), and `enough`
+(cancellation). `decode`/`probe`/`encode_*` return `Result<_, whereat::At<E>>`
+(`At<JxlError>`): the `At<…>` adds a build-time source location for logs —
+get the underlying error with `err.error()` (borrow) or `err.into_inner()`
+(owned), then match the [`JxlError`] enum.
 
 ### Encode
 
