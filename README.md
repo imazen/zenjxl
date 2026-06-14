@@ -39,8 +39,9 @@ let rgba: Vec<u8> = output.pixels.to_rgba8().copy_to_contiguous_bytes(); // w*h*
 `PixelDescriptor`), `zenpixels-convert` (the `.to_rgba8()` trait), and `enough`
 (cancellation). `decode`/`probe`/`encode_*` return `Result<_, whereat::At<E>>`
 (`At<JxlError>`): the `At<…>` adds a build-time source location for logs —
-get the underlying error with `err.error()` (borrow) or `err.into_inner()`
-(owned), then match the [`JxlError`] enum.
+get the underlying error with `err.error()` (borrow) or `err.decompose().0`
+(owned), then match the [`JxlError`] enum (it is `#[non_exhaustive]`, so keep a
+wildcard arm).
 
 ### Encode
 
