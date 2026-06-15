@@ -38,10 +38,28 @@ let rgba: Vec<u8> = output.pixels.to_rgba8().copy_to_contiguous_bytes(); // w*h*
 **Dependencies & errors.** Besides `zenjxl`, add `zenpixels` (`PixelBuffer`/
 `PixelDescriptor`), `zenpixels-convert` (the `.to_rgba8()` trait), and `enough`
 (cancellation). `decode`/`probe`/`encode_*` return `Result<_, whereat::At<E>>`
-(`At<JxlError>`): the `At<…>` adds a build-time source location for logs —
-get the underlying error with `err.error()` (borrow) or `err.decompose().0`
-(owned), then match the [`JxlError`] enum (it is `#[non_exhaustive]`, so keep a
-wildcard arm).
+(`At<JxlError>`): the `At<…>` adds a build-time source location for logs — read
+it with `err.location()` (`Option<&Location>`, giving `file()`/`line()`). Get the
+underlying error with `err.error()` (borrow) or `err.decompose().0` (owned), then
+match the [`JxlError`] enum (it is `#[non_exhaustive]`, so keep a wildcard arm).
+
+**Cancellation.** `decode_with_options(data, limits, preferred, parallel, stop)`
+adds a cancellation token. `parallel: Option<bool>` toggles multithreaded decode
+(`None` = default); `stop: Option<Arc<dyn enough::Stop>>` is the token. Build a
+real one with `almost_enough::Stopper` (`cargo add almost-enough`):
+
+```rust
+use std::sync::Arc;
+use zenjxl::{decode_with_options, JxlLimits};
+
+let stopper = almost_enough::Stopper::new();
+let watcher = stopper.clone(); // Stopper is Clone; shares the cancel flag
+std::thread::spawn(move || watcher.cancel()); // e.g. on a deadline / client disconnect
+
+let limits = JxlLimits { max_pixels: Some(120_000_000), max_memory_bytes: Some(2 * 1024 * 1024 * 1024) };
+let stop: Arc<dyn enough::Stop> = Arc::new(stopper);
+let output = decode_with_options(jxl_bytes, Some(&limits), &[], None, Some(stop))?;
+```
 
 ### Encode
 
