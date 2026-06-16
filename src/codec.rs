@@ -24,6 +24,7 @@ use zenpixels::PixelDescriptor;
 
 #[cfg(any(feature = "encode", feature = "decode"))]
 use crate::error::JxlError;
+use whereat::ResultAtExt;
 
 #[cfg(any(feature = "encode", feature = "decode"))]
 type At<E> = whereat::At<E>;
@@ -865,8 +866,7 @@ mod encoding {
                 } else {
                     req
                 };
-                req.encode(data)
-                    .map_err(|e| whereat::at!(JxlError::Encode(e.decompose().0)))
+                req.encode(data).map_err_at(JxlError::Encode)
             };
 
             match &self.mode {
@@ -1333,10 +1333,10 @@ mod encoding {
             let encoded = match &self.mode {
                 JxlEncMode::Lossy(cfg) => cfg
                     .encode_animation(self.width, self.height, layout, &animation, &anim_frames)
-                    .map_err(|e| whereat::at!(JxlError::Encode(e.decompose().0)))?,
+                    .map_err_at(JxlError::Encode)?,
                 JxlEncMode::Lossless(cfg) => cfg
                     .encode_animation(self.width, self.height, layout, &animation, &anim_frames)
-                    .map_err(|e| whereat::at!(JxlError::Encode(e.decompose().0)))?,
+                    .map_err_at(JxlError::Encode)?,
             };
 
             let encoded = self.wrap_with_metadata_and_gain_map(encoded);
@@ -2441,9 +2441,7 @@ mod decoding {
 
             // Parse header
             let mut input: &[u8] = &self.data;
-            let result = decoder
-                .process(&mut input)
-                .map_err(|e| whereat::at!(JxlError::Decode(e)))?;
+            let result = decoder.process(&mut input).map_err_at(JxlError::from)?;
             let mut decoder = match result {
                 ProcessingResult::Complete { result } => result,
                 ProcessingResult::NeedsMoreInput { .. } => {
@@ -2545,7 +2543,7 @@ mod decoding {
                 // surface the dedicated `JxlError::ProgressiveRejected`.
                 let result = decoder
                     .process(&mut input)
-                    .map_err(|e| whereat::at!(map_err(e)))?;
+                    .map_err(|e| e.map_error(map_err))?;
                 let decoder_fi = match result {
                     ProcessingResult::Complete { result } => result,
                     ProcessingResult::NeedsMoreInput { .. } => break,
@@ -2560,7 +2558,7 @@ mod decoding {
 
                 let result = decoder_fi
                     .process(&mut input, &mut [output])
-                    .map_err(|e| whereat::at!(map_err(e)))?;
+                    .map_err(|e| e.map_error(map_err))?;
                 let next_decoder = match result {
                     ProcessingResult::Complete { result } => result,
                     ProcessingResult::NeedsMoreInput { .. } => {

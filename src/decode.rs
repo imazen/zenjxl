@@ -629,7 +629,7 @@ pub(crate) fn probe_with_orientation(
     let mut input = data;
     let result = decoder
         .process(&mut input)
-        .map_err(|e| whereat::at!(map_err(e)))?;
+        .map_err(|e| e.map_error(map_err))?;
     let decoder = match result {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
@@ -804,7 +804,7 @@ pub(crate) fn decode_with_options_oriented(
     let mut input = data;
     let result = decoder
         .process(&mut input)
-        .map_err(|e| whereat::at!(map_err(e)))?;
+        .map_err(|e| e.map_error(map_err))?;
     let mut decoder = match result {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
@@ -871,7 +871,7 @@ pub(crate) fn decode_with_options_oriented(
     // Phase 2: frame info
     let result = decoder
         .process(&mut input)
-        .map_err(|e| whereat::at!(map_err(e)))?;
+        .map_err(|e| e.map_error(map_err))?;
     let decoder = match result {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
@@ -889,7 +889,7 @@ pub(crate) fn decode_with_options_oriented(
     let output = JxlOutputBuffer::new(&mut buf, height, bytes_per_row);
     let result = decoder
         .process(&mut input, &mut [output])
-        .map_err(|e| whereat::at!(map_err(e)))?;
+        .map_err(|e| e.map_error(map_err))?;
     let mut final_decoder = match result {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
