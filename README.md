@@ -6,6 +6,22 @@ zenjxl-decoder is Imazen's fork of jxl-rs with additional metadata extraction, g
 
 `#![forbid(unsafe_code)]`, `no_std + alloc`, edition 2024.
 
+## Install
+
+```toml
+[dependencies]
+zenjxl = "0.2.1"
+```
+
+To read decoded pixels back out as packed RGBA8 bytes (see the Decode example),
+also add the pixel crates and — for cancellation — `almost-enough`:
+
+```toml
+zenpixels = "0.2.13"           # PixelBuffer / PixelDescriptor (returned by decode)
+zenpixels-convert = "0.2.13"   # the `.to_rgba8()` extension trait
+almost-enough = "0.4.4"        # a ready-made cancellation token (optional)
+```
+
 ## Quick start
 
 ### Decode
@@ -33,6 +49,14 @@ let output = decode(jxl_bytes, Some(&limits), &[]).unwrap();
 // `zenpixels-convert` extension trait:
 use zenpixels_convert::PixelBufferConvertTypedExt;
 let rgba: Vec<u8> = output.pixels.to_rgba8().copy_to_contiguous_bytes(); // w*h*4, R,G,B,A
+
+// Need the bytes in their native layout instead? Read them straight off the
+// PixelBuffer — no conversion crate required. `descriptor()` tells you the layout
+// (e.g. RGB8 vs RGBA8); `width()`/`height()` give the dimensions.
+let (w, h) = (output.pixels.width(), output.pixels.height());
+let desc = output.pixels.descriptor();              // PixelDescriptor: channels + bit depth
+let native: Vec<u8> = output.pixels.into_vec();      // owned, tightly packed, w*h*desc.bytes_per_pixel()
+// (use `output.pixels.contiguous_bytes()` for a borrowing `Cow<[u8]>` instead of an owned Vec.)
 ```
 
 **Dependencies & errors.** Besides `zenjxl`, add `zenpixels` (`PixelBuffer`/
@@ -64,17 +88,33 @@ let output = decode_with_options(jxl_bytes, Some(&limits), &[], None, Some(stop)
 ### Encode
 
 ```rust
-use zenjxl::{encode_rgb8, encode_rgb8_lossless, calibrated_jxl_quality};
+use zenjxl::{LossyConfig, LosslessConfig, PixelLayout, calibrated_jxl_quality, quality_to_distance};
 
-let rgb: &[u8] = &[0u8; 256 * 256 * 3]; // RGB pixels
+let rgb: &[u8] = &[0u8; 256 * 256 * 3]; // packed RGB8 pixels
 
-// Lossy encode -- calibrated_jxl_quality maps 0..=100 to JXL distance.
-let distance = calibrated_jxl_quality(85);
-let lossy = encode_rgb8(rgb, 256, 256, distance).unwrap();
+// Lossy. JXL is parameterized by butteraugli *distance*, where LOWER = better
+// (0.0 = mathematically lossless, ~1.0 = visually lossless, larger = smaller file).
+// Map a 0..=100 quality to a distance with the calibrated chain:
+//   calibrated_jxl_quality(generic_q) -> native JXL quality (0..=100),
+//   quality_to_distance(native_q)     -> butteraugli distance.
+let distance = quality_to_distance(calibrated_jxl_quality(85.0));
+let lossy = LossyConfig::new(distance)
+    .encode(rgb, 256, 256, PixelLayout::Rgb8)
+    .unwrap();
 
-// Lossless encode.
-let lossless = encode_rgb8_lossless(rgb, 256, 256).unwrap();
+// Lossless.
+let lossless = LosslessConfig::new()
+    .encode(rgb, 256, 256, PixelLayout::Rgb8)
+    .unwrap();
 ```
+
+`PixelLayout` also covers `Rgba8`, `Bgra8`, and `Gray8` (plus 16-bit and
+linear-f32 variants). `quality_to_distance` alone maps quality straight to
+distance; `calibrated_jxl_quality` first re-maps a libjpeg-turbo-style quality
+onto JXL's native quality scale so a given number lands at the same perceptual
+level it would in a JPEG encoder. Convenience wrappers
+(`encode_rgb8`/`encode_rgba8`/…) exist for the [`imgref`](https://docs.rs/imgref)
+`ImgRef<rgb::Rgb<u8>>` pixel types if you already hold those.
 
 ## Features
 
@@ -99,8 +139,9 @@ let lossless = encode_rgb8_lossless(rgb, 256, 256).unwrap();
 
 ## Limitations
 
-- Not published to crates.io. Depend on it via git or path.
-- Encoder is u8-only for the convenience API. The zencodec path supports wider bit depths.
+- The `encode_rgb8`/`encode_rgba8`/… convenience wrappers are u8-only. The
+  `LossyConfig`/`LosslessConfig` `encode()` path and the zencodec adapter support
+  wider bit depths (16-bit and linear-f32 layouts via `PixelLayout`).
 - zenjxl-decoder does not yet support all JPEG XL features (e.g., some edge cases in progressive decoding).
 
 ## Image tech I maintain
