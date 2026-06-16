@@ -24,6 +24,9 @@ use zenpixels::PixelDescriptor;
 
 #[cfg(any(feature = "encode", feature = "decode"))]
 use crate::error::JxlError;
+// `map_err_at` is only called inside the `encode`/`decode` modules; gate the
+// import to match so the `zencodec`-only build doesn't see it as unused.
+#[cfg(any(feature = "encode", feature = "decode"))]
 use whereat::ResultAtExt;
 
 #[cfg(any(feature = "encode", feature = "decode"))]
