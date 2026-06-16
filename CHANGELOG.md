@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Documentation
+- README: documented how to read pixels back out of the decoded `PixelBuffer`
+  (the `zenpixels-convert` `to_rgba8().copy_to_contiguous_bytes()` chain for
+  packed RGBA8, plus `into_vec()`/`contiguous_bytes()`/`descriptor()` for the
+  native layout); added an **Install** section (`zenjxl = "0.2.1"` — the crate
+  is published, the old "not published to crates.io" note was wrong); fixed the
+  **Encode** example, which never compiled (`encode_rgb8(rgb, w, h, distance)`
+  is not a real signature — the convenience fns take an `imgref::ImgRef`) by
+  switching it to the raw-bytes `LossyConfig`/`LosslessConfig` `encode(pixels,
+  w, h, PixelLayout)` path; and stated the JXL **distance** convention
+  (LOWER = better) with the `calibrated_jxl_quality` → `quality_to_distance`
+  mapping. Found via an insulated external-developer usability test of the
+  published 0.2.1 README.
+
 ### Added
 
 - **SCALAR sweep-axis ladders** for the dense-sweep program (zenmetrics
