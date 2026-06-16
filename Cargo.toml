@@ -102,8 +102,8 @@ butteraugli-loop = ["encode", "jxl-encoder/butteraugli-loop"]
 jpeg-lossy = ["encode", "decode", "jxl-encoder/jpeg-reencoding", "dep:zenjpeg", "zenjpeg/decoder"]
 # Expert / unstable: forwards jxl-encoder's `__expert` feature so picker
 # training and codec calibration sweeps can apply
-# `LossyConfig::with_effort_profile_override(EffortProfile)` /
-# `LosslessConfig::with_effort_profile_override(EffortProfile)` through
+# `LossyConfig::with_internal_params(LossyInternalParams)` /
+# `LosslessConfig::with_internal_params(LosslessInternalParams)` through
 # zenjxl's re-exports. Double-underscore prefix signals "private — do
 # not depend on this in production code." Anything in the underlying
 # escape hatch may change without semver bumps.
