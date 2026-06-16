@@ -676,6 +676,20 @@ mod encoding {
                 has_any = true;
             }
 
+            // HDR: forward the content peak (MaxCLL) as JXL's
+            // `intensity_target` — the symmetric inverse of the decode-side
+            // `intensity_target → MaxCLL` mapping, which was otherwise dropped
+            // on encode so HDR peak signaling did not round-trip. (The
+            // `diffuse_white` anchor is the *linear* reference used by
+            // `quantize_to`; JXL signals the *peak*, not SDR white, so the
+            // peak is what flows here.)
+            if let Some(cll) = meta.content_light_level
+                && cll.max_content_light_level > 0
+            {
+                jxl_meta = jxl_meta.with_intensity_target(f32::from(cll.max_content_light_level));
+                has_any = true;
+            }
+
             has_any.then_some(jxl_meta)
         }
 
