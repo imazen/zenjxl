@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Preserve the decoder/encoder `At` trace across the codec boundary** and fix
+  the `E0308` compile error from the `zenjxl-decoder` `At<Error>` bump (decoder
+  `b1be322`: `process()` now returns `Result<_, At<jxl::api::Error>>`). The 7
+  decode sites and 4 encode sites flattened the inner error (`JxlError::Decode(e)`
+  with `e: At<Error>`, or `JxlError::Encode(e.decompose().0)` which dropped the
+  trace). They now use `whereat`'s trace-preserving conversions: the direct
+  decode site and all encode sites use `.map_err_at(JxlError::from)` /
+  `.map_err_at(JxlError::Encode)`; the 6 sites routed through the
+  `ProgressiveRejected`-special-casing `map_err` helper use
+  `.map_err(|e| e.map_error(map_err))` (runs the helper on the inner error while
+  keeping the `At` trace frames). The callee's location frames now survive into
+  `At<JxlError>` instead of being discarded.
+
 ### Documentation
 - README: documented how to read pixels back out of the decoded `PixelBuffer`
   (the `zenpixels-convert` `to_rgba8().copy_to_contiguous_bytes()` chain for

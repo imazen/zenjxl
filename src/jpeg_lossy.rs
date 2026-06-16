@@ -39,6 +39,7 @@ use zenpixels::PixelDescriptor;
 
 use crate::decode::decode;
 use crate::error::JxlError;
+use whereat::ResultAtExt;
 
 type At<E> = whereat::At<E>;
 
@@ -475,5 +476,5 @@ fn encode_pixel(
     cfg.encode_request(w, h, jxl_encoder::PixelLayout::Rgb8)
         .with_metadata(&meta)
         .encode(ref_px)
-        .map_err(|e| whereat::at!(JxlError::Encode(e.decompose().0)))
+        .map_err_at(JxlError::Encode)
 }
