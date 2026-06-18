@@ -70,7 +70,7 @@ jxl-encoder = { version = "0.3.2", default-features = false, features = [
 # Synthesizes a real Display-P3 ICC for the jpeg-lossy color-preservation test
 # (`tests/jpeg_lossy.rs`). Matches the moxcms the jpeg-lossy feature already
 # pulls via zenjpeg, so no extra version in the graph.
-moxcms = { version = "0.8.1" }
+moxcms = { version = ">=0.8.1, <0.10" }
 # SSIMULACRA2 scoring for the sweep-validation harness
 # (examples/sweep_validate.rs).
 fast-ssim2 = "0.8.2"
