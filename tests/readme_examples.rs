@@ -93,7 +93,9 @@ fn decode_with_cancellation() -> Result<(), whereat::At<zenjxl::JxlError>> {
 
 // ── Encode (README "Encode") ────────────────────────────────────────────────
 fn encode_lossy_and_lossless() {
-    use zenjxl::{LosslessConfig, LossyConfig, PixelLayout, calibrated_jxl_quality, quality_to_distance};
+    use zenjxl::{
+        LosslessConfig, LossyConfig, PixelLayout, calibrated_jxl_quality, quality_to_distance,
+    };
 
     let rgb: &[u8] = &[0u8; 256 * 256 * 3]; // packed RGB8 pixels
 
