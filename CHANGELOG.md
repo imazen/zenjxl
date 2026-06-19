@@ -17,6 +17,13 @@
   `At<JxlError>` instead of being discarded.
 
 ### Documentation
+- README: fixed the decode/error snippets so they compile against the real API
+  (closes #9) — replaced the non-existent `err.location()` with `err.full_trace()`
+  and the non-existent `PixelBuffer::contiguous_bytes()` with
+  `as_contiguous_bytes()`, and documented that `max_memory_bytes` also caps the
+  decoder's live allocations (not just the output-size estimate). Added
+  `tests/readme_examples.rs`, a CI-exercised compile-check of every README
+  snippet so they can't silently rot again.
 - README: documented how to read pixels back out of the decoded `PixelBuffer`
   (the `zenpixels-convert` `to_rgba8().copy_to_contiguous_bytes()` chain for
   packed RGBA8, plus `into_vec()`/`contiguous_bytes()`/`descriptor()` for the

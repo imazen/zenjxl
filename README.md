@@ -56,16 +56,27 @@ let rgba: Vec<u8> = output.pixels.to_rgba8().copy_to_contiguous_bytes(); // w*h*
 let (w, h) = (output.pixels.width(), output.pixels.height());
 let desc = output.pixels.descriptor();              // PixelDescriptor: channels + bit depth
 let native: Vec<u8> = output.pixels.into_vec();      // owned, tightly packed, w*h*desc.bytes_per_pixel()
-// (use `output.pixels.contiguous_bytes()` for a borrowing `Cow<[u8]>` instead of an owned Vec.)
+// (use `output.pixels.as_contiguous_bytes()` — `Option<&[u8]>`, `Some` only when rows
+// are unpadded — to borrow instead of taking an owned Vec.)
 ```
+
+**Limits.** `max_pixels` and `max_memory_bytes` both gate up front: before any
+frame is decoded the wrapper rejects the image if `width * height` exceeds
+`max_pixels`, or if the `width * height * bytes_per_pixel` output estimate
+exceeds `max_memory_bytes`. `max_memory_bytes` is *also* forwarded to the
+decoder's internal memory tracker, which bounds allocations during the decode
+itself — so it caps both the early estimate and the live decode, not just the
+output buffer. Pass `None` for `limits` to use the decoder's built-in defaults.
 
 **Dependencies & errors.** Besides `zenjxl`, add `zenpixels` (`PixelBuffer`/
 `PixelDescriptor`), `zenpixels-convert` (the `.to_rgba8()` trait), and `enough`
 (cancellation). `decode`/`probe`/`encode_*` return `Result<_, whereat::At<E>>`
-(`At<JxlError>`): the `At<…>` adds a build-time source location for logs — read
-it with `err.location()` (`Option<&Location>`, giving `file()`/`line()`). Get the
-underlying error with `err.error()` (borrow) or `err.decompose().0` (owned), then
-match the [`JxlError`] enum (it is `#[non_exhaustive]`, so keep a wildcard arm).
+(`At<JxlError>`): the `At<…>` adds a build-time source location for logs — print
+the error with its captured frames via `err.full_trace()` (a `Display`, e.g.
+`println!("{}", err.full_trace())`). Get the underlying error with `err.error()`
+(borrow) or `err.decompose().0` (owned — `decompose` also hands back the trace),
+then match the [`JxlError`] enum (it is `#[non_exhaustive]`, so keep a wildcard
+arm).
 
 **Cancellation.** `decode_with_options(data, limits, preferred, parallel, stop)`
 adds a cancellation token. `parallel: Option<bool>` toggles multithreaded decode

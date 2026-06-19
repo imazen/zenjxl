@@ -59,6 +59,9 @@ zenjpeg = { path = "../zenjpeg/zenjpeg" }
 zenjxl-decoder = { path = "../zenjxl-decoder/zenjxl-decoder" }
 
 [dev-dependencies]
+# Concrete `enough::Stop` token for the README cancellation example
+# (tests/readme_examples.rs compiles the documented snippets).
+almost-enough = "0.4.4"
 archmage = { version = "0.9.19", features = ["std"] }
 # Builds the jhgm gain-map fixture for tests/gain_map_render.rs
 # (GainMapBundle + append_gain_map_bundle).
