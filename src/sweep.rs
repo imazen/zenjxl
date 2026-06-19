@@ -451,6 +451,59 @@ impl LossyAxes {
         axes.internal.extend(lossy_internal_probes());
         axes
     }
+
+    /// Dense, isolated ladders over the lossy CONTINUOUS knobs — the data
+    /// a trained **scalar head** needs (VARIANT_GENERATION pattern 17).
+    /// Every categorical axis is pinned to its default; the continuous
+    /// axes get dense ladders:
+    ///
+    /// - the **full effort ladder e1–e10** — effort is the compute dial,
+    ///   and `modes_full` only carries `{7,5,9,3,10}` (it skips
+    ///   `e4`/`e6`/`e8`); a per-effort cost/quality head needs every
+    ///   step, so the gap is filled here. Effort is also the
+    ///   [`compute_tier`], so this is the dense *compute* axis too.
+    /// - `k_ac_quant` — 8 pts log-≈symmetric around the 0.765 default
+    ///   (default omitted; it aliases the default cell).
+    /// - `fine_grained_step` — the live values (1, 3).
+    ///
+    /// Pair with [`SweepBuilder::with_max_deviations`]`(1)` for one
+    /// isolated ladder per knob across the quality grid.
+    #[must_use]
+    pub fn scalar_dense() -> Self {
+        let mut internal = vec![NamedLossyParams::default_probe()];
+        for (label, v) in [
+            ("kaq0.5", 0.5f32),
+            ("kaq0.575", 0.575),
+            ("kaq0.65", 0.65),
+            ("kaq0.7", 0.7),
+            ("kaq0.88", 0.88),
+            ("kaq1", 1.0),
+            ("kaq1.15", 1.15),
+            ("kaq1.31", 1.31),
+        ] {
+            let mut p = LossyInternalParams::default();
+            p.k_ac_quant = Some(v);
+            internal.push(NamedLossyParams::new(label, p));
+        }
+        for (label, v) in [("fgs1", 1u8), ("fgs3", 3)] {
+            let mut p = LossyInternalParams::default();
+            p.fine_grained_step = Some(v);
+            internal.push(NamedLossyParams::new(label, p));
+        }
+        Self {
+            // Default 7 first, then the dense ladder (e1–e10 minus 7).
+            efforts: vec![7, 1, 2, 3, 4, 5, 6, 8, 9, 10],
+            strategies: vec![EncoderStrategy::Zenjxl],
+            encoder_modes: vec![EncoderMode::Reference],
+            internal,
+            gaborish: vec![None],
+            epf_levels: vec![-1],
+            progressive: vec![ProgressiveMode::Single],
+            noise: vec![false],
+            faster_decoding: vec![0],
+            ans: vec![None],
+        }
+    }
 }
 
 /// The curated single-knob lossy internal-params probes (provenance in
@@ -611,6 +664,22 @@ impl LosslessAxes {
         axes.internal.extend(lossless_internal_probes());
         axes
     }
+
+    /// Dense effort ladder (e1–e10) for the lossless compute/bytes scalar
+    /// head, everything else default (VARIANT_GENERATION pattern 17).
+    /// Lossless pixels are exact, so the scalar of interest is purely
+    /// bytes-vs-CPU per effort; effort is also the [`compute_tier`].
+    #[must_use]
+    pub fn scalar_dense() -> Self {
+        Self {
+            efforts: vec![7, 1, 2, 3, 4, 5, 6, 8, 9, 10],
+            encoder_modes: vec![EncoderMode::Reference],
+            internal: vec![NamedLosslessParams::default_probe()],
+            predictors: vec![None],
+            group_size_shifts: vec![None],
+            faster_decoding: vec![0],
+        }
+    }
 }
 
 /// The curated single-knob lossless internal-params probes (provenance
@@ -679,6 +748,18 @@ impl SweepAxes {
         Self {
             lossy: Some(LossyAxes::modes_full()),
             lossless: Some(LosslessAxes::modes_full()),
+        }
+    }
+
+    /// Dense isolated scalar ladders for both modes (pattern 17): the
+    /// full effort ladder for each, plus lossy `k_ac_quant` /
+    /// `fine_grained_step`. Pair with
+    /// [`SweepBuilder::with_max_deviations`]`(1)`.
+    #[must_use]
+    pub fn scalar_dense() -> Self {
+        Self {
+            lossy: Some(LossyAxes::scalar_dense()),
+            lossless: Some(LosslessAxes::scalar_dense()),
         }
     }
 }
@@ -806,6 +887,11 @@ pub struct SweepPlan {
     /// Stratum/cell ids rejected by jxl-encoder `validate()` (or by a
     /// non-positive resolved distance).
     pub invalid_skipped: Vec<String>,
+    /// Cell ids dropped because their [`compute_tier`] (the effort level)
+    /// exceeded the [`SweepBuilder::with_compute_limit`] budget — the
+    /// explicit no-silent-caps report for the compute constraint (empty
+    /// when no limit was set).
+    pub compute_tier_skipped: Vec<String>,
     /// Mode axes collapsed to fit the budget — the explicit
     /// no-silent-caps report.
     pub dropped: Vec<DroppedAxis>,
@@ -829,6 +915,25 @@ impl SweepPlan {
 }
 
 // ============================================================================
+// Compute-resource tier
+// ============================================================================
+
+/// Compute-cost tier of a variant (higher = more CPU per encode). Used
+/// by [`SweepBuilder::with_compute_limit`] to bound a sweep by compute
+/// budget, and public so the fleet and pickers can constrain candidates
+/// the same way (cf. zenavif `auto_tune`'s speed range). For JPEG XL the
+/// tier **is the effort level** (1–10) — the single dial that drives the
+/// per-effort encoder schedules — for both lossy and lossless, so
+/// `with_compute_limit(5)` is literally "sweep `e ≤ 5`".
+#[must_use]
+pub fn compute_tier(variant: &SweepVariant) -> u8 {
+    match variant {
+        SweepVariant::Lossy(v) => v.effort,
+        SweepVariant::Lossless(v) => v.effort,
+    }
+}
+
+// ============================================================================
 // Builder
 // ============================================================================
 
@@ -839,6 +944,8 @@ pub struct SweepBuilder {
     axes: SweepAxes,
     grid: QualityGrid,
     budget: Option<usize>,
+    compute_limit: Option<u8>,
+    max_deviations: Option<u8>,
 }
 
 impl SweepBuilder {
@@ -850,6 +957,8 @@ impl SweepBuilder {
             axes,
             grid,
             budget: None,
+            compute_limit: None,
+            max_deviations: None,
         }
     }
 
@@ -868,6 +977,62 @@ impl SweepBuilder {
         self
     }
 
+    /// Constrain the plan to cells whose [`compute_tier`] (the effort
+    /// level) is `<= max_tier`, dropping the more expensive cells
+    /// (recorded in [`SweepPlan::compute_tier_skipped`], never silently).
+    /// For JPEG XL this is exactly "sweep `e <= max_tier`" — the dense
+    /// effort ladder in [`SweepAxes::scalar_dense`] stays, capped at the
+    /// budget. Composes with [`with_budget`](Self::with_budget) (compute
+    /// filter first, then the budget ladder reduces the survivors).
+    #[must_use]
+    pub fn with_compute_limit(mut self, max_tier: u8) -> Self {
+        self.compute_limit = Some(max_tier);
+        self
+    }
+
+    /// Keep only cells within `max_deviations` axes of their mode's
+    /// default stratum. `1` = main-effects only (the default cell plus
+    /// every single-axis probe, no interaction combos) — the
+    /// isolated-axis regime a trained **scalar head** trains on. Pair
+    /// with [`SweepAxes::scalar_dense`] for dense per-knob response
+    /// curves without the cartesian blow-up of the full cross.
+    #[must_use]
+    pub fn with_max_deviations(mut self, max_deviations: u8) -> Self {
+        self.max_deviations = Some(max_deviations);
+        self
+    }
+
+    /// Cross + apply the user constraints (compute-tier limit, then
+    /// deviation scope). Returns `(cells, invalid_skipped,
+    /// duplicates_merged, compute_tier_skipped)`.
+    fn build_cells(
+        &self,
+        axes: &SweepAxes,
+        q_points: &[(Option<f32>, f32)],
+    ) -> (Vec<SweepCell>, Vec<String>, usize, Vec<String>) {
+        let (mut cells, invalid_skipped, duplicates_merged) = cross(axes, q_points);
+        let mut compute_tier_skipped = Vec::new();
+        if let Some(max_tier) = self.compute_limit {
+            cells.retain(|c| {
+                if compute_tier(&c.variant) <= max_tier {
+                    true
+                } else {
+                    compute_tier_skipped.push(c.id.clone());
+                    false
+                }
+            });
+        }
+        if let Some(max_dev) = self.max_deviations {
+            cells.retain(|c| c.deviations <= max_dev);
+        }
+        (
+            cells,
+            invalid_skipped,
+            duplicates_merged,
+            compute_tier_skipped,
+        )
+    }
+
     /// Build the plan.
     #[must_use]
     pub fn plan(&self) -> SweepPlan {
@@ -878,7 +1043,8 @@ impl SweepBuilder {
         let mut over_budget = false;
 
         loop {
-            let (cells, invalid_skipped, duplicates_merged) = cross(&axes, &q_points);
+            let (cells, invalid_skipped, duplicates_merged, compute_tier_skipped) =
+                self.build_cells(&axes, &q_points);
 
             let within = match self.budget {
                 None => true,
@@ -888,6 +1054,7 @@ impl SweepBuilder {
                 return SweepPlan {
                     cells,
                     invalid_skipped,
+                    compute_tier_skipped,
                     dropped,
                     duplicates_merged,
                     q_coarsenings,
@@ -916,10 +1083,12 @@ impl SweepBuilder {
 
             // Nothing left to reduce: report rather than sample.
             over_budget = true;
-            let (cells, invalid_skipped, duplicates_merged) = cross(&axes, &q_points);
+            let (cells, invalid_skipped, duplicates_merged, compute_tier_skipped) =
+                self.build_cells(&axes, &q_points);
             return SweepPlan {
                 cells,
                 invalid_skipped,
+                compute_tier_skipped,
                 dropped,
                 duplicates_merged,
                 q_coarsenings,
@@ -1751,6 +1920,81 @@ mod tests {
                 "{bad:?} must be rejected"
             );
         }
+    }
+
+    #[test]
+    fn scalar_dense_fills_effort_ladder_isolated() {
+        use super::*;
+        let plan = SweepBuilder::new(
+            SweepAxes::scalar_dense(),
+            QualityGrid::ExplicitQuality(vec![50.0]),
+        )
+        .with_max_deviations(1)
+        .plan();
+        // Isolation: main-effects only — one clean ladder per knob.
+        assert!(
+            plan.cells.iter().all(|c| c.deviations <= 1),
+            "scalar_dense + max_deviations(1) must be main-effects only"
+        );
+        // Dense effort: the FULL e1..=e10 ladder is present — the
+        // e4/e6/e8 that modes_full skips are filled in for the scalar
+        // head + compute axis.
+        let mut efforts: Vec<u8> = plan
+            .cells
+            .iter()
+            .map(|c| compute_tier(&c.variant))
+            .collect();
+        efforts.sort_unstable();
+        efforts.dedup();
+        for e in 1..=10u8 {
+            assert!(efforts.contains(&e), "scalar_dense missing effort e{e}");
+        }
+    }
+
+    #[test]
+    fn compute_tier_equals_effort() {
+        use super::*;
+        let mk = |e: u8| {
+            SweepVariant::Lossless(LosslessVariant {
+                effort: e,
+                encoder_mode: EncoderMode::Reference,
+                internal: NamedLosslessParams::default_probe(),
+                predictor: None,
+                group_size_shift: None,
+                faster_decoding: 0,
+            })
+        };
+        assert_eq!(compute_tier(&mk(3)), 3);
+        assert!(compute_tier(&mk(9)) > compute_tier(&mk(3)));
+    }
+
+    #[test]
+    fn with_compute_limit_caps_effort_and_reports() {
+        use super::*;
+        let unlimited = SweepBuilder::new(
+            SweepAxes::modes_full(),
+            QualityGrid::ExplicitQuality(vec![75.0]),
+        )
+        .plan();
+        let limited = SweepBuilder::new(
+            SweepAxes::modes_full(),
+            QualityGrid::ExplicitQuality(vec![75.0]),
+        )
+        .with_compute_limit(5)
+        .plan();
+        assert!(!limited.cells.is_empty(), "e ≤ 5 cells must survive");
+        assert!(
+            limited.cells.len() < unlimited.cells.len(),
+            "compute limit must drop the e>5 (e7/e9/e10) cells"
+        );
+        assert!(
+            limited.cells.iter().all(|c| compute_tier(&c.variant) <= 5),
+            "no cell may exceed e5 under with_compute_limit(5)"
+        );
+        assert!(
+            !limited.compute_tier_skipped.is_empty(),
+            "dropped e>5 cells must be reported, never silently capped"
+        );
     }
 
     use super::*;

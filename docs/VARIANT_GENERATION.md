@@ -294,6 +294,28 @@ Harness re-run fully green (`ALL HARD CHECKS PASSED`, 1498 cells,
 (lossy e9-vs-e5 mean bytes, fd4 cost) pre-date this change and involve
 none of the new axes.
 
+### Dense scalar heads + compute budget (2026-06-19)
+
+Adopting the canonical playbook patterns 17–18 (see
+`zenjpeg/docs/VARIANT_GENERATION.md`):
+
+- **`SweepAxes::scalar_dense()`** pins every categorical axis to its
+  default and gives the continuous axes dense isolated ladders: the
+  **full effort ladder e1–e10** (the `e4`/`e6`/`e8` that `modes_full`
+  skips are filled — a per-effort cost/quality scalar head needs every
+  step), the 8-point `k_ac_quant` ladder, and the live
+  `fine_grained_step` values. Pair with
+  **`SweepBuilder::with_max_deviations(1)`** (main-effects only) for one
+  clean per-knob response curve across quality — the
+  `knob × quality → outcome` table a scalar head fits, no cartesian
+  blow-up.
+- **`compute_tier(&SweepVariant)` = the effort level** +
+  **`SweepBuilder::with_compute_limit(max)`**: for JXL the compute tier
+  IS effort, so `with_compute_limit(5)` is exactly "sweep `e ≤ 5`".
+  Dropped cells are reported in `SweepPlan::compute_tier_skipped` (no
+  silent caps); it composes with the budget ladder. This is the lever
+  for "go dense on e4/e5 while staying off the minutes-per-MP e10 tier."
+
 ## Known limits / open items
 
 - **jxl-encoder#68 is fully fixed upstream** (`5eefe5f7` + `329f207d`,

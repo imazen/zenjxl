@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+- **Sweep: `scalar_dense` preset + compute-budget constraint** (`src/sweep.rs`,
+  `encode`+`__expert`; VARIANT_GENERATION patterns 17–18). `SweepAxes::scalar_dense()`
+  emits dense isolated single-axis ladders for trained scalar heads: the **full
+  effort ladder e1–e10** (filling the `e4`/`e6`/`e8` that `modes_full` skips), an
+  8-point `k_ac_quant` ladder, and `fine_grained_step`. New
+  `SweepBuilder::with_max_deviations(1)` keeps main-effects only.
+  `compute_tier(&SweepVariant)` returns the effort level and
+  `SweepBuilder::with_compute_limit(max)` caps a sweep by effort
+  (`with_compute_limit(5)` = "sweep e ≤ 5"), with dropped cells reported in
+  `SweepPlan::compute_tier_skipped`. All additive, behind `__expert`.
+
 ### Fixed
 - **Preserve the decoder/encoder `At` trace across the codec boundary** and fix
   the `E0308` compile error from the `zenjxl-decoder` `At<Error>` bump (decoder
