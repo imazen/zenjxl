@@ -431,7 +431,10 @@ fn decode_rgb8(codestream: &[u8]) -> Result<(Vec<u8>, u32, u32), At<JxlError>> {
 
 #[inline]
 fn encode_coarsen(jpeg_bytes: &[u8], scale: f32, effort: u8) -> Result<Vec<u8>, At<JxlError>> {
-    encode_jpeg_recompress_auto_codestream(jpeg_bytes, scale, effort)
+    // jxl-encoder added optional `limits` + `stop` params (landed on its
+    // main); this path imposes neither, so pass `None, None` (unchanged
+    // behaviour — no resource cap, no cancellation).
+    encode_jpeg_recompress_auto_codestream(jpeg_bytes, scale, effort, None, None)
         .map_err(|e| whereat::at!(JxlError::Encode(jxl_encoder::EncodeError::from(e))))
 }
 
