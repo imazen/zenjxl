@@ -40,6 +40,12 @@ mod validate;
 #[cfg(all(feature = "encode", feature = "__expert"))]
 pub mod sweep;
 
+/// Encode resource estimates (peak memory, time, thread count) — a forwarder
+/// to jxl-encoder's calibrated `heuristics`, so JXL participates in fleet
+/// memory/thread admission control alongside the other zen codecs.
+#[cfg(feature = "encode")]
+pub mod heuristics;
+
 pub use error::JxlError;
 pub use validate::ValidationError;
 
