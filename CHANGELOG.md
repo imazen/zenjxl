@@ -2,7 +2,21 @@
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES
+<!-- Drop when zencodec 0.1.24 publishes. -->
+- Remove the `[patch.crates-io] zencodec = { git, rev = "0f71295" }` pin and
+  re-point the `zencodec` dependency at the published `^0.1.24`. The patch
+  pins zencodec to the unreleased `estimate` API.
+
 ### Added
+- vCPU-aware resource estimation via zencodec's unified `estimate` API:
+  `JxlEncoderConfig::estimate_encode_resources(&ImageCharacteristics, &ComputeEnvironment)`
+  (overrides the `zencodec::EncoderConfig` default, behind the `zencodec`
+  feature) returns a core-adjusted `ResourceEstimate`. Maps `jxl-encoder`'s
+  native `heuristics::estimate_encode` + `encode_threading_info` onto the
+  shared `zencodec::estimate::{ResourceEstimate, ThreadingInformation}` at the
+  boundary — `jxl-encoder` core stays standalone (keeps its own threading
+  model; no zencodec coupling).
 - **Sweep: `scalar_dense` preset + compute-budget constraint** (`src/sweep.rs`,
   `encode`+`__expert`; VARIANT_GENERATION patterns 17–18). `SweepAxes::scalar_dense()`
   emits dense isolated single-axis ladders for trained scalar heads: the **full

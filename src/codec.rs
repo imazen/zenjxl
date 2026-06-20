@@ -512,6 +512,52 @@ mod encoding {
             Some(self.lossless)
         }
 
+        fn estimate_encode_resources(
+            &self,
+            image: &zencodec::estimate::ImageCharacteristics,
+            compute: &zencodec::estimate::ComputeEnvironment,
+        ) -> zencodec::estimate::ResourceEstimate {
+            use zencodec::estimate::{ResourceEstimate, ThreadingInformation};
+            // Read path + effort off the resolved mode — the same
+            // `LossyConfig`/`LosslessConfig` the encode consumes (rebuilt by
+            // every setter, so it already reflects quality→distance
+            // calibration, effort clamping, and upstream defaults).
+            let (is_lossless, effort) = match &self.mode {
+                JxlEncMode::Lossy(c) => (false, c.effort()),
+                JxlEncMode::Lossless(c) => (true, c.effort()),
+            };
+            let descriptor = image.descriptor();
+            let input_bpp = descriptor.bytes_per_pixel() as u8;
+            let has_alpha = descriptor.has_alpha();
+            match jxl_encoder::heuristics::estimate_encode(
+                image.width(),
+                image.height(),
+                input_bpp,
+                has_alpha,
+                is_lossless,
+                effort,
+            ) {
+                Some(e) => {
+                    let ti = jxl_encoder::heuristics::encode_threading_info(is_lossless, effort);
+                    let threading = if ti.parallel {
+                        ThreadingInformation::parallel(
+                            ti.max_useful_threads,
+                            ti.parallel_fraction,
+                            ti.mem_bytes_per_thread,
+                        )
+                    } else {
+                        ThreadingInformation::SERIAL
+                    };
+                    ResourceEstimate::new(e.peak_memory_bytes, e.time_ms)
+                        .with_peak_range(e.peak_memory_bytes_min, e.peak_memory_bytes_max)
+                        .with_output_bytes(e.output_bytes)
+                        .with_threading(threading)
+                        .at_cores(compute.cores())
+                }
+                None => ResourceEstimate::conservative(image).at_cores(compute.cores()),
+            }
+        }
+
         fn job(self) -> JxlEncodeJob {
             JxlEncodeJob {
                 config: self,
