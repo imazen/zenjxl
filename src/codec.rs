@@ -540,17 +540,12 @@ mod encoding {
                 Some(e) => {
                     let ti = jxl_encoder::heuristics::encode_threading_info(is_lossless, effort);
                     let threading = if ti.parallel {
-                        ThreadingInformation::parallel(
-                            ti.max_useful_threads,
-                            ti.parallel_fraction,
-                            ti.mem_bytes_per_thread,
-                        )
+                        ThreadingInformation::parallel(ti.max_useful_threads)
                     } else {
                         ThreadingInformation::SERIAL
                     };
-                    ResourceEstimate::new(e.peak_memory_bytes, e.time_ms)
-                        .with_peak_range(e.peak_memory_bytes_min, e.peak_memory_bytes_max)
-                        .with_output_bytes(e.output_bytes)
+                    ResourceEstimate::new(e.peak_memory_bytes, e.time_ms as u64)
+                        .with_peak_max(e.peak_memory_bytes_max)
                         .with_threading(threading)
                         .at_cores(compute.cores())
                 }

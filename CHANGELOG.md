@@ -2,11 +2,15 @@
 
 ## [Unreleased]
 
-### QUEUED BREAKING CHANGES
-<!-- Drop when zencodec 0.1.24 publishes. -->
-- Remove the `[patch.crates-io] zencodec = { git, rev = "0f71295" }` pin and
-  re-point the `zencodec` dependency at the published `^0.1.24`. The patch
-  pins zencodec to the unreleased `estimate` API.
+### Changed
+- deps: migrate to published zencodec 0.1.24 estimate API; drop the temporary
+  `[patch.crates-io] zencodec = { git, rev = "0f71295" }` pin (the `estimate`
+  API is now on crates.io). The `estimate_encode_resources` mapping in
+  `src/codec.rs` follows the refined `ResourceEstimate` API:
+  `ResourceEstimate::new(peak, time_ms as u64)` (wall_ms is now `u64`),
+  `.with_peak_max(max)` (replaces the dropped `.with_peak_range(min, max)`),
+  the `.with_output_bytes(..)` call is gone, and
+  `ThreadingInformation::parallel(max_efficient_threads)` is now 1-arg.
 
 ### Added
 - vCPU-aware resource estimation via zencodec's unified `estimate` API:
