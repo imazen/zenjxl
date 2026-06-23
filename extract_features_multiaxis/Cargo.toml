@@ -5,7 +5,9 @@ edition = "2024"
 publish = false
 
 [dependencies]
-zenanalyze = { path = "/home/lilith/work/zen/zenanalyze", features = ["experimental", "hdr"] }
+# `api` enables zenanalyze's zenanalyze-api feature contract — the extractor emits
+# qualified `name@hex8` column headers via versioning::feature_qualified_names().
+zenanalyze = { path = "/home/lilith/work/zen/zenanalyze", features = ["experimental", "hdr", "api"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 [profile.release]

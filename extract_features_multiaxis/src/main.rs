@@ -157,14 +157,29 @@ fn main() -> ExitCode {
     };
     eprintln!("manifest: {} entries", entries.len());
 
-    if let Some(parent) = output.parent() {
-        if !parent.as_os_str().is_empty() {
-            let _ = std::fs::create_dir_all(parent);
-        }
+    if let Some(parent) = output.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        let _ = std::fs::create_dir_all(parent);
     }
 
     let cols: Vec<AnalysisFeature> = FeatureSet::SUPPORTED.iter().collect();
     eprintln!("extracting {} features per image", cols.len());
+
+    // Qualified `name@hex8` headers (the zenanalyze-api contract identity) — so the
+    // training data negotiates per-feature reuse and the picker bake carries qualified
+    // columns. Falls back to bare `feat_<name>` for any unversioned feature.
+    let qmap: HashMap<&str, String> = zenanalyze::versioning::feature_qualified_names()
+        .into_iter()
+        .collect();
+    let col_headers: Vec<String> = cols
+        .iter()
+        .map(|c| {
+            qmap.get(c.name())
+                .cloned()
+                .unwrap_or_else(|| format!("feat_{}", c.name()))
+        })
+        .collect();
 
     let f = OpenOptions::new()
         .create(true)
@@ -178,8 +193,8 @@ fn main() -> ExitCode {
         "image_path\timage_sha\tsplit\tcontent_class\tsource\tsize_class\twidth\theight"
     )
     .unwrap();
-    for c in &cols {
-        write!(w, "\tfeat_{}", c.name()).unwrap();
+    for h in &col_headers {
+        write!(w, "\t{h}").unwrap();
     }
     writeln!(w).unwrap();
 
@@ -188,7 +203,7 @@ fn main() -> ExitCode {
     let mut failed = 0usize;
     for (idx, e) in entries.iter().enumerate() {
         let path = corpus_root.join(&e.relative_path);
-        let dyn_img = match ImageReader::open(&path).and_then(|r| Ok(r.decode())) {
+        let dyn_img = match ImageReader::open(&path).map(|r| r.decode()) {
             Ok(Ok(img)) => img,
             _ => {
                 eprintln!("skip (decode fail): {}", path.display());
