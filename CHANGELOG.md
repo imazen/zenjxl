@@ -13,6 +13,24 @@
   `ThreadingInformation::parallel(max_efficient_threads)` is now 1-arg.
 
 ### Added
+- **`AllocPreference` honored at untrusted decode allocations** (3-mode,
+  per-site). The wrapper-owned output buffers — the single-image output buffer
+  (`src/decode.rs`), the per-animation-frame buffer, and the recursive
+  gain-map sub-image buffers (`src/codec.rs`) — are all sized from the
+  untrusted header dimensions, so they default to the *fallible* `try_reserve`
+  path (graceful `JxlError::LimitExceeded` on a forged header) and honor
+  `zencodec::AllocPreference` (`Fallible`/`Infallible` override; `CodecDefault`
+  keeps the site default). Threaded from
+  `ResourceLimits::prefer_fallible_allocations` at the zencodec decode boundary;
+  the direct `decode*` API is unchanged (passes `CodecDefault`). New
+  `src/alloc_util.rs` (the `resolve_fallible`/`alloc_zeroed` 3-mode helpers).
+  The heavy VarDCT/modular pass buffers live in the `zenjxl-decoder`
+  dependency and are out of this preference's reach (deferred follow-up).
+- **`JxlDecoderConfig::estimate_decode_resources`** — overrides the
+  `zencodec::DecoderConfig` default with a JXL-shaped heuristic (output buffer
+  + VarDCT/modular working set + fixed entropy/context overhead), reported
+  SERIAL and core-adjusted via `ResourceEstimate::at_cores`. Mirrors the
+  existing `estimate_encode_resources`.
 - vCPU-aware resource estimation via zencodec's unified `estimate` API:
   `JxlEncoderConfig::estimate_encode_resources(&ImageCharacteristics, &ComputeEnvironment)`
   (overrides the `zencodec::EncoderConfig` default, behind the `zencodec`

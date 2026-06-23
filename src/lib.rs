@@ -15,6 +15,10 @@ extern crate alloc;
 
 whereat::define_at_crate_info!();
 
+// Allocation helpers honoring `zencodec::AllocPreference` per call site —
+// used only by the decode path (the untrusted output buffers).
+#[cfg(feature = "decode")]
+mod alloc_util;
 #[cfg(feature = "zencodec")]
 mod codec;
 #[cfg(feature = "decode")]

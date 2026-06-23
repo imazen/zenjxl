@@ -742,7 +742,16 @@ pub fn decode_with_options(
     parallel: Option<bool>,
     stop: Option<alloc::sync::Arc<dyn enough::Stop>>,
 ) -> Result<JxlDecodeOutput, At<JxlError>> {
-    decode_with_options_oriented(data, limits, preferred, parallel, stop, true, false)
+    decode_with_options_oriented(
+        data,
+        limits,
+        preferred,
+        parallel,
+        stop,
+        true,
+        false,
+        zencodec::AllocPreference::CodecDefault,
+    )
 }
 
 /// Decode a JXL image with explicit orientation-adjustment control.
@@ -763,6 +772,18 @@ pub fn decode_with_options(
 /// (multi-pass or LF frame) instead of decoding it, surfaced here as
 /// [`JxlError::ProgressiveRejected`]. The header-only probe never decodes a
 /// frame, so this gate only matters on the decode path.
+///
+/// `alloc_pref` is the [`AllocPreference`](zencodec::AllocPreference) for the
+/// one untrusted-sized allocation the wrapper owns — the full-image output
+/// buffer, sized from the decoded header dimensions. Its site default is
+/// *fallible* (a forged header demanding gigabytes yields a graceful
+/// [`JxlError::LimitExceeded`] instead of aborting); `Fallible`/`Infallible`
+/// override it, `CodecDefault` keeps it. The public `decode*` entry points pass
+/// `CodecDefault` (behaviour unchanged); the zencodec adapter forwards the
+/// caller's `ResourceLimits::prefer_fallible_allocations`. The heavy
+/// VarDCT/modular pass buffers are allocated inside `zenjxl-decoder` and lie
+/// beyond this preference.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn decode_with_options_oriented(
     data: &[u8],
     limits: Option<&JxlLimits>,
@@ -771,6 +792,7 @@ pub(crate) fn decode_with_options_oriented(
     stop: Option<alloc::sync::Arc<dyn enough::Stop>>,
     adjust_orientation: bool,
     reject_progressive: bool,
+    alloc_pref: zencodec::AllocPreference,
 ) -> Result<JxlDecodeOutput, At<JxlError>> {
     let mut options = JxlDecoderOptions::default();
     options.adjust_orientation = adjust_orientation;
@@ -881,10 +903,13 @@ pub(crate) fn decode_with_options_oriented(
         }
     };
 
-    // Phase 3: decode pixels
+    // Phase 3: decode pixels.
+    // The output buffer is sized straight from the (untrusted) header
+    // dimensions, so it honors `alloc_pref` with a *fallible* site default —
+    // see the function docs.
     let (bytes_per_row, buf_size) =
         checked_buf_size(width, height, channels, bytes_per_sample).map_err(|e| whereat::at!(e))?;
-    let mut buf = vec![0u8; buf_size];
+    let mut buf = crate::alloc_util::alloc_zeroed(alloc_pref, true, buf_size)?;
 
     let output = JxlOutputBuffer::new(&mut buf, height, bytes_per_row);
     let result = decoder

@@ -1399,7 +1399,6 @@ mod decoding {
     use super::*;
     use alloc::borrow::Cow;
     use alloc::collections::VecDeque;
-    use alloc::vec;
     use alloc::vec::Vec;
 
     use alloc::string::ToString;
@@ -1420,9 +1419,8 @@ mod decoding {
     use enough::Stop;
 
     use crate::decode::{
-        JxlInfo, JxlLimits, build_pixel_data, choose_pixel_format, decode_with_options,
-        decode_with_options_oriented, extract_color_info, is_hdr_or_wide_gamut, map_err, probe,
-        probe_with_orientation,
+        JxlInfo, JxlLimits, build_pixel_data, choose_pixel_format, decode_with_options_oriented,
+        extract_color_info, is_hdr_or_wide_gamut, map_err, probe, probe_with_orientation,
     };
 
     /// Determine the decoder `parallel` flag from limits.
@@ -1488,6 +1486,7 @@ mod decoding {
         native_limits: Option<&JxlLimits>,
         parallel: Option<bool>,
         stop: &dyn Stop,
+        alloc_pref: zencodec::AllocPreference,
     ) -> Result<(zenpixels::PixelBuffer, ImageInfo), At<JxlError>> {
         use ultrahdr_core::gainmap::{HdrOutputFormat, apply_gainmap};
 
@@ -1511,13 +1510,18 @@ mod decoding {
         }
 
         // SDR-base bundle: decode the gain-map codestream (same resource
-        // limits as the base decode) and apply it.
-        let gm_result = decode_with_options(
+        // limits + allocation preference as the base decode) and apply it.
+        // `adjust_orientation = true`, `reject_progressive = false` matches
+        // `decode_with_options`.
+        let gm_result = decode_with_options_oriented(
             &bundle.gain_map_codestream,
             native_limits,
             &[],
             parallel,
             None,
+            true,
+            false,
+            alloc_pref,
         )?;
         let gm_pixels = gm_result.pixels;
         let channels = match gm_pixels.descriptor().pixel_format() {
@@ -1673,6 +1677,27 @@ mod decoding {
             &JXL_DECODE_CAPS
         }
 
+        fn estimate_decode_resources(
+            &self,
+            image: &zencodec::estimate::ImageCharacteristics,
+            compute: &zencodec::estimate::ComputeEnvironment,
+        ) -> zencodec::estimate::ResourceEstimate {
+            use zencodec::estimate::{ResourceEstimate, ThreadingInformation};
+            // jxl-encoder ships a calibrated *encode* heuristic; the
+            // zenjxl-decoder dependency exposes no decode estimate, so model
+            // it here (output buffer + VarDCT/modular working set + fixed
+            // overhead). Reported SERIAL: jxl-rs can thread, but the wrapper
+            // does not characterize a scaling knee, so the estimate does not
+            // promise core scaling.
+            let out_bpp = image.descriptor().bytes_per_pixel() as u8;
+            match estimate_jxl_decode(image.width(), image.height(), out_bpp) {
+                Some((peak, wall_ms)) => ResourceEstimate::new(peak, wall_ms)
+                    .with_threading(ThreadingInformation::SERIAL)
+                    .at_cores(compute.cores()),
+                None => ResourceEstimate::conservative(image).at_cores(compute.cores()),
+            }
+        }
+
         fn job<'a>(self) -> Self::Job<'a> {
             JxlDecodeJob {
                 limits: None,
@@ -1684,6 +1709,44 @@ mod decoding {
                 orientation: OrientationHint::Preserve,
             }
         }
+    }
+
+    /// Estimate `(peak_memory_bytes, wall_ms)` for a JXL decode of a
+    /// `width × height` image producing `out_bpp` bytes per output pixel.
+    ///
+    /// Returns `None` only on dimension overflow (a forged header), in which
+    /// case the caller falls back to
+    /// [`ResourceEstimate::conservative`](zencodec::estimate::ResourceEstimate::conservative).
+    ///
+    /// Model (a rough envelope, not a measured calibration — JXL decode peak
+    /// is content-dependent on the VarDCT vs modular path):
+    /// * **peak** = output buffer (`W·H·out_bpp`) + a VarDCT/modular working
+    ///   set + a fixed entropy/context overhead. The working set is taken as
+    ///   `WORKING_BYTES_PER_PX` per pixel — the decoder carries the image as
+    ///   internal f32 planes (≈ 3·4 B/px for XYB/RGB) plus LF/HF coefficient
+    ///   and upsampling buffers, the largest live set across the passes.
+    /// * **wall_ms** = pixels / throughput, at a conservative
+    ///   `DECODE_MPIX_PER_S` (JXL decode is markedly slower per pixel than
+    ///   PNG/JPEG).
+    #[must_use]
+    fn estimate_jxl_decode(width: u32, height: u32, out_bpp: u8) -> Option<(u64, u64)> {
+        // Internal working set beyond the output buffer: f32 color planes plus
+        // coefficient / upsampling scratch — the dominant live allocation on
+        // the VarDCT path.
+        const WORKING_BYTES_PER_PX: u64 = 24;
+        // Entropy tables, context model, frame header scratch — size-independent.
+        const FIXED_OVERHEAD_BYTES: u64 = 16 * 1024 * 1024;
+        // Conservative JXL decode throughput (megapixels / second).
+        const DECODE_MPIX_PER_S: f64 = 60.0;
+
+        let pixels = (width as u64).checked_mul(height as u64)?;
+        let output_bytes = pixels.checked_mul(out_bpp as u64)?;
+        let working = pixels.checked_mul(WORKING_BYTES_PER_PX)?;
+        let peak = output_bytes
+            .checked_add(working)?
+            .checked_add(FIXED_OVERHEAD_BYTES)?;
+        let wall_ms = (pixels as f64 / (DECODE_MPIX_PER_S * 1_000.0)).ceil() as u64;
+        Some((peak, wall_ms))
     }
 
     // ── JxlDecodeJob ────────────────────────────────────────────────────
@@ -2296,6 +2359,15 @@ mod decoding {
         fn decode(self) -> Result<DecodeOutput, At<JxlError>> {
             let native_limits = JxlDecodeJob::to_native_limits(&self.limits);
             let parallel = policy_to_parallel(&self.limits);
+            // Forward the caller's allocation-fallibility preference to the
+            // wrapper's untrusted output-buffer allocation. The direct
+            // (non-zencodec) decode API leaves this `CodecDefault`; here the
+            // zencodec adapter maps `ResourceLimits::prefer_fallible_allocations`.
+            let alloc_pref = self
+                .limits
+                .as_ref()
+                .map(|l| l.prefer_fallible_allocations)
+                .unwrap_or_default();
             let stop_arc: Option<Arc<dyn Stop>> = self.stop.map(|s| Arc::new(s) as Arc<dyn Stop>);
             #[cfg(feature = "reconstruct-hdr")]
             let stop_for_apply = stop_arc.clone();
@@ -2318,6 +2390,7 @@ mod decoding {
                 stop_arc,
                 JxlDecodeJob::decoder_adjust_orientation(self.orientation),
                 reject_progressive,
+                alloc_pref,
             )?;
 
             let info = JxlDecodeJob::apply_policy(
@@ -2376,6 +2449,7 @@ mod decoding {
                         native_limits.as_ref(),
                         parallel,
                         stop_ref,
+                        alloc_pref,
                     )?
                 }
                 _ => (pixels, info),
@@ -2399,12 +2473,19 @@ mod decoding {
                 // (same resource limits as the base decode). Errors only when
                 // a present gain map is malformed.
                 if surface_components {
-                    let gm_result = decode_with_options(
+                    // Same `alloc_pref` as the base decode so the gain-map
+                    // sub-image's untrusted output buffer honors the caller's
+                    // fallibility preference too. `adjust_orientation = true`,
+                    // `reject_progressive = false` matches `decode_with_options`.
+                    let gm_result = decode_with_options_oriented(
                         &gm.gain_map_codestream,
                         native_limits.as_ref(),
                         &[],
                         parallel,
                         None,
+                        true,
+                        false,
+                        alloc_pref,
                     )?;
                     let source = bundle_to_gain_map_source(gm);
                     let gm_info = source.metadata.clone();
@@ -2453,6 +2534,17 @@ mod decoding {
         /// Decode all frames up front.
         fn decode_all_frames(&mut self) -> Result<(), At<JxlError>> {
             let mut options = JxlDecoderOptions::default();
+
+            // Per-frame output buffers are sized from the (untrusted) header
+            // dimensions, so they honor the caller's allocation-fallibility
+            // preference with a *fallible* site default. The direct decode API
+            // never reaches this path; only the zencodec adapter does, mapping
+            // `ResourceLimits::prefer_fallible_allocations`.
+            let alloc_pref = self
+                .limits
+                .as_ref()
+                .map(|l| l.prefer_fallible_allocations)
+                .unwrap_or_default();
 
             // Honor the same progressive gate as the single-image decode path:
             // an animation whose frames are progressive must also be rejected
@@ -2596,8 +2688,10 @@ mod decoding {
                 let frame_header = decoder_fi.frame_header();
                 let duration_ms = frame_header.duration.map(|d| d as u32).unwrap_or(0);
 
-                // Decode pixels
-                let mut buf = vec![0u8; frame_buf_bytes];
+                // Decode pixels. The per-frame output buffer is sized from the
+                // (untrusted) header dimensions, so it honors `alloc_pref` with
+                // a *fallible* site default.
+                let mut buf = crate::alloc_util::alloc_zeroed(alloc_pref, true, frame_buf_bytes)?;
                 let output = JxlOutputBuffer::new(&mut buf, height, bytes_per_row);
 
                 let result = decoder_fi
@@ -3863,5 +3957,96 @@ mod tests {
             Some(xmp_data),
             "XMP should be accessible via ImageInfo"
         );
+    }
+
+    /// The `AllocPreference` override must not change decoded bytes: `Fallible`,
+    /// `Infallible`, and the default (`CodecDefault`) decode of the same JXL
+    /// produce byte-identical output. Only the allocation *strategy* differs.
+    #[cfg(all(feature = "encode", feature = "decode"))]
+    #[test]
+    fn fallible_alloc_decode_matches_default() {
+        use zencodec::decode::{Decode, DecodeJob, DecoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::{AllocPreference, ResourceLimits};
+
+        // Lossless RGBA8 so the decoded bytes are deterministic.
+        let width = 48u32;
+        let height = 40u32;
+        let pixels: Vec<rgb::Rgba<u8>> = (0..width * height)
+            .map(|i| rgb::Rgba {
+                r: (i % 256) as u8,
+                g: ((i / 3) % 256) as u8,
+                b: ((i / 7) % 256) as u8,
+                a: 255,
+            })
+            .collect();
+        let buf =
+            zenpixels::PixelBuffer::<rgb::Rgba<u8>>::from_pixels(pixels, width, height).unwrap();
+
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let encoder = config.job().encoder().unwrap();
+        let encoded = encoder.encode(buf.as_slice().into()).unwrap();
+
+        let decode_with = |pref: Option<AllocPreference>| -> Vec<u8> {
+            let dec_config = JxlDecoderConfig::new();
+            let mut job = dec_config.job();
+            if let Some(p) = pref {
+                job = job.with_limits(ResourceLimits::none().with_prefer_fallible_allocations(p));
+            }
+            let decoder = job.decoder(Cow::Borrowed(encoded.data()), &[]).unwrap();
+            let decoded = decoder.decode().unwrap();
+            decoded.pixels().contiguous_bytes().into_owned()
+        };
+
+        let default_bytes = decode_with(None);
+        let codec_default_bytes = decode_with(Some(AllocPreference::CodecDefault));
+        let fallible_bytes = decode_with(Some(AllocPreference::Fallible));
+        let infallible_bytes = decode_with(Some(AllocPreference::Infallible));
+
+        assert!(!default_bytes.is_empty());
+        assert_eq!(
+            default_bytes, codec_default_bytes,
+            "CodecDefault must match no-limits default"
+        );
+        assert_eq!(
+            default_bytes, fallible_bytes,
+            "Fallible must match default bytes"
+        );
+        assert_eq!(
+            default_bytes, infallible_bytes,
+            "Infallible must match default bytes"
+        );
+    }
+
+    /// `estimate_decode_resources` reports a non-trivial peak (output buffer +
+    /// working set + overhead), a serial threading model, and a peak that
+    /// grows with image area.
+    #[cfg(feature = "decode")]
+    #[test]
+    fn estimate_decode_resources_is_sane() {
+        use zencodec::decode::DecoderConfig;
+        use zencodec::estimate::{ComputeEnvironment, ImageCharacteristics};
+
+        let cfg = JxlDecoderConfig::new();
+        let compute = ComputeEnvironment::new();
+        let small = ImageCharacteristics::new(256, 256, zenpixels::PixelDescriptor::RGBA8_SRGB);
+        let large = ImageCharacteristics::new(2048, 2048, zenpixels::PixelDescriptor::RGBA8_SRGB);
+
+        let es = cfg.estimate_decode_resources(&small, &compute);
+        let el = cfg.estimate_decode_resources(&large, &compute);
+
+        // Peak must exceed the bare output buffer (W*H*4) — there is a working
+        // set + fixed overhead on top.
+        let small_output = 256u64 * 256 * 4;
+        assert!(
+            es.peak_memory_bytes_est().unwrap() > small_output,
+            "peak must exceed the bare output buffer"
+        );
+        // Larger image → larger peak and at-least-as-large wall time.
+        assert!(
+            el.peak_memory_bytes_est().unwrap() > es.peak_memory_bytes_est().unwrap(),
+            "peak must grow with area"
+        );
+        assert!(el.wall_ms().unwrap() >= es.wall_ms().unwrap());
     }
 }
