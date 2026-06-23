@@ -166,14 +166,14 @@ mod tests {
     fn alloc_zeroed_fallible_oom_returns_err() {
         // Request an impossibly large allocation; the fallible path must
         // return Err (mapped to LimitExceeded) rather than abort.
-        let r = alloc_zeroed(AllocPreference::Fallible, true, usize::MAX / 2);
+        let r = alloc_zeroed(AllocPreference::Fallible, true, usize::MAX);
         assert!(r.is_err());
         assert!(matches!(r.unwrap_err().error(), JxlError::LimitExceeded(_)));
     }
 
     #[test]
     fn vec_with_capacity_fallible_oom_returns_err() {
-        let r = vec_with_capacity(AllocPreference::Fallible, true, usize::MAX / 2);
+        let r = vec_with_capacity(AllocPreference::Fallible, true, usize::MAX);
         assert!(r.is_err());
         assert!(matches!(r.unwrap_err().error(), JxlError::LimitExceeded(_)));
     }
