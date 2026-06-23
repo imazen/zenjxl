@@ -512,6 +512,55 @@ mod encoding {
             Some(self.lossless)
         }
 
+        /// Honor a [`Fidelity`](zencodec::encode::Fidelity) target as natively
+        /// as JPEG XL allows.
+        ///
+        /// - `Lossless` → modular lossless (`with_lossless(true)`).
+        /// - `Lossy(ApproxButteraugli(d))` → **native** VarDCT butteraugli
+        ///   distance (`with_distance`, clamped to `0.0..=25.0`).
+        /// - `Lossy(CodecSpecificQuality(q))` → the calibrated jxl quality dial.
+        /// - `Lossy(ApproxSsim2(s))` → jxl has no native SSIM2 target, so the
+        ///   score is mapped onto the quality dial; `resolved_target_fidelity`
+        ///   reports it as `codec_quality`, honest that no SSIM2 convergence
+        ///   happened.
+        ///
+        /// The quality arms clear any prior `with_distance` so the encode and
+        /// the resolved report agree under chained calls.
+        fn with_fidelity(self, fidelity: zencodec::encode::Fidelity) -> Self {
+            use zencodec::encode::{Fidelity, LossyTarget};
+            match fidelity {
+                Fidelity::Lossless => self.with_lossless(true),
+                Fidelity::Lossy(LossyTarget::ApproxButteraugli(distance)) => {
+                    self.with_lossless(false).with_distance(distance)
+                }
+                Fidelity::Lossy(LossyTarget::CodecSpecificQuality(q)) => {
+                    let mut s = self.with_lossless(false);
+                    s.distance_override = None;
+                    s.with_generic_quality(q)
+                }
+                Fidelity::Lossy(LossyTarget::ApproxSsim2(score)) => {
+                    let mut s = self.with_lossless(false);
+                    s.distance_override = None;
+                    s.with_generic_quality(score)
+                }
+                // `Fidelity` / `LossyTarget` are `#[non_exhaustive]`.
+                _ => self.with_lossless(false),
+            }
+        }
+
+        /// Report what jxl resolved the fidelity to: lossless wins, then a
+        /// native butteraugli distance, else the quality dial.
+        fn resolved_target_fidelity(&self) -> Option<zencodec::encode::Fidelity> {
+            use zencodec::encode::Fidelity;
+            if self.lossless {
+                return Some(Fidelity::Lossless);
+            }
+            if let Some(distance) = self.distance_override {
+                return Some(Fidelity::butteraugli(distance));
+            }
+            self.generic_quality.map(Fidelity::codec_quality)
+        }
+
         fn estimate_encode_resources(
             &self,
             image: &zencodec::estimate::ImageCharacteristics,
@@ -2895,6 +2944,41 @@ mod tests {
         assert_eq!(config.is_lossless(), Some(true));
         assert!(config.lossless_config().is_some());
         assert!(config.lossy_config().is_none());
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn fidelity_targets_roundtrip() {
+        use zencodec::encode::{EncoderConfig, Fidelity};
+
+        // Native modular lossless.
+        let ll = JxlEncoderConfig::new().with_fidelity(Fidelity::Lossless);
+        assert_eq!(ll.resolved_target_fidelity(), Some(Fidelity::Lossless));
+        assert_eq!(ll.is_lossless(), Some(true));
+
+        // Native VarDCT butteraugli distance round-trips as itself.
+        let bt = JxlEncoderConfig::new().with_fidelity(Fidelity::butteraugli(2.0));
+        assert_eq!(
+            bt.resolved_target_fidelity(),
+            Some(Fidelity::butteraugli(2.0))
+        );
+        assert_eq!(bt.is_lossless(), Some(false));
+        assert!(bt.lossy_config().is_some());
+
+        // Codec quality dial round-trips as itself.
+        let cq = JxlEncoderConfig::new().with_fidelity(Fidelity::codec_quality(80.0));
+        assert_eq!(
+            cq.resolved_target_fidelity(),
+            Some(Fidelity::codec_quality(80.0))
+        );
+
+        // No native SSIM2 in jxl: the score maps onto the quality dial and is
+        // reported as codec_quality (honest that no SSIM2 convergence happened).
+        let s2 = JxlEncoderConfig::new().with_fidelity(Fidelity::ssim2(90.0));
+        assert_eq!(
+            s2.resolved_target_fidelity(),
+            Some(Fidelity::codec_quality(90.0))
+        );
     }
 
     #[cfg(feature = "encode")]

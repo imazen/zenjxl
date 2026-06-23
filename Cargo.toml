@@ -21,7 +21,7 @@ whereat = { version = "0.1.5"}
 rgb = { version = "0.8.53", default-features = false, features = ["as-bytes"] }
 imgref = "1.12.0"
 enough = "0.4.3"
-zencodec = { version = "0.1.24" }
+zencodec = { version = "0.1.25" }
 zenpixels = { version = "0.2.11", default-features = false, features = ["rgb"] }
 # Pixel-exact orientation baking (`orient::apply_orientation`) for the zencodec
 # decode adapter's OrientationHint handling. Only the `orient` module is used
