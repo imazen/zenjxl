@@ -537,8 +537,18 @@ impl LossyAxes {
         // zero-deviation (production-default) stratum; the rest fill
         // modes_full's gaps, ordered most-production-relevant-first so the
         // budget ladder (which sheds from the end, floor 3) drops the
-        // least-relevant efforts last.
+        // least-relevant efforts last. (e1..=e9 ALL kept — never skip an
+        // effort: a knob may only pay off at a given effort.)
         axes.efforts = vec![7, 5, 9, 3, 8, 6, 4, 2, 1];
+        // P2 — code the settled: `progressive` is GRADUATED out of the
+        // picker surface. It was NEVER on the RD Pareto front across two
+        // independent corpora (local n=12 + the 2026-06-25 Hetzner-fleet
+        // n=30 lossy_dense runs — `zenmetrics/benchmarks/jxl_lossy_p0_2026-06-25.md`),
+        // which is expected: ProgressiveMode trades bitstream layout for
+        // progressive *rendering*, not rate-distortion. The default
+        // (`Single`) is already the RD-optimal value, so there is no rule to
+        // pick — pin it and drop `prog1`/`prog2` from the swept axes.
+        axes.progressive = vec![ProgressiveMode::Single];
         axes
     }
 }
@@ -2048,6 +2058,15 @@ mod tests {
         assert!(
             plan.cells.iter().any(|c| c.id.contains("kaq")),
             "lossy_dense must include the k_ac_quant ladder probes"
+        );
+        // progressive GRADUATED out (P2: never RD-competitive on 2 corpora);
+        // the default Single is pinned, so no prog1/prog2 cells.
+        assert!(
+            !plan
+                .cells
+                .iter()
+                .any(|c| c.id.contains("-prog1") || c.id.contains("-prog2")),
+            "lossy_dense must not sweep progressive (coded as settled)"
         );
     }
 
