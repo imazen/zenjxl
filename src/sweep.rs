@@ -504,6 +504,43 @@ impl LossyAxes {
             ans: vec![None],
         }
     }
+
+    /// **P0 main-effects** axes for the JXL lossy knob-space ablation
+    /// program (`zenmetrics/docs/JXL_LOSSY_KNOBSPACE_ABLATION_PROGRAM.md`):
+    /// the full [`modes_full`](Self::modes_full) lossy knob set — every
+    /// user-disableable mode axis plus the expert internal-params probes
+    /// (strategy / gaborish / ans / epf / progressive / noise /
+    /// faster_decoding / encoder_mode + `k_ac_quant` ladder + entropy
+    /// presets + the dct/cfl/chroma/non-align experts) — but over the
+    /// **complete `e1..=e9` effort ladder** instead of `modes_full`'s
+    /// `{7,5,9,3,10}`. `modes_full` skips `e1/e2/e4/e6/e8`; a knob whose
+    /// value is effort-dependent — one that "only pays off at e9", or one
+    /// that lets a *low* effort mimic a higher one — is invisible unless
+    /// every effort is present, so the ladder is filled in here.
+    ///
+    /// `e10` is dropped: without jxl-encoder's `butteraugli-loop` feature
+    /// it is byte-identical to `e9` on the lossy path (it would only
+    /// fingerprint-merge), and `e10..=e12` are the perceptual-loop tier
+    /// the program defers.
+    ///
+    /// Pair with [`SweepBuilder::with_max_deviations`]`(1)`: that yields
+    /// the all-defaults cell, the isolated `e1..=e9` effort ladder, and
+    /// every single-knob probe at the default effort — the cheap
+    /// "which knobs ever win, and at which effort" P0 question, with no
+    /// cartesian knob×knob blow-up (those interactions are P1). Lossy-only
+    /// by construction at the [`SweepAxes`] level; the modular partition
+    /// is a separate program element.
+    #[must_use]
+    pub fn lossy_dense() -> Self {
+        let mut axes = Self::modes_full();
+        // Full e1..=e9 ladder. 7 first so it stays index 0 = the
+        // zero-deviation (production-default) stratum; the rest fill
+        // modes_full's gaps, ordered most-production-relevant-first so the
+        // budget ladder (which sheds from the end, floor 3) drops the
+        // least-relevant efforts last.
+        axes.efforts = vec![7, 5, 9, 3, 8, 6, 4, 2, 1];
+        axes
+    }
 }
 
 /// The curated single-knob lossy internal-params probes (provenance in
@@ -760,6 +797,20 @@ impl SweepAxes {
         Self {
             lossy: Some(LossyAxes::scalar_dense()),
             lossless: Some(LosslessAxes::scalar_dense()),
+        }
+    }
+
+    /// P0 main-effects axes for the JXL lossy knob-space ablation program:
+    /// the full lossy knob set over the `e1..=e9` ladder
+    /// ([`LossyAxes::lossy_dense`]), **lossy-only** — no modular cells, as
+    /// the modular/lossless partition is a separate program element. Pair
+    /// with [`SweepBuilder::with_max_deviations`]`(1)` for the cheap
+    /// "which knobs ever win, and at which effort" P0 question.
+    #[must_use]
+    pub fn lossy_dense() -> Self {
+        Self {
+            lossy: Some(LossyAxes::lossy_dense()),
+            lossless: None,
         }
     }
 }
@@ -1949,6 +2000,55 @@ mod tests {
         for e in 1..=10u8 {
             assert!(efforts.contains(&e), "scalar_dense missing effort e{e}");
         }
+    }
+
+    #[test]
+    fn lossy_dense_is_lossy_only_main_effects_over_full_effort_ladder() {
+        use super::*;
+        let plan = SweepBuilder::new(
+            SweepAxes::lossy_dense(),
+            QualityGrid::ExplicitQuality(vec![30.0, 85.0]),
+        )
+        .with_max_deviations(1)
+        .plan();
+        assert!(!plan.cells.is_empty(), "lossy_dense must emit cells");
+        // Lossy-only: the modular partition is a separate program element.
+        assert!(
+            plan.cells
+                .iter()
+                .all(|c| matches!(c.variant, SweepVariant::Lossy(_))),
+            "lossy_dense must emit no modular cells"
+        );
+        // Main-effects only under max_deviations(1) — no knob×knob cross.
+        assert!(
+            plan.cells.iter().all(|c| c.deviations <= 1),
+            "lossy_dense + max_deviations(1) must be main-effects only"
+        );
+        // The full e1..=e9 ladder is present (modes_full skips e1/2/4/6/8);
+        // e10 is NOT (it byte-aliases e9 without butteraugli-loop).
+        let mut efforts: Vec<u8> = plan
+            .cells
+            .iter()
+            .map(|c| compute_tier(&c.variant))
+            .collect();
+        efforts.sort_unstable();
+        efforts.dedup();
+        for e in 1..=9u8 {
+            assert!(efforts.contains(&e), "lossy_dense missing effort e{e}");
+        }
+        assert!(
+            !efforts.contains(&10),
+            "lossy_dense must not carry e10 (byte-aliases e9 without buttloop)"
+        );
+        // The mode + expert probes ride along as single deviations.
+        assert!(
+            plan.cells.iter().any(|c| c.id.contains("_libjxl_")),
+            "lossy_dense must include the libjxl strategy probe"
+        );
+        assert!(
+            plan.cells.iter().any(|c| c.id.contains("kaq")),
+            "lossy_dense must include the k_ac_quant ladder probes"
+        );
     }
 
     #[test]
