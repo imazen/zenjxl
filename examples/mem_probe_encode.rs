@@ -38,7 +38,11 @@
 //! the optional `est` marker; if you pass `est`, you must pass threads first.
 //!
 //! TSV row:
-//!   w  h  pixels  mode  effort  quality  threads  out_bytes  pre_rss_kb  vmhwm_kb  marginal_kb
+//!   w  h  pixels  mode  effort  quality  threads  out_bytes  pre_rss_kb  vmhwm_kb  marginal_kb  encode_ms
+//!
+//! `encode_ms` is the wall time of the `encode()` call only (file read +
+//! process startup excluded), so it is comparable to the `est` row's
+//! predicted `time_ms` — the time half of the per-effort estimate validation.
 
 use std::hint::black_box;
 
@@ -173,6 +177,9 @@ fn main() {
     // builds a dedicated N-thread pool so the per-thread working set (lossless
     // SplitWorkspace, lossy buttloop/EPF scratch) shows up in VmHWM. Only
     // engages real parallelism when the probe is built `--features parallel`.
+    // Wall time of the encode() call only (file read + startup excluded), so
+    // it lines up with the `est` row's predicted time_ms.
+    let t0 = std::time::Instant::now();
     let out = if is_lossless {
         LosslessConfig::new()
             .with_effort(effort)
@@ -187,6 +194,7 @@ fn main() {
             .encode(&data)
     }
     .expect("encode");
+    let encode_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
     // High-water mark immediately after encode — VmHWM is monotonic, so it
     // reflects the peak *during* the encode.
@@ -194,7 +202,7 @@ fn main() {
 
     let pixels = (w as u64) * (h as u64);
     println!(
-        "{w}\t{h}\t{pixels}\t{mode}\t{effort}\t{quality}\t{threads}\t{}\t{pre}\t{peak}\t{}",
+        "{w}\t{h}\t{pixels}\t{mode}\t{effort}\t{quality}\t{threads}\t{}\t{pre}\t{peak}\t{}\t{encode_ms:.1}",
         out.len(),
         peak.saturating_sub(pre)
     );
