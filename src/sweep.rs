@@ -727,6 +727,31 @@ impl LosslessAxes {
             faster_decoding: vec![0],
         }
     }
+
+    /// Modular picker sweep: the FULL effort ladder `e1..=10` (as
+    /// [`scalar_dense`](Self::scalar_dense) — `modes_full` only samples
+    /// {1,3,5,7,9}) crossed with the predictor + internal-RCT/WP probes. The
+    /// jxl-modular picker's two real levers are effort (compute/bytes) and the
+    /// predictor/RCT choice, so this drops the `group_size`/`faster_decoding`
+    /// (decode-speed) cross that `modes_full` carries — keeping it dense over
+    /// what the picker actually selects while satisfying the mandatory coverage
+    /// (every `e1..=10` + a predictor probe). Modular cells ride the q=0 sentinel,
+    /// so there is no `× q` multiply.
+    #[must_use]
+    pub fn modular_dense() -> Self {
+        let mut internal = vec![NamedLosslessParams::default_probe()];
+        // First two curated probes are rct1 + wp5 — supply the `rct`/`wp`
+        // predictor-probe tokens the mandatory-coverage gate checks for.
+        internal.extend(lossless_internal_probes().into_iter().take(2));
+        Self {
+            efforts: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            encoder_modes: vec![EncoderMode::Reference],
+            internal,
+            predictors: vec![None, Some(6)],
+            group_size_shifts: vec![None],
+            faster_decoding: vec![0],
+        }
+    }
 }
 
 /// The curated single-knob lossless internal-params probes (provenance
@@ -821,6 +846,21 @@ impl SweepAxes {
         Self {
             lossy: Some(LossyAxes::lossy_dense()),
             lossless: None,
+        }
+    }
+
+    /// Modular counterpart to [`lossy_dense`](Self::lossy_dense): the full
+    /// lossless (modular) mode cross (`e1..=e10` × predictors), **modular-only**
+    /// — no lossy `vd-` cells (the lossy ablation owns those). This is the
+    /// jxl-modular picker's sweep: it satisfies that picker's mandatory coverage
+    /// (e1..=e10 + a predictor probe) without dragging the lossy cross or its
+    /// q-grid multiply — lossless cells ride the q=0 sentinel, so the cell count
+    /// is just the modular cross (no `× q`).
+    #[must_use]
+    pub fn modular_dense() -> Self {
+        Self {
+            lossy: None,
+            lossless: Some(LosslessAxes::modular_dense()),
         }
     }
 }
