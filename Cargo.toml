@@ -8,9 +8,12 @@ description = "JPEG XL encoding and decoding with zencodec trait integration"
 categories = ["multimedia::images", "multimedia::encoding"]
 keywords = ["jxl", "jpeg-xl", "image", "encoder", "decoder"]
 repository = "https://github.com/imazen/zenjxl"
+# README.crates.md is the badge-free crates.io README, generated from README.md
+# by zenutils gen-readme-crates.sh (see the per-crate README conventions).
+readme = "README.crates.md"
 include = [
     "/src/**",
-    "/README.md",
+    "/README.crates.md",
     "/CHANGELOG.md",
     "/LICENSE*",
 ]

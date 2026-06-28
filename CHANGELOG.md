@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Documentation
+- README overhaul: full badge row (CI/crates.io/lib.rs/docs.rs/MSRV/license),
+  documented the `jpeg-lossy`, `reconstruct-hdr`, and `__expert` features,
+  refreshed the crosslink footer, and split a badge-free `README.crates.md` for
+  crates.io (`readme = "README.crates.md"`).
+
 ### Changed
 - deps: migrate to published zencodec 0.1.24 estimate API; drop the temporary
   `[patch.crates-io] zencodec = { git, rev = "0f71295" }` pin (the `estimate`
