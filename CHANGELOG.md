@@ -9,6 +9,22 @@
   crates.io (`readme = "README.crates.md"`).
 
 ### Changed
+- **zencodec trait impls return `At<CodecError>` — the envelope (Pattern B)**
+  (PR #16, error-taxonomy). All eight `zencodec` trait impls behind the
+  `zencodec` feature (`EncoderConfig` / `EncodeJob` / `Encoder` /
+  `AnimationFrameEncoder` / `DecoderConfig` / `DecodeJob` / `Decode` /
+  `AnimationFrameDecoder`) now use `type Error = At<zencodec::CodecError>`
+  instead of `At<JxlError>`, so a generic consumer recovers the `ErrorCategory`
+  *and* the codec name (`"zenjxl"`) **through `Dyn*` dispatch + `Box<dyn Error>`
+  erasure** — `None` under the old typed error, `Some` now (forcing test
+  `codec::tests::dyn_dispatch_preserves_category_and_codec_through_erasure`).
+  `JxlError` (+ its `CategorizedError` impl) is kept as the recoverable detail
+  and category source; the new `From<JxlError> for At<CodecError>` bridge wraps
+  bare native values, and already-located `At<JxlError>` internals convert once
+  at each trait boundary via `CodecError::of` (internal `?` sites untouched).
+  The native `decode` / `probe` / `encode*` API is **unchanged** — it keeps the
+  typed `At<JxlError>`. Breaking for code that named the trait impls' associated
+  `Error` type.
 - deps: migrate to published zencodec 0.1.24 estimate API; drop the temporary
   `[patch.crates-io] zencodec = { git, rev = "0f71295" }` pin (the `estimate`
   API is now on crates.io). The `estimate_encode_resources` mapping in

@@ -105,6 +105,34 @@ impl CategorizedError for JxlError {
     }
 }
 
+/// Bridge a bare [`JxlError`] into the shared [`CodecError`](zencodec::CodecError)
+/// envelope as `At<CodecError>` — the one-impl adoption cost of the zencodec
+/// **envelope** error pattern (Pattern B). The zencodec trait impls
+/// ([`codec`](crate::codec)) return `At<CodecError>` so a generic consumer
+/// recovers the [`ErrorCategory`] *and* the codec name through `Dyn*` dispatch
+/// and `Box<dyn Error>` erasure; the native API ([`decode`](crate::decode) etc.)
+/// keeps the typed `At<JxlError>`.
+///
+/// `.start_at()` begins the location trace; [`CodecError::of`](zencodec::CodecError::of)
+/// then maps that `At<JxlError>` to `At<CodecError>`, reading the
+/// [`category`](CategorizedError::category) and
+/// [`codec_name`](CategorizedError::codec_name) off the value — keeping the `At`
+/// trace on the outside and the `JxlError` as the recoverable detail. With this
+/// in place, `JxlError::from(op).into()` (and `?` on a bare `JxlError`) auto-wraps
+/// into the envelope at a trait boundary.
+///
+/// Already-located `At<JxlError>` values cannot use this (`From<At<JxlError>> for
+/// At<CodecError>` is barred by the orphan rule); they convert with
+/// `.map_err(zencodec::CodecError::of)`, which the adapter does once at each
+/// trait boundary (its fallible internals stay `At<JxlError>`).
+impl From<JxlError> for whereat::At<zencodec::CodecError> {
+    #[track_caller]
+    fn from(e: JxlError) -> Self {
+        use whereat::ErrorAtExt;
+        zencodec::CodecError::of(e.start_at())
+    }
+}
+
 #[cfg(test)]
 mod categorized_error_tests {
     use super::*;
@@ -121,6 +149,10 @@ mod categorized_error_tests {
         // are `#[non_exhaustive]` enums, but enum-level non-exhaustiveness only
         // blocks exhaustive matching downstream — their (non-marked) variants
         // are still constructible here.
+        // `mut` is only exercised by the `decode` / `encode` pushes below; with
+        // neither feature on (e.g. CI's `--no-default-features --features zencodec`
+        // clippy job) the vec is never mutated.
+        #[cfg_attr(not(any(feature = "decode", feature = "encode")), allow(unused_mut))]
         let mut cases: Vec<(JxlError, ErrorCategory)> = alloc::vec![
             (
                 JxlError::InvalidInput("bad dims".into()),
