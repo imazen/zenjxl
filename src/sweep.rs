@@ -2036,8 +2036,8 @@ pub fn encode_fingerprint(variant: &SweepVariant) -> u64 {
                 h.f32(p.k_info_loss_mul_base);
                 let t = &p.entropy_mul_table;
                 for x in [
-                    t.dct8, t.dct4x4, t.dct4x8, t.identity, t.dct2x2, t.afv, t.dct16x8,
-                    t.dct16x16, t.dct16x32, t.dct32x32, t.dct64x32, t.dct64x64,
+                    t.dct8, t.dct4x4, t.dct4x8, t.identity, t.dct2x2, t.afv, t.dct16x8, t.dct16x16,
+                    t.dct16x32, t.dct32x32, t.dct64x32, t.dct64x64,
                 ] {
                     h.f32(x);
                 }
@@ -2085,7 +2085,13 @@ pub fn encode_fingerprint(variant: &SweepVariant) -> u64 {
             // Debug-hash fields whose concrete resolved type varies, so this
             // compiles regardless of the exact numeric width / Option-ness.
             h.write(format!("{:?}", p.lz77_method).as_bytes());
-            h.write(format!("{:?}", (p.nb_rcts_to_try, &p.forced_rct, p.wp_num_param_sets)).as_bytes());
+            h.write(
+                format!(
+                    "{:?}",
+                    (p.nb_rcts_to_try, &p.forced_rct, p.wp_num_param_sets)
+                )
+                .as_bytes(),
+            );
 
             // Tree-learning detail: byte-relevant only when tree learning runs.
             if p.tree_learning {
