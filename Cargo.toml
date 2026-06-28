@@ -53,6 +53,10 @@ ultrahdr-core = { version = "0.5.0", optional = true, default-features = false, 
 # consumes — is now published, so its path-patch was dropped and the `jxl`
 # dep above bumped to 0.3.10.)
 [patch.crates-io]
+# TEMP: until zencodec 0.1.26 ships (PR #103 — CategorizedError taxonomy).
+# Remove this patch and bump the `zencodec` dep to the released version once
+# zencodec 0.1.26 is published.
+zencodec = { git = "https://github.com/imazen/zencodec", branch = "cancellation-classification-99" }
 jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../zenjpeg/zenjpeg" }
 # The `JxlDecoderOptions::reject_progressive` decode-time gate is on

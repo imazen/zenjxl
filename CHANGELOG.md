@@ -19,6 +19,18 @@
   `ThreadingInformation::parallel(max_efficient_threads)` is now 1-arg.
 
 ### Added
+- **`zencodec::CategorizedError` adopted on `JxlError`** (error-taxonomy, PR
+  zencodec#103). `codec_name()` returns `Some("zenjxl")`; `category()` totally
+  maps every variant to one `ErrorCategory`: `Decode` → `MalformedImage`,
+  `ProgressiveRejected` → `PolicyRejected`, `Encode` → `Internal`,
+  `InvalidInput` → `InvalidParameters`, `LimitExceeded` →
+  `LimitsExceeded(LimitKind::Memory)`, `Sink` → `Io(opaque)`, with `Cancelled`
+  and `UnsupportedOperation` delegating to the zencodec cause type's own
+  `category()` (cancelled-vs-timed-out, operation-vs-pixel-format). New
+  `error::categorized_error_tests` covers the per-variant mapping. **TEMP**:
+  builds against `[patch.crates-io] zencodec = { git, branch =
+  "cancellation-classification-99" }` until zencodec 0.1.26 ships #103; drop the
+  patch and bump the `zencodec` dep at that point.
 - **`AllocPreference` honored at untrusted decode allocations** (3-mode,
   per-site). The wrapper-owned output buffers — the single-image output buffer
   (`src/decode.rs`), the per-animation-frame buffer, and the recursive
