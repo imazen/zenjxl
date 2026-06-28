@@ -24,41 +24,6 @@ almost-enough = "0.4.4"        # a ready-made cancellation token (optional)
 
 ## Quick start
 
-The one-shot helpers do the whole job in a single call with sane defaults:
-encode tightly-packed RGBA8 to JPEG XL, or decode any JPEG XL back to packed
-RGBA8. Reach for the `LossyConfig`/`LosslessConfig` builders (further down) when
-you need quality control, 16-bit / grayscale / HDR I/O, embedded metadata,
-resource limits, or cancellation.
-
-```rust
-use zenjxl::{encode_rgba8_bytes, encode_rgba8_bytes_lossless, decode_rgba8};
-
-// 2×2 RGBA, tightly packed (width * height * 4 bytes), R,G,B,A per pixel.
-let (width, height) = (2u32, 2u32);
-let rgba = vec![
-    255, 0, 0, 255,   0, 255, 0, 255,
-    0, 0, 255, 255,   255, 255, 255, 255,
-];
-
-// Lossy at the default butteraugli distance 1.0 (≈ visually lossless, the same
-// target as `cjxl -d 1.0`). JXL lossy is not bit-exact — check dims/length.
-let jxl = encode_rgba8_bytes(&rgba, width, height)?;
-let (pixels, w, h) = decode_rgba8(&jxl)?;
-assert_eq!((w, h), (width, height));
-assert_eq!(pixels.len(), (width * height * 4) as usize);
-
-// Lossless round-trips the bytes exactly.
-let jxl_lossless = encode_rgba8_bytes_lossless(&rgba, width, height)?;
-let (pixels_lossless, _, _) = decode_rgba8(&jxl_lossless)?;
-assert_eq!(pixels_lossless, rgba);
-```
-
-The one-shots return `Result<_, whereat::At<JxlError>>` (the same error type as
-`decode`/`probe`/`LossyConfig::encode`). The typed `encode_rgba8` /
-`encode_rgba8_lossless` names are taken by the [`imgref`](https://docs.rs/imgref)
-`ImgRef<rgb::Rgba<u8>>` convenience wrappers, so the flat-`&[u8]` one-shots are
-`encode_rgba8_bytes` / `encode_rgba8_bytes_lossless`.
-
 ### Decode
 
 ```rust

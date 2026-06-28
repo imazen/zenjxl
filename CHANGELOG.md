@@ -19,17 +19,6 @@
   `ThreadingInformation::parallel(max_efficient_threads)` is now 1-arg.
 
 ### Added
-- **One-shot convenience free functions** (`src/lib.rs`): `decode_rgba8(jxl) ->
-  (rgba, w, h)` (gated `decode`) and `encode_rgba8_bytes(rgba, w, h)` (lossy,
-  default butteraugli distance 1.0) + `encode_rgba8_bytes_lossless(rgba, w, h)`
-  (gated `encode`). Each operates on tightly-packed RGBA8 bytes and returns the
-  crate's natural `whereat::At<JxlError>` error, doing the core job in one call
-  with sane defaults — the `LossyConfig`/`LosslessConfig` builder path stays the
-  power API. The `*_bytes` suffix avoids colliding with the typed `encode_rgba8`
-  (`imgref::ImgRef`) re-exports. Length is validated overflow-safely
-  (`checked_mul`); `decode_rgba8` normalizes any source format to packed RGBA8
-  via `zenpixels-convert`, so the `decode` feature now enables it. README Quick
-  start leads with these; mirrored in `tests/readme_examples.rs`.
 - **`AllocPreference` honored at untrusted decode allocations** (3-mode,
   per-site). The wrapper-owned output buffers — the single-image output buffer
   (`src/decode.rs`), the per-animation-frame buffer, and the recursive
