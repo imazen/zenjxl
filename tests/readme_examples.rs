@@ -110,3 +110,27 @@ fn encode_lossy_and_lossless() {
 
     let _ = (lossy, lossless);
 }
+
+// ── One-shot Quick start (README lead) ──────────────────────────────────────
+fn quick_start_one_shot() -> Result<(), whereat::At<zenjxl::JxlError>> {
+    use zenjxl::{decode_rgba8, encode_rgba8_bytes, encode_rgba8_bytes_lossless};
+
+    // 2×2 RGBA, tightly packed (width * height * 4 bytes), R,G,B,A per pixel.
+    let (width, height) = (2u32, 2u32);
+    let rgba = vec![
+        255, 0, 0, 255, 0, 255, 0, 255, //
+        0, 0, 255, 255, 255, 255, 255, 255,
+    ];
+
+    // Lossy at the default butteraugli distance 1.0 (≈ visually lossless).
+    let jxl = encode_rgba8_bytes(&rgba, width, height)?;
+    let (pixels, w, h) = decode_rgba8(&jxl)?;
+    assert_eq!((w, h), (width, height));
+    assert_eq!(pixels.len(), (width * height * 4) as usize);
+
+    // Lossless round-trips the bytes exactly.
+    let jxl_lossless = encode_rgba8_bytes_lossless(&rgba, width, height)?;
+    let (pixels_lossless, _, _) = decode_rgba8(&jxl_lossless)?;
+    assert_eq!(pixels_lossless, rgba);
+    Ok(())
+}
