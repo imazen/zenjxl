@@ -951,6 +951,14 @@ pub struct SweepCell {
     /// Byte-identity fingerprint of the resolved state. Cells with
     /// equal fingerprints produce identical bytes for the same input.
     pub fingerprint: u64,
+    /// Encode-COMPUTE dedup key: the byte-affecting RESOLVED encoder
+    /// state (effort schedule + overrides via `resolved_profile()`),
+    /// with effort-inert value-knobs canonicalized. Distinct from
+    /// `fingerprint` (the per-knobset identity used for row dedup):
+    /// many input knobsets share one `encode_fingerprint` and encode
+    /// once, then fan out to a row per input knobset. See
+    /// [`encode_fingerprint`].
+    pub encode_fingerprint: u64,
     /// Ids of candidate cells merged into this one (identical
     /// fingerprints).
     pub aliases: Vec<String>,
@@ -1522,12 +1530,14 @@ fn cross(
             cells[idx].aliases.push(id);
             *merged += 1;
         } else {
+            let efp = encode_fingerprint(&cell_variant);
             by_fingerprint.insert(fp, cells.len());
             cells.push(SweepCell {
                 id,
                 variant: cell_variant,
                 quality,
                 fingerprint: fp,
+                encode_fingerprint: efp,
                 aliases: Vec::new(),
                 deviations,
             });
@@ -1961,6 +1971,149 @@ pub fn fingerprint(variant: &SweepVariant) -> u64 {
             // docs).
             h.opt_u8(p.tree_learn_seeds);
             h.opt_bool(p.lloyd_max_buckets);
+        }
+    }
+    h.0
+}
+
+/// ENCODE-dedup fingerprint: the BYTE-AFFECTING resolved encoder state, with
+/// effort-inert *value* knobs canonicalized away.
+///
+/// Distinct from [`fingerprint`] (the per-knobset IDENTITY fp — every input
+/// knobset stays a separate cell/row so the parquet keeps one row per
+/// knobset). This is the COMPUTE-dedup key: two cells with the same
+/// `encode_fingerprint` produce byte-identical output (validated: e1≡e2; a
+/// downgrade-probe below its effort gate ≡ the default at that effort), so the
+/// encode runs once and fans out to every input knobset sharing it.
+///
+/// `LossyConfig`/`LosslessConfig::resolved_profile()` already applies the
+/// effort schedule + `__expert`/sparse overrides + `faster_decoding`, so the
+/// resolved BOOLEAN/feature knobs are already canonical (a below-gate override
+/// resolves to the same value as the default) and are hashed directly. The
+/// *value* knobs (`k_ac_quant`, `entropy_mul_table`, `k_info_loss_mul_base`,
+/// `fine_grained_step`, `ans_histogram_strategy_vardct`) are written to the
+/// override value regardless of effort, so they are hashed ONLY when their
+/// activating flag is set (else skipped). `butteraugli_iters` IS hashed — it
+/// keeps e8/e9/e10/e11/e12 distinct under the butteraugli-loop build.
+#[must_use]
+pub fn encode_fingerprint(variant: &SweepVariant) -> u64 {
+    let mut h = Fnv::new();
+    match variant {
+        SweepVariant::Lossy(v) => {
+            h.u8(1);
+            h.f32(v.distance);
+            let p = v.build().resolved_profile();
+
+            // Resolved boolean/feature knobs — schedule-canonical, hash directly.
+            h.u8(u8::from(p.use_ans));
+            h.u8(u8::from(p.gaborish));
+            h.u8(u8::from(p.ac_strategy_enabled));
+            h.u8(u8::from(p.use_adaptive_quant));
+            h.u8(u8::from(p.try_dct16));
+            h.u8(u8::from(p.try_dct32));
+            h.u8(u8::from(p.try_dct64));
+            h.u8(u8::from(p.try_dct4x8_afv));
+            h.u8(u8::from(p.non_aligned_eval));
+            h.u8(u8::from(p.chromacity_adjustment));
+            h.u8(u8::from(p.cfl_two_pass));
+            h.u8(u8::from(p.patches));
+            h.u8(u8::from(p.patch_ref_tree_learning));
+            h.u8(u8::from(p.lz77));
+            h.u8(u8::from(p.enhanced_clustering_vardct));
+            h.u32(p.butteraugli_iters); // keeps e8..e12 distinct under butteraugli-loop
+            h.u8(p.extra_dc_precision);
+
+            // VALUE knobs — resolved to the override value even when byte-inert,
+            // so gate on the flag that actually consumes them.
+            if p.use_ans {
+                h.u8(match p.ans_histogram_strategy_vardct {
+                    ANSHistogramStrategy::Fast => 1,
+                    ANSHistogramStrategy::Approximate => 2,
+                    ANSHistogramStrategy::Precise => 3,
+                });
+            }
+            if p.ac_strategy_enabled {
+                h.f32(p.k_info_loss_mul_base);
+                let t = &p.entropy_mul_table;
+                for x in [
+                    t.dct8, t.dct4x4, t.dct4x8, t.identity, t.dct2x2, t.afv, t.dct16x8,
+                    t.dct16x16, t.dct16x32, t.dct32x32, t.dct64x32, t.dct64x64,
+                ] {
+                    h.f32(x);
+                }
+            }
+            if p.non_aligned_eval {
+                h.u8(p.fine_grained_step);
+            }
+            if p.use_adaptive_quant {
+                h.f32(p.k_ac_quant);
+            }
+
+            // Non-EffortProfile byte dims.
+            h.u8(match v.encoder_mode {
+                EncoderMode::Reference => 0,
+                EncoderMode::Experimental => 1,
+            });
+            match &v.strategy {
+                EncoderStrategy::Libjxl => h.u8(0),
+                EncoderStrategy::LeanFaster => h.u8(1),
+                EncoderStrategy::Zenjxl => h.u8(2),
+                EncoderStrategy::Aggressive => h.u8(3),
+                EncoderStrategy::Custom(c) => {
+                    h.u8(4);
+                    h.write(format!("{c:?}").as_bytes());
+                }
+            }
+            h.u8(v.epf_level as u8);
+            h.u8(match v.progressive {
+                ProgressiveMode::Single => 0,
+                ProgressiveMode::QuantizedAcFullAc => 1,
+                ProgressiveMode::DcVlfLfAc => 2,
+            });
+            h.u8(u8::from(v.noise));
+            h.u8(v.faster_decoding);
+        }
+        SweepVariant::Lossless(v) => {
+            h.u8(2);
+            let p = v.build().resolved_profile();
+
+            // Always byte-relevant (modular).
+            h.u8(u8::from(p.use_ans));
+            h.u8(u8::from(p.patches));
+            h.u8(u8::from(p.tree_learning));
+            h.u8(u8::from(p.lz77));
+            // Debug-hash fields whose concrete resolved type varies, so this
+            // compiles regardless of the exact numeric width / Option-ness.
+            h.write(format!("{:?}", p.lz77_method).as_bytes());
+            h.write(format!("{:?}", (p.nb_rcts_to_try, &p.forced_rct, p.wp_num_param_sets)).as_bytes());
+
+            // Tree-learning detail: byte-relevant only when tree learning runs.
+            if p.tree_learning {
+                h.write(
+                    format!(
+                        "{:?}",
+                        (
+                            p.tree_max_buckets,
+                            p.tree_num_properties,
+                            p.tree_threshold_base,
+                            p.tree_learn_seeds,
+                            p.tree_sample_fraction,
+                            p.tree_max_samples_fixed,
+                            p.lloyd_max_buckets,
+                            p.use_streaming_dedup,
+                            p.gather_dedup,
+                        )
+                    )
+                    .as_bytes(),
+                );
+            }
+
+            // LosslessConfig-level dims NOT in EffortProfile. `predictor = None`
+            // (auto) resolves content-dependently, so hash the OVERRIDE spelling
+            // (conservative — never merge an auto cell across efforts).
+            h.opt_u8(v.predictor);
+            h.opt_u8(v.group_size_shift);
+            h.u8(v.faster_decoding);
         }
     }
     h.0
