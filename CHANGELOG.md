@@ -19,6 +19,21 @@
   `ThreadingInformation::parallel(max_efficient_threads)` is now 1-arg.
 
 ### Added
+- **Typed one-shot convenience free functions** (`src/lib.rs`): `encode(img:
+  zenpixels::PixelSlice) -> Vec<u8>` (lossy, default butteraugli distance 1.0)
+  and `encode_lossless(img: zenpixels::PixelSlice)` (gated `encode`), plus
+  `decode_rgba8(jxl) -> (rgba, w, h)` (gated `decode`). The encode input is a
+  self-describing `zenpixels::PixelSlice` — pixel format, dimensions, and row
+  stride ride with the pixels, so there is no separate `width`/`height` to keep
+  in sync and no buffer-length-mismatch class of bug; any encoder-supported
+  format (RGB/RGBA/BGRA/grayscale × 8/16-bit, plus linear-f32) is accepted and
+  strided slices are packed before encode. `decode_rgba8` normalizes any source
+  to packed RGBA8 via `zenpixels-convert` (re-enabled on the `decode` feature).
+  All return the crate's natural `whereat::At<JxlError>`; the
+  `LossyConfig`/`LosslessConfig` builders stay the power API. README Quick start
+  leads with these; mirrored in `tests/readme_examples.rs`. (Replaces the
+  raw-`(&[u8], w, h)` `encode_rgba8_bytes` one-shots removed in the preceding
+  commit.)
 - **`AllocPreference` honored at untrusted decode allocations** (3-mode,
   per-site). The wrapper-owned output buffers — the single-image output buffer
   (`src/decode.rs`), the per-animation-frame buffer, and the recursive
