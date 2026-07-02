@@ -1,6 +1,16 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.0] - Unreleased
+
+**Breaking release** (0.x minor bump): the zencodec trait impls' associated
+`Error` type changed (see *Changed* below; merged as `9b948f4`, PR #16). The
+package version was bumped 0.2.1 → 0.3.0 in-tree ahead of release.
+**Release gate:** publishing 0.3.0 requires zencodec 0.1.26 (the
+CategorizedError taxonomy, zencodec#103) on crates.io; until then the
+`[patch.crates-io]` git pin on the `cancellation-classification-99` branch
+stays in place and the declared `zencodec` requirement stays at 0.1.25 (a
+0.1.26 requirement would not match the patch's 0.1.25 and nothing >= 0.1.26
+is published).
 
 ### Documentation
 - README overhaul: full badge row (CI/crates.io/lib.rs/docs.rs/MSRV/license),
@@ -10,7 +20,7 @@
 
 ### Changed
 - **zencodec trait impls return `At<CodecError>` — the envelope (Pattern B)**
-  (PR #16, error-taxonomy). All eight `zencodec` trait impls behind the
+  (PR #16, error-taxonomy, merged as `9b948f4`). All eight `zencodec` trait impls behind the
   `zencodec` feature (`EncoderConfig` / `EncodeJob` / `Encoder` /
   `AnimationFrameEncoder` / `DecoderConfig` / `DecodeJob` / `Decode` /
   `AnimationFrameDecoder`) now use `type Error = At<zencodec::CodecError>`

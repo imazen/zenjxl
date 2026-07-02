@@ -1,6 +1,6 @@
 [package]
 name = "zenjxl"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.93"
 license = "AGPL-3.0-only OR LicenseRef-Imazen-Commercial"
@@ -24,6 +24,13 @@ whereat = { version = "0.1.5"}
 rgb = { version = "0.8.53", default-features = false, features = ["as-bytes"] }
 imgref = "1.12.0"
 enough = "0.4.3"
+# RELEASE GATE: 0.3.0 consumes the CategorizedError taxonomy (zencodec#103),
+# which is unreleased — it lives on the `cancellation-classification-99` branch
+# (still versioned 0.1.25) via the [patch.crates-io] pin below. The published
+# zencodec 0.1.25 does NOT have it, so this requirement MUST be bumped to
+# "0.1.26" (and the patch dropped) before zenjxl 0.3.0 can be published.
+# Declaring "0.1.26" today would break resolution: the patch's 0.1.25 would no
+# longer match the requirement and crates.io has nothing >= 0.1.26 yet.
 zencodec = { version = "0.1.25" }
 zenpixels = { version = "0.2.11", default-features = false, features = ["rgb"] }
 # Pixel-exact orientation baking (`orient::apply_orientation`) for the zencodec
