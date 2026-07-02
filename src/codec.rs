@@ -458,7 +458,12 @@ mod encoding {
     }
 
     impl zencodec::encode::EncoderConfig for JxlEncoderConfig {
-        type Error = At<JxlError>;
+        // Envelope (Pattern B): a generic consumer recovers `ErrorCategory` +
+        // codec name through `Dyn*` dispatch. None of this config's methods are
+        // fallible, so only the associated type changes; `JxlError` (the detail
+        // + category source) flows through the bridge when a fallible boundary
+        // method on a downstream type errors.
+        type Error = At<zencodec::CodecError>;
         type Job = JxlEncodeJob;
 
         fn format() -> ImageFormat {
@@ -627,7 +632,7 @@ mod encoding {
     }
 
     impl zencodec::encode::EncodeJob for JxlEncodeJob {
-        type Error = At<JxlError>;
+        type Error = At<zencodec::CodecError>;
         type Enc = JxlEncoder;
         type AnimationFrameEnc = JxlAnimationFrameEncoder;
 
@@ -656,7 +661,9 @@ mod encoding {
             self
         }
 
-        fn encoder(self) -> Result<JxlEncoder, At<JxlError>> {
+        fn encoder(self) -> Result<JxlEncoder, At<zencodec::CodecError>> {
+            // Infallible: no `JxlError` is produced, so the `At<CodecError>`
+            // return type is never instantiated here.
             let mode = apply_threads(&self.config.mode, &self.limits);
             Ok(JxlEncoder {
                 mode,
@@ -669,7 +676,9 @@ mod encoding {
             })
         }
 
-        fn animation_frame_encoder(self) -> Result<JxlAnimationFrameEncoder, At<JxlError>> {
+        fn animation_frame_encoder(
+            self,
+        ) -> Result<JxlAnimationFrameEncoder, At<zencodec::CodecError>> {
             let mode = apply_threads(&self.config.mode, &self.limits);
             Ok(JxlAnimationFrameEncoder::from_job(
                 mode,
@@ -981,56 +990,64 @@ mod encoding {
     }
 
     impl zencodec::encode::Encoder for JxlEncoder {
-        type Error = At<JxlError>;
+        type Error = At<zencodec::CodecError>;
 
-        fn reject(op: UnsupportedOperation) -> At<JxlError> {
-            whereat::at!(JxlError::UnsupportedOperation(op))
+        fn reject(op: UnsupportedOperation) -> At<zencodec::CodecError> {
+            // Bridge a bare native value into the envelope (see
+            // `From<JxlError> for At<CodecError>`).
+            JxlError::from(op).into()
         }
 
-        fn encode(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<JxlError>> {
-            use zenpixels::PixelFormat;
+        fn encode(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<zencodec::CodecError>> {
+            // The fallible body stays `At<JxlError>` (internal `?` sites
+            // untouched); convert once at the boundary, preserving the trace.
+            (move || -> Result<EncodeOutput, At<JxlError>> {
+                use zenpixels::PixelFormat;
 
-            let width = pixels.width();
-            let height = pixels.rows();
+                let width = pixels.width();
+                let height = pixels.rows();
 
-            // Rgbx8 / Bgrx8: byte 3 is undefined padding — strip to 3-channel RGB
-            // so the encoder doesn't treat the padding as alpha.
-            let pf = pixels.descriptor().pixel_format();
-            if matches!(pf, PixelFormat::Rgbx8 | PixelFormat::Bgrx8) {
-                self.check_limits(width, height, 3)?;
-                let raw = pixels.contiguous_bytes();
-                let mut rgb =
-                    alloc::vec::Vec::with_capacity((width as usize) * (height as usize) * 3);
-                if matches!(pf, PixelFormat::Rgbx8) {
-                    for px in raw.chunks_exact(4) {
-                        rgb.extend_from_slice(&[px[0], px[1], px[2]]);
+                // Rgbx8 / Bgrx8: byte 3 is undefined padding — strip to 3-channel RGB
+                // so the encoder doesn't treat the padding as alpha.
+                let pf = pixels.descriptor().pixel_format();
+                if matches!(pf, PixelFormat::Rgbx8 | PixelFormat::Bgrx8) {
+                    self.check_limits(width, height, 3)?;
+                    let raw = pixels.contiguous_bytes();
+                    let mut rgb =
+                        alloc::vec::Vec::with_capacity((width as usize) * (height as usize) * 3);
+                    if matches!(pf, PixelFormat::Rgbx8) {
+                        for px in raw.chunks_exact(4) {
+                            rgb.extend_from_slice(&[px[0], px[1], px[2]]);
+                        }
+                    } else {
+                        // Bgrx8: swap B↔R while stripping.
+                        for px in raw.chunks_exact(4) {
+                            rgb.extend_from_slice(&[px[2], px[1], px[0]]);
+                        }
                     }
-                } else {
-                    // Bgrx8: swap B↔R while stripping.
-                    for px in raw.chunks_exact(4) {
-                        rgb.extend_from_slice(&[px[2], px[1], px[0]]);
-                    }
+                    let encoded =
+                        self.encode_with_metadata(&rgb, width, height, PixelLayout::Rgb8)?;
+                    let encoded = self.maybe_attach_gain_map(encoded);
+                    self.check_encoded_output_size(&encoded)?;
+                    return Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
+                        .with_mime_type("image/jxl")
+                        .with_extension("jxl"));
                 }
-                let encoded = self.encode_with_metadata(&rgb, width, height, PixelLayout::Rgb8)?;
+
+                let layout = Self::descriptor_to_layout(pixels.descriptor())?;
+                let bpp = pixels.descriptor().bytes_per_pixel() as u32;
+                self.check_limits(width, height, bpp)?;
+
+                let data = pixels.contiguous_bytes();
+                let encoded = self.encode_with_metadata(&data, width, height, layout)?;
                 let encoded = self.maybe_attach_gain_map(encoded);
                 self.check_encoded_output_size(&encoded)?;
-                return Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
+
+                Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                     .with_mime_type("image/jxl")
-                    .with_extension("jxl"));
-            }
-
-            let layout = Self::descriptor_to_layout(pixels.descriptor())?;
-            let bpp = pixels.descriptor().bytes_per_pixel() as u32;
-            self.check_limits(width, height, bpp)?;
-
-            let data = pixels.contiguous_bytes();
-            let encoded = self.encode_with_metadata(&data, width, height, layout)?;
-            let encoded = self.maybe_attach_gain_map(encoded);
-            self.check_encoded_output_size(&encoded)?;
-
-            Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
-                .with_mime_type("image/jxl")
-                .with_extension("jxl"))
+                    .with_extension("jxl"))
+            })()
+            .map_err(zencodec::CodecError::of)
         }
 
         fn encode_srgba8(
@@ -1040,148 +1057,161 @@ mod encoding {
             width: u32,
             height: u32,
             stride_pixels: u32,
-        ) -> Result<EncodeOutput, At<JxlError>> {
-            let w = width as usize;
-            let h = height as usize;
-            let stride = stride_pixels as usize;
+        ) -> Result<EncodeOutput, At<zencodec::CodecError>> {
+            (move || -> Result<EncodeOutput, At<JxlError>> {
+                let w = width as usize;
+                let h = height as usize;
+                let stride = stride_pixels as usize;
 
-            if make_opaque {
-                // Encode as RGB — strip alpha entirely for smaller output.
-                self.check_limits(width, height, 3)?;
-                // check_limits already gates dimensions, but use checked_mul
-                // here so a degenerate width/height pair can't overflow the
-                // capacity computation on its way to a panic.
-                let rgb_capacity =
-                    w.checked_mul(h)
-                        .and_then(|v| v.checked_mul(3))
-                        .ok_or_else(|| {
-                            whereat::at!(JxlError::LimitExceeded("RGB capacity overflow".into(),))
-                        })?;
-                let mut rgb = Vec::with_capacity(rgb_capacity);
-                for y in 0..h {
-                    let row_start = y * stride * 4;
-                    let row = &data[row_start..row_start + w * 4];
-                    for px in row.chunks_exact(4) {
-                        rgb.push(px[0]);
-                        rgb.push(px[1]);
-                        rgb.push(px[2]);
-                    }
-                }
-                let encoded = self.encode_with_metadata(&rgb, width, height, PixelLayout::Rgb8)?;
-                let encoded = self.maybe_attach_gain_map(encoded);
-                self.check_encoded_output_size(&encoded)?;
-                Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
-                    .with_mime_type("image/jxl")
-                    .with_extension("jxl"))
-            } else {
-                // RGBA path — copy contiguous if strided, otherwise zero-copy.
-                self.check_limits(width, height, 4)?;
-                let pixel_data: alloc::borrow::Cow<'_, [u8]> = if stride == w {
-                    alloc::borrow::Cow::Borrowed(&data[..w * h * 4])
-                } else {
-                    let mut buf = Vec::with_capacity(w * h * 4);
+                if make_opaque {
+                    // Encode as RGB — strip alpha entirely for smaller output.
+                    self.check_limits(width, height, 3)?;
+                    // check_limits already gates dimensions, but use checked_mul
+                    // here so a degenerate width/height pair can't overflow the
+                    // capacity computation on its way to a panic.
+                    let rgb_capacity =
+                        w.checked_mul(h)
+                            .and_then(|v| v.checked_mul(3))
+                            .ok_or_else(|| {
+                                whereat::at!(JxlError::LimitExceeded(
+                                    "RGB capacity overflow".into(),
+                                ))
+                            })?;
+                    let mut rgb = Vec::with_capacity(rgb_capacity);
                     for y in 0..h {
                         let row_start = y * stride * 4;
-                        buf.extend_from_slice(&data[row_start..row_start + w * 4]);
+                        let row = &data[row_start..row_start + w * 4];
+                        for px in row.chunks_exact(4) {
+                            rgb.push(px[0]);
+                            rgb.push(px[1]);
+                            rgb.push(px[2]);
+                        }
                     }
-                    alloc::borrow::Cow::Owned(buf)
+                    let encoded =
+                        self.encode_with_metadata(&rgb, width, height, PixelLayout::Rgb8)?;
+                    let encoded = self.maybe_attach_gain_map(encoded);
+                    self.check_encoded_output_size(&encoded)?;
+                    Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
+                        .with_mime_type("image/jxl")
+                        .with_extension("jxl"))
+                } else {
+                    // RGBA path — copy contiguous if strided, otherwise zero-copy.
+                    self.check_limits(width, height, 4)?;
+                    let pixel_data: alloc::borrow::Cow<'_, [u8]> = if stride == w {
+                        alloc::borrow::Cow::Borrowed(&data[..w * h * 4])
+                    } else {
+                        let mut buf = Vec::with_capacity(w * h * 4);
+                        for y in 0..h {
+                            let row_start = y * stride * 4;
+                            buf.extend_from_slice(&data[row_start..row_start + w * 4]);
+                        }
+                        alloc::borrow::Cow::Owned(buf)
+                    };
+                    let encoded =
+                        self.encode_with_metadata(&pixel_data, width, height, PixelLayout::Rgba8)?;
+                    let encoded = self.maybe_attach_gain_map(encoded);
+                    self.check_encoded_output_size(&encoded)?;
+                    Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
+                        .with_mime_type("image/jxl")
+                        .with_extension("jxl"))
+                }
+            })()
+            .map_err(zencodec::CodecError::of)
+        }
+
+        fn push_rows(&mut self, rows: PixelSlice<'_>) -> Result<(), At<zencodec::CodecError>> {
+            (move || -> Result<(), At<JxlError>> {
+                use zenpixels::PixelFormat;
+
+                let desc = rows.descriptor();
+                let width = rows.width();
+                let num_rows = rows.rows();
+
+                // Rgbx8 / Bgrx8: strip padding byte and coerce to Rgb8 in the
+                // accumulated buffer, then treat the stream as Rgb8 internally.
+                let pf = desc.pixel_format();
+                let (layout, bytes_cow): (PixelLayout, alloc::borrow::Cow<'_, [u8]>) =
+                    if matches!(pf, PixelFormat::Rgbx8 | PixelFormat::Bgrx8) {
+                        let raw = rows.contiguous_bytes();
+                        let mut rgb = alloc::vec::Vec::with_capacity(
+                            (width as usize) * (num_rows as usize) * 3,
+                        );
+                        if matches!(pf, PixelFormat::Rgbx8) {
+                            for px in raw.chunks_exact(4) {
+                                rgb.extend_from_slice(&[px[0], px[1], px[2]]);
+                            }
+                        } else {
+                            for px in raw.chunks_exact(4) {
+                                rgb.extend_from_slice(&[px[2], px[1], px[0]]);
+                            }
+                        }
+                        (PixelLayout::Rgb8, alloc::borrow::Cow::Owned(rgb))
+                    } else {
+                        (Self::descriptor_to_layout(desc)?, rows.contiguous_bytes())
+                    };
+                let bytes: &[u8] = &bytes_cow;
+
+                match &mut self.stream {
+                    StreamState::Empty => {
+                        let mut data = Vec::new();
+                        data.extend_from_slice(bytes);
+                        self.stream = StreamState::Accumulating {
+                            width,
+                            layout,
+                            descriptor: desc,
+                            data,
+                            rows_pushed: num_rows,
+                        };
+                    }
+                    StreamState::Accumulating {
+                        width: w,
+                        descriptor: d,
+                        data,
+                        rows_pushed,
+                        ..
+                    } => {
+                        if width != *w || desc != *d {
+                            return Err(whereat::at!(JxlError::InvalidInput(
+                                "push_rows: width or pixel format changed between calls".into(),
+                            )));
+                        }
+                        data.extend_from_slice(bytes);
+                        *rows_pushed += num_rows;
+                    }
+                }
+                Ok(())
+            })()
+            .map_err(zencodec::CodecError::of)
+        }
+
+        fn finish(self) -> Result<EncodeOutput, At<zencodec::CodecError>> {
+            (move || -> Result<EncodeOutput, At<JxlError>> {
+                let StreamState::Accumulating {
+                    width,
+                    layout,
+                    descriptor,
+                    ref data,
+                    rows_pushed,
+                    ..
+                } = self.stream
+                else {
+                    return Err(whereat::at!(JxlError::InvalidInput(
+                        "finish: no rows were pushed".into(),
+                    )));
                 };
-                let encoded =
-                    self.encode_with_metadata(&pixel_data, width, height, PixelLayout::Rgba8)?;
+
+                let bpp = descriptor.bytes_per_pixel() as u32;
+                self.check_limits(width, rows_pushed, bpp)?;
+
+                let encoded = self.encode_with_metadata(data, width, rows_pushed, layout)?;
                 let encoded = self.maybe_attach_gain_map(encoded);
                 self.check_encoded_output_size(&encoded)?;
+
                 Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                     .with_mime_type("image/jxl")
                     .with_extension("jxl"))
-            }
-        }
-
-        fn push_rows(&mut self, rows: PixelSlice<'_>) -> Result<(), At<JxlError>> {
-            use zenpixels::PixelFormat;
-
-            let desc = rows.descriptor();
-            let width = rows.width();
-            let num_rows = rows.rows();
-
-            // Rgbx8 / Bgrx8: strip padding byte and coerce to Rgb8 in the
-            // accumulated buffer, then treat the stream as Rgb8 internally.
-            let pf = desc.pixel_format();
-            let (layout, bytes_cow): (PixelLayout, alloc::borrow::Cow<'_, [u8]>) =
-                if matches!(pf, PixelFormat::Rgbx8 | PixelFormat::Bgrx8) {
-                    let raw = rows.contiguous_bytes();
-                    let mut rgb =
-                        alloc::vec::Vec::with_capacity((width as usize) * (num_rows as usize) * 3);
-                    if matches!(pf, PixelFormat::Rgbx8) {
-                        for px in raw.chunks_exact(4) {
-                            rgb.extend_from_slice(&[px[0], px[1], px[2]]);
-                        }
-                    } else {
-                        for px in raw.chunks_exact(4) {
-                            rgb.extend_from_slice(&[px[2], px[1], px[0]]);
-                        }
-                    }
-                    (PixelLayout::Rgb8, alloc::borrow::Cow::Owned(rgb))
-                } else {
-                    (Self::descriptor_to_layout(desc)?, rows.contiguous_bytes())
-                };
-            let bytes: &[u8] = &bytes_cow;
-
-            match &mut self.stream {
-                StreamState::Empty => {
-                    let mut data = Vec::new();
-                    data.extend_from_slice(bytes);
-                    self.stream = StreamState::Accumulating {
-                        width,
-                        layout,
-                        descriptor: desc,
-                        data,
-                        rows_pushed: num_rows,
-                    };
-                }
-                StreamState::Accumulating {
-                    width: w,
-                    descriptor: d,
-                    data,
-                    rows_pushed,
-                    ..
-                } => {
-                    if width != *w || desc != *d {
-                        return Err(whereat::at!(JxlError::InvalidInput(
-                            "push_rows: width or pixel format changed between calls".into(),
-                        )));
-                    }
-                    data.extend_from_slice(bytes);
-                    *rows_pushed += num_rows;
-                }
-            }
-            Ok(())
-        }
-
-        fn finish(self) -> Result<EncodeOutput, At<JxlError>> {
-            let StreamState::Accumulating {
-                width,
-                layout,
-                descriptor,
-                ref data,
-                rows_pushed,
-                ..
-            } = self.stream
-            else {
-                return Err(whereat::at!(JxlError::InvalidInput(
-                    "finish: no rows were pushed".into(),
-                )));
-            };
-
-            let bpp = descriptor.bytes_per_pixel() as u32;
-            self.check_limits(width, rows_pushed, bpp)?;
-
-            let encoded = self.encode_with_metadata(data, width, rows_pushed, layout)?;
-            let encoded = self.maybe_attach_gain_map(encoded);
-            self.check_encoded_output_size(&encoded)?;
-
-            Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
-                .with_mime_type("image/jxl")
-                .with_extension("jxl"))
+            })()
+            .map_err(zencodec::CodecError::of)
         }
     }
 
@@ -1299,10 +1329,10 @@ mod encoding {
     }
 
     impl zencodec::encode::AnimationFrameEncoder for JxlAnimationFrameEncoder {
-        type Error = At<JxlError>;
+        type Error = At<zencodec::CodecError>;
 
-        fn reject(op: UnsupportedOperation) -> At<JxlError> {
-            whereat::at!(JxlError::UnsupportedOperation(op))
+        fn reject(op: UnsupportedOperation) -> At<zencodec::CodecError> {
+            JxlError::from(op).into()
         }
 
         fn push_frame(
@@ -1310,133 +1340,139 @@ mod encoding {
             pixels: PixelSlice<'_>,
             duration_ms: u32,
             stop: Option<&dyn Stop>,
-        ) -> Result<(), At<JxlError>> {
-            use zenpixels::PixelFormat;
+        ) -> Result<(), At<zencodec::CodecError>> {
+            (move || -> Result<(), At<JxlError>> {
+                use zenpixels::PixelFormat;
 
-            // Check cancellation before doing any work.
-            if let Some(stop) = stop {
-                stop.check()
-                    .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
-            }
+                // Check cancellation before doing any work.
+                if let Some(stop) = stop {
+                    stop.check()
+                        .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
+                }
 
-            let desc = pixels.descriptor();
-            let pf = desc.pixel_format();
-            let strip_padding = matches!(pf, PixelFormat::Rgbx8 | PixelFormat::Bgrx8);
-            let layout = if strip_padding {
-                PixelLayout::Rgb8
-            } else {
-                JxlEncoder::descriptor_to_layout(desc)?
-            };
-            let w = pixels.width();
-            let h = pixels.rows();
+                let desc = pixels.descriptor();
+                let pf = desc.pixel_format();
+                let strip_padding = matches!(pf, PixelFormat::Rgbx8 | PixelFormat::Bgrx8);
+                let layout = if strip_padding {
+                    PixelLayout::Rgb8
+                } else {
+                    JxlEncoder::descriptor_to_layout(desc)?
+                };
+                let w = pixels.width();
+                let h = pixels.rows();
 
-            if self.pixel_data.is_empty() {
-                // Validate dimensions against limits on first frame.
+                if self.pixel_data.is_empty() {
+                    // Validate dimensions against limits on first frame.
+                    if let Some(ref limits) = self.limits {
+                        limits
+                            .check_dimensions(w, h)
+                            .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
+                    }
+                    self.width = w;
+                    self.height = h;
+                    self.layout = Some(layout);
+                } else if w != self.width || h != self.height {
+                    return Err(whereat::at!(JxlError::InvalidInput(
+                        "animation frame dimensions must match first frame".into(),
+                    )));
+                }
+
+                // Check max_frames limit.
                 if let Some(ref limits) = self.limits {
                     limits
-                        .check_dimensions(w, h)
+                        .check_frames(self.pixel_data.len() as u32 + 1)
                         .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
                 }
-                self.width = w;
-                self.height = h;
-                self.layout = Some(layout);
-            } else if w != self.width || h != self.height {
-                return Err(whereat::at!(JxlError::InvalidInput(
-                    "animation frame dimensions must match first frame".into(),
-                )));
-            }
 
-            // Check max_frames limit.
-            if let Some(ref limits) = self.limits {
-                limits
-                    .check_frames(self.pixel_data.len() as u32 + 1)
-                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
-            }
-
-            let frame_data = if strip_padding {
-                let raw = pixels.contiguous_bytes();
-                let mut rgb = Vec::with_capacity((w as usize) * (h as usize) * 3);
-                if matches!(pf, PixelFormat::Rgbx8) {
-                    for px in raw.chunks_exact(4) {
-                        rgb.extend_from_slice(&[px[0], px[1], px[2]]);
+                let frame_data = if strip_padding {
+                    let raw = pixels.contiguous_bytes();
+                    let mut rgb = Vec::with_capacity((w as usize) * (h as usize) * 3);
+                    if matches!(pf, PixelFormat::Rgbx8) {
+                        for px in raw.chunks_exact(4) {
+                            rgb.extend_from_slice(&[px[0], px[1], px[2]]);
+                        }
+                    } else {
+                        for px in raw.chunks_exact(4) {
+                            rgb.extend_from_slice(&[px[2], px[1], px[0]]);
+                        }
                     }
+                    rgb
                 } else {
-                    for px in raw.chunks_exact(4) {
-                        rgb.extend_from_slice(&[px[2], px[1], px[0]]);
-                    }
+                    pixels.contiguous_bytes().into_owned()
+                };
+                let frame_bytes = frame_data.len() as u64;
+                self.accumulated_bytes += frame_bytes;
+
+                // Check accumulated memory across ALL frames, not just the first.
+                if let Some(ref limits) = self.limits {
+                    limits
+                        .check_memory(self.accumulated_bytes)
+                        .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
                 }
-                rgb
-            } else {
-                pixels.contiguous_bytes().into_owned()
-            };
-            let frame_bytes = frame_data.len() as u64;
-            self.accumulated_bytes += frame_bytes;
 
-            // Check accumulated memory across ALL frames, not just the first.
-            if let Some(ref limits) = self.limits {
-                limits
-                    .check_memory(self.accumulated_bytes)
-                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
-            }
-
-            self.pixel_data.push(frame_data);
-            self.frames.push(duration_ms);
-            Ok(())
+                self.pixel_data.push(frame_data);
+                self.frames.push(duration_ms);
+                Ok(())
+            })()
+            .map_err(zencodec::CodecError::of)
         }
 
-        fn finish(self, stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<JxlError>> {
-            // Check cancellation before expensive encode.
-            if let Some(stop) = stop {
-                stop.check()
-                    .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
-            }
+        fn finish(self, stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<zencodec::CodecError>> {
+            (move || -> Result<EncodeOutput, At<JxlError>> {
+                // Check cancellation before expensive encode.
+                if let Some(stop) = stop {
+                    stop.check()
+                        .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
+                }
 
-            let layout = self
-                .layout
-                .ok_or_else(|| whereat::at!(JxlError::InvalidInput("no frames pushed".into())))?;
+                let layout = self.layout.ok_or_else(|| {
+                    whereat::at!(JxlError::InvalidInput("no frames pushed".into()))
+                })?;
 
-            let animation = AnimationParams {
-                tps_numerator: 1000,
-                tps_denominator: 1,
-                num_loops: self.loop_count.unwrap_or(0),
-                // jxl-encoder 0.3.2 (W12-4 a1-audit chunk-1) added
-                // associated/premultiplied-alpha signalling on the
-                // animation path. zenjxl's high-level wrapper takes
-                // straight-alpha pixels, matching the new default.
-                ..AnimationParams::default()
-            };
+                let animation = AnimationParams {
+                    tps_numerator: 1000,
+                    tps_denominator: 1,
+                    num_loops: self.loop_count.unwrap_or(0),
+                    // jxl-encoder 0.3.2 (W12-4 a1-audit chunk-1) added
+                    // associated/premultiplied-alpha signalling on the
+                    // animation path. zenjxl's high-level wrapper takes
+                    // straight-alpha pixels, matching the new default.
+                    ..AnimationParams::default()
+                };
 
-            let anim_frames: Vec<AnimationFrame<'_>> = self
-                .pixel_data
-                .iter()
-                .zip(&self.frames)
-                // jxl-encoder 0.3.2 expanded AnimationFrame with
-                // blend_mode / blend_source / save_as_reference /
-                // reference_only / name / timecode for multi-layer
-                // animation API parity with libjxl frame headers
-                // (jxl-encoder commit d0e47838). zenjxl's wrapper
-                // produces single-pass replace-blend frames, so
-                // `AnimationFrame::new` is the right constructor —
-                // it leaves every optional field at the encoder
-                // default (= the prior `pixels + duration`-only
-                // behaviour).
-                .map(|(data, &duration)| AnimationFrame::new(data, duration))
-                .collect();
+                let anim_frames: Vec<AnimationFrame<'_>> = self
+                    .pixel_data
+                    .iter()
+                    .zip(&self.frames)
+                    // jxl-encoder 0.3.2 expanded AnimationFrame with
+                    // blend_mode / blend_source / save_as_reference /
+                    // reference_only / name / timecode for multi-layer
+                    // animation API parity with libjxl frame headers
+                    // (jxl-encoder commit d0e47838). zenjxl's wrapper
+                    // produces single-pass replace-blend frames, so
+                    // `AnimationFrame::new` is the right constructor —
+                    // it leaves every optional field at the encoder
+                    // default (= the prior `pixels + duration`-only
+                    // behaviour).
+                    .map(|(data, &duration)| AnimationFrame::new(data, duration))
+                    .collect();
 
-            let encoded = match &self.mode {
-                JxlEncMode::Lossy(cfg) => cfg
-                    .encode_animation(self.width, self.height, layout, &animation, &anim_frames)
-                    .map_err_at(JxlError::Encode)?,
-                JxlEncMode::Lossless(cfg) => cfg
-                    .encode_animation(self.width, self.height, layout, &animation, &anim_frames)
-                    .map_err_at(JxlError::Encode)?,
-            };
+                let encoded = match &self.mode {
+                    JxlEncMode::Lossy(cfg) => cfg
+                        .encode_animation(self.width, self.height, layout, &animation, &anim_frames)
+                        .map_err_at(JxlError::Encode)?,
+                    JxlEncMode::Lossless(cfg) => cfg
+                        .encode_animation(self.width, self.height, layout, &animation, &anim_frames)
+                        .map_err_at(JxlError::Encode)?,
+                };
 
-            let encoded = self.wrap_with_metadata_and_gain_map(encoded);
+                let encoded = self.wrap_with_metadata_and_gain_map(encoded);
 
-            Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
-                .with_mime_type("image/jxl")
-                .with_extension("jxl"))
+                Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
+                    .with_mime_type("image/jxl")
+                    .with_extension("jxl"))
+            })()
+            .map_err(zencodec::CodecError::of)
         }
     }
 }
@@ -1711,7 +1747,10 @@ mod decoding {
     }
 
     impl zencodec::decode::DecoderConfig for JxlDecoderConfig {
-        type Error = At<JxlError>;
+        // Envelope (Pattern B) — see the `EncoderConfig` impl. No fallible
+        // methods here; the bridge carries `JxlError` at the `DecodeJob`
+        // boundaries.
+        type Error = At<zencodec::CodecError>;
         type Job<'a> = JxlDecodeJob;
 
         fn formats() -> &'static [ImageFormat] {
@@ -2205,9 +2244,9 @@ mod decoding {
     }
 
     impl<'a> zencodec::decode::DecodeJob<'a> for JxlDecodeJob {
-        type Error = At<JxlError>;
+        type Error = At<zencodec::CodecError>;
         type Dec = JxlDecoder<'a>;
-        type StreamDec = Unsupported<At<JxlError>>;
+        type StreamDec = Unsupported<At<zencodec::CodecError>>;
         type AnimationFrameDec = JxlAnimationFrameDecoder;
 
         fn with_stop(mut self, stop: zencodec::StopToken) -> Self {
@@ -2242,96 +2281,108 @@ mod decoding {
             self
         }
 
-        fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<JxlError>> {
-            // Enforce input size limit.
-            if let Some(ref limits) = self.limits {
-                limits
-                    .check_input_size(data.len() as u64)
-                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
-            }
-            // Probe in the same orientation mode the decode will use, so the
-            // reported dims + orientation match what `decode` emits.
-            let info =
-                probe_with_orientation(data, Self::decoder_adjust_orientation(self.orientation))?;
-            // Enforce dimension limits after probing the header. The post-decode
-            // extra transform (ExactTransform/CorrectAndTransform) only reorders
-            // pixels, so the buffer size to bound is the emitted geometry here.
-            if let Some(ref limits) = self.limits {
-                limits
-                    .check_dimensions(info.width, info.height)
-                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
-            }
-            let image_info = Self::jxl_info_to_image_info(&info).with_source_encoding_details(info);
-            // Fold in the extra transform's dims/Identity for the bake hints
-            // that the decoder can't express natively.
-            let image_info = Self::report_probe_for_hint(image_info, self.orientation);
-            Ok(Self::apply_policy(image_info, &self.policy))
+        fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<zencodec::CodecError>> {
+            (move || -> Result<ImageInfo, At<JxlError>> {
+                // Enforce input size limit.
+                if let Some(ref limits) = self.limits {
+                    limits
+                        .check_input_size(data.len() as u64)
+                        .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
+                }
+                // Probe in the same orientation mode the decode will use, so the
+                // reported dims + orientation match what `decode` emits.
+                let info = probe_with_orientation(
+                    data,
+                    Self::decoder_adjust_orientation(self.orientation),
+                )?;
+                // Enforce dimension limits after probing the header. The post-decode
+                // extra transform (ExactTransform/CorrectAndTransform) only reorders
+                // pixels, so the buffer size to bound is the emitted geometry here.
+                if let Some(ref limits) = self.limits {
+                    limits
+                        .check_dimensions(info.width, info.height)
+                        .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
+                }
+                let image_info =
+                    Self::jxl_info_to_image_info(&info).with_source_encoding_details(info);
+                // Fold in the extra transform's dims/Identity for the bake hints
+                // that the decoder can't express natively.
+                let image_info = Self::report_probe_for_hint(image_info, self.orientation);
+                Ok(Self::apply_policy(image_info, &self.policy))
+            })()
+            .map_err(zencodec::CodecError::of)
         }
 
-        fn output_info(&self, data: &[u8]) -> Result<OutputInfo, At<JxlError>> {
-            // Enforce input size limit.
-            if let Some(ref limits) = self.limits {
-                limits
-                    .check_input_size(data.len() as u64)
-                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
-            }
-            // Probe in the chosen orientation mode so `info` carries the emitted
-            // (decoder-native) geometry; the extra transform is folded in below.
-            let info =
-                probe_with_orientation(data, Self::decoder_adjust_orientation(self.orientation))?;
-            // Bound the actual decode against the decoder-native geometry (the
-            // extra transform only reorders pixels, never grows the buffer).
-            if let Some(ref limits) = self.limits {
-                limits
-                    .check_dimensions(info.width, info.height)
-                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
-            }
-            let native_desc = Self::native_descriptor(&info);
-            // Final emitted geometry = decoder-native geometry with the extra
-            // transform's axis-swap folded in.
-            let extra = Self::extra_orientation(self.orientation);
-            let (ow, oh) = extra.output_dimensions(info.width, info.height);
-            // Total orientation the pipeline applies to the *stored* pixels —
-            // the decoder's native bake (intrinsic on the bake path, Identity on
-            // preserve) composed with the extra transform. Reported so the
-            // framework's "remaining for caller" arithmetic stays correct.
-            let applied = Self::total_applied_orientation(&info, self.orientation);
-            Ok(OutputInfo::full_decode(ow, oh, native_desc)
-                .with_alpha(info.has_alpha)
-                .with_orientation_applied(applied))
+        fn output_info(&self, data: &[u8]) -> Result<OutputInfo, At<zencodec::CodecError>> {
+            (move || -> Result<OutputInfo, At<JxlError>> {
+                // Enforce input size limit.
+                if let Some(ref limits) = self.limits {
+                    limits
+                        .check_input_size(data.len() as u64)
+                        .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
+                }
+                // Probe in the chosen orientation mode so `info` carries the emitted
+                // (decoder-native) geometry; the extra transform is folded in below.
+                let info = probe_with_orientation(
+                    data,
+                    Self::decoder_adjust_orientation(self.orientation),
+                )?;
+                // Bound the actual decode against the decoder-native geometry (the
+                // extra transform only reorders pixels, never grows the buffer).
+                if let Some(ref limits) = self.limits {
+                    limits
+                        .check_dimensions(info.width, info.height)
+                        .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
+                }
+                let native_desc = Self::native_descriptor(&info);
+                // Final emitted geometry = decoder-native geometry with the extra
+                // transform's axis-swap folded in.
+                let extra = Self::extra_orientation(self.orientation);
+                let (ow, oh) = extra.output_dimensions(info.width, info.height);
+                // Total orientation the pipeline applies to the *stored* pixels —
+                // the decoder's native bake (intrinsic on the bake path, Identity on
+                // preserve) composed with the extra transform. Reported so the
+                // framework's "remaining for caller" arithmetic stays correct.
+                let applied = Self::total_applied_orientation(&info, self.orientation);
+                Ok(OutputInfo::full_decode(ow, oh, native_desc)
+                    .with_alpha(info.has_alpha)
+                    .with_orientation_applied(applied))
+            })()
+            .map_err(zencodec::CodecError::of)
         }
 
         fn decoder(
             self,
             data: Cow<'a, [u8]>,
             preferred: &[PixelDescriptor],
-        ) -> Result<JxlDecoder<'a>, At<JxlError>> {
-            // Enforce input size limit before decoding.
-            if let Some(ref limits) = self.limits {
-                limits
-                    .check_input_size(data.len() as u64)
-                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
-            }
-            Ok(JxlDecoder {
-                data,
-                limits: self.limits,
-                policy: self.policy,
-                stop: self.stop,
-                preferred: preferred.to_vec(),
-                extract_gain_map: self.extract_gain_map,
-                gain_map_render: self.gain_map_render,
-                orientation: self.orientation,
-            })
+        ) -> Result<JxlDecoder<'a>, At<zencodec::CodecError>> {
+            (move || -> Result<JxlDecoder<'a>, At<JxlError>> {
+                // Enforce input size limit before decoding.
+                if let Some(ref limits) = self.limits {
+                    limits
+                        .check_input_size(data.len() as u64)
+                        .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
+                }
+                Ok(JxlDecoder {
+                    data,
+                    limits: self.limits,
+                    policy: self.policy,
+                    stop: self.stop,
+                    preferred: preferred.to_vec(),
+                    extract_gain_map: self.extract_gain_map,
+                    gain_map_render: self.gain_map_render,
+                    orientation: self.orientation,
+                })
+            })()
+            .map_err(zencodec::CodecError::of)
         }
 
         fn streaming_decoder(
             self,
             _data: Cow<'a, [u8]>,
             _preferred: &[PixelDescriptor],
-        ) -> Result<Unsupported<At<JxlError>>, At<JxlError>> {
-            Err(whereat::at!(JxlError::UnsupportedOperation(
-                UnsupportedOperation::RowLevelDecode,
-            )))
+        ) -> Result<Unsupported<At<zencodec::CodecError>>, At<zencodec::CodecError>> {
+            Err(JxlError::from(UnsupportedOperation::RowLevelDecode).into())
         }
 
         fn push_decoder(
@@ -2339,9 +2390,11 @@ mod decoding {
             data: Cow<'a, [u8]>,
             sink: &mut dyn zencodec::decode::DecodeRowSink,
             preferred: &[PixelDescriptor],
-        ) -> Result<OutputInfo, At<JxlError>> {
+        ) -> Result<OutputInfo, At<zencodec::CodecError>> {
+            // The helper drives the typed decode path and yields `Self::Error`
+            // (now `At<CodecError>`); the sink-error closure bridges via `From`.
             zencodec::helpers::copy_decode_to_sink(self, data, sink, preferred, |e| {
-                whereat::at!(JxlError::Sink(e))
+                JxlError::Sink(e).into()
             })
         }
 
@@ -2349,41 +2402,44 @@ mod decoding {
             self,
             data: Cow<'a, [u8]>,
             preferred: &[PixelDescriptor],
-        ) -> Result<JxlAnimationFrameDecoder, At<JxlError>> {
-            if !self.policy.resolve_animation(true) {
-                return Err(whereat::at!(JxlError::UnsupportedOperation(
-                    UnsupportedOperation::AnimationDecode,
-                )));
-            }
-            // Enforce input size limit before decoding.
-            if let Some(ref limits) = self.limits {
-                limits
-                    .check_input_size(data.len() as u64)
-                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
-            }
-            // Eagerly probe to populate image_info so info() never panics.
-            let info = probe(&data)?;
-            // Enforce dimension limits after probing the header.
-            if let Some(ref limits) = self.limits {
-                limits
-                    .check_dimensions(info.width, info.height)
-                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
-            }
-            let image_info = Arc::new(Self::apply_policy(
-                Self::jxl_info_to_image_info(&info),
-                &self.policy,
-            ));
-            Ok(JxlAnimationFrameDecoder {
-                data: data.into_owned(),
-                limits: self.limits,
-                policy: self.policy,
-                stop: self.stop,
-                preferred: preferred.to_vec(),
-                frames: None,
-                image_info: Some(image_info),
-                current: None,
-                start_frame_index: self.start_frame_index,
-            })
+        ) -> Result<JxlAnimationFrameDecoder, At<zencodec::CodecError>> {
+            (move || -> Result<JxlAnimationFrameDecoder, At<JxlError>> {
+                if !self.policy.resolve_animation(true) {
+                    return Err(whereat::at!(JxlError::UnsupportedOperation(
+                        UnsupportedOperation::AnimationDecode,
+                    )));
+                }
+                // Enforce input size limit before decoding.
+                if let Some(ref limits) = self.limits {
+                    limits
+                        .check_input_size(data.len() as u64)
+                        .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
+                }
+                // Eagerly probe to populate image_info so info() never panics.
+                let info = probe(&data)?;
+                // Enforce dimension limits after probing the header.
+                if let Some(ref limits) = self.limits {
+                    limits
+                        .check_dimensions(info.width, info.height)
+                        .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string())))?;
+                }
+                let image_info = Arc::new(Self::apply_policy(
+                    Self::jxl_info_to_image_info(&info),
+                    &self.policy,
+                ));
+                Ok(JxlAnimationFrameDecoder {
+                    data: data.into_owned(),
+                    limits: self.limits,
+                    policy: self.policy,
+                    stop: self.stop,
+                    preferred: preferred.to_vec(),
+                    frames: None,
+                    image_info: Some(image_info),
+                    current: None,
+                    start_frame_index: self.start_frame_index,
+                })
+            })()
+            .map_err(zencodec::CodecError::of)
         }
     }
 
@@ -2403,151 +2459,155 @@ mod decoding {
     }
 
     impl zencodec::decode::Decode for JxlDecoder<'_> {
-        type Error = At<JxlError>;
+        type Error = At<zencodec::CodecError>;
 
-        fn decode(self) -> Result<DecodeOutput, At<JxlError>> {
-            let native_limits = JxlDecodeJob::to_native_limits(&self.limits);
-            let parallel = policy_to_parallel(&self.limits);
-            // Forward the caller's allocation-fallibility preference to the
-            // wrapper's untrusted output-buffer allocation. The direct
-            // (non-zencodec) decode API leaves this `CodecDefault`; here the
-            // zencodec adapter maps `ResourceLimits::prefer_fallible_allocations`.
-            let alloc_pref = self
-                .limits
-                .as_ref()
-                .map(|l| l.prefer_fallible_allocations)
-                .unwrap_or_default();
-            let stop_arc: Option<Arc<dyn Stop>> = self.stop.map(|s| Arc::new(s) as Arc<dyn Stop>);
-            #[cfg(feature = "reconstruct-hdr")]
-            let stop_for_apply = stop_arc.clone();
-            // Gate progressive content during decode when the policy forbids it.
-            // `resolve_progressive(true)` is true unless `allow_progressive`
-            // is explicitly `Some(false)`, so we only reject when the caller
-            // opted out. The decoder errors at the first progressive frame
-            // header; the header-only probe is unaffected.
-            let reject_progressive = !self.policy.resolve_progressive(true);
-            // Decode in the orientation mode the hint selects: the JXL decoder
-            // bakes the intrinsic orientation natively on the `Correct`/
-            // `CorrectAndTransform` path (`adjust_orientation = true`) and emits
-            // stored pixels on `Preserve`/`ExactTransform`. The extra transform
-            // of `ExactTransform`/`CorrectAndTransform` is applied below.
-            let result = decode_with_options_oriented(
-                &self.data,
-                native_limits.as_ref(),
-                &self.preferred,
-                parallel,
-                stop_arc,
-                JxlDecodeJob::decoder_adjust_orientation(self.orientation),
-                reject_progressive,
-                alloc_pref,
-            )?;
+        fn decode(self) -> Result<DecodeOutput, At<zencodec::CodecError>> {
+            (move || -> Result<DecodeOutput, At<JxlError>> {
+                let native_limits = JxlDecodeJob::to_native_limits(&self.limits);
+                let parallel = policy_to_parallel(&self.limits);
+                // Forward the caller's allocation-fallibility preference to the
+                // wrapper's untrusted output-buffer allocation. The direct
+                // (non-zencodec) decode API leaves this `CodecDefault`; here the
+                // zencodec adapter maps `ResourceLimits::prefer_fallible_allocations`.
+                let alloc_pref = self
+                    .limits
+                    .as_ref()
+                    .map(|l| l.prefer_fallible_allocations)
+                    .unwrap_or_default();
+                let stop_arc: Option<Arc<dyn Stop>> =
+                    self.stop.map(|s| Arc::new(s) as Arc<dyn Stop>);
+                #[cfg(feature = "reconstruct-hdr")]
+                let stop_for_apply = stop_arc.clone();
+                // Gate progressive content during decode when the policy forbids it.
+                // `resolve_progressive(true)` is true unless `allow_progressive`
+                // is explicitly `Some(false)`, so we only reject when the caller
+                // opted out. The decoder errors at the first progressive frame
+                // header; the header-only probe is unaffected.
+                let reject_progressive = !self.policy.resolve_progressive(true);
+                // Decode in the orientation mode the hint selects: the JXL decoder
+                // bakes the intrinsic orientation natively on the `Correct`/
+                // `CorrectAndTransform` path (`adjust_orientation = true`) and emits
+                // stored pixels on `Preserve`/`ExactTransform`. The extra transform
+                // of `ExactTransform`/`CorrectAndTransform` is applied below.
+                let result = decode_with_options_oriented(
+                    &self.data,
+                    native_limits.as_ref(),
+                    &self.preferred,
+                    parallel,
+                    stop_arc,
+                    JxlDecodeJob::decoder_adjust_orientation(self.orientation),
+                    reject_progressive,
+                    alloc_pref,
+                )?;
 
-            let info = JxlDecodeJob::apply_policy(
-                JxlDecodeJob::jxl_info_to_image_info(&result.info),
-                &self.policy,
-            );
-            // Re-tag color signaling from the codestream CICP (see
-            // enrich_descriptor_from_cicp): the decoder rendered into the
-            // signaled encoding, so PQ/HLG/wide-gamut sources keep their
-            // code-value meaning in the output descriptor.
-            let enriched =
-                enrich_descriptor_from_cicp(result.pixels.descriptor(), result.info.cicp);
-            let pixels = result.pixels.with_descriptor(enriched);
-            // Gain-map rendition intent: Components decodes the jhgm gain-map
-            // codestream into a DecodedGainMap; ReconstructHdr applies it
-            // natively when the `reconstruct-hdr` feature is on, and
-            // downgrades to surfacing Components per the zencodec contract
-            // when it is off (reconstructs_hdr() is false — the base stays
-            // honestly labeled per its own descriptor). Unknown future modes
-            // are refused, never mis-rendered.
-            let (surface_components, reconstruct_target): (bool, Option<Option<f32>>) =
-                match self.gain_map_render {
-                    zencodec::GainMapRender::BaseOnly => (false, None),
-                    zencodec::GainMapRender::Components => (true, None),
-                    #[cfg(feature = "reconstruct-hdr")]
-                    zencodec::GainMapRender::ReconstructHdr { target_headroom } => {
-                        (false, Some(target_headroom))
-                    }
-                    #[cfg(not(feature = "reconstruct-hdr"))]
-                    zencodec::GainMapRender::ReconstructHdr { .. } => (true, None),
-                    _ => {
-                        return Err(whereat::at!(JxlError::InvalidInput(
-                            "unrecognized GainMapRender mode".into()
-                        )));
-                    }
-                };
-            #[cfg(not(feature = "reconstruct-hdr"))]
-            let _ = reconstruct_target;
-
-            // Native HDR reconstruction: apply the gain map to the decoded
-            // base. A ReconstructHdr request on a plain (no-jhgm) image is a
-            // normal decode — the base may itself be the HDR rendition.
-            #[cfg(feature = "reconstruct-hdr")]
-            let (pixels, info) = match (reconstruct_target, result.gain_map.as_ref()) {
-                (Some(target), Some(gm)) => {
-                    let stop_ref: &dyn Stop = match &stop_for_apply {
-                        Some(s) => &**s,
-                        None => &enough::Unstoppable,
+                let info = JxlDecodeJob::apply_policy(
+                    JxlDecodeJob::jxl_info_to_image_info(&result.info),
+                    &self.policy,
+                );
+                // Re-tag color signaling from the codestream CICP (see
+                // enrich_descriptor_from_cicp): the decoder rendered into the
+                // signaled encoding, so PQ/HLG/wide-gamut sources keep their
+                // code-value meaning in the output descriptor.
+                let enriched =
+                    enrich_descriptor_from_cicp(result.pixels.descriptor(), result.info.cicp);
+                let pixels = result.pixels.with_descriptor(enriched);
+                // Gain-map rendition intent: Components decodes the jhgm gain-map
+                // codestream into a DecodedGainMap; ReconstructHdr applies it
+                // natively when the `reconstruct-hdr` feature is on, and
+                // downgrades to surfacing Components per the zencodec contract
+                // when it is off (reconstructs_hdr() is false — the base stays
+                // honestly labeled per its own descriptor). Unknown future modes
+                // are refused, never mis-rendered.
+                let (surface_components, reconstruct_target): (bool, Option<Option<f32>>) =
+                    match self.gain_map_render {
+                        zencodec::GainMapRender::BaseOnly => (false, None),
+                        zencodec::GainMapRender::Components => (true, None),
+                        #[cfg(feature = "reconstruct-hdr")]
+                        zencodec::GainMapRender::ReconstructHdr { target_headroom } => {
+                            (false, Some(target_headroom))
+                        }
+                        #[cfg(not(feature = "reconstruct-hdr"))]
+                        zencodec::GainMapRender::ReconstructHdr { .. } => (true, None),
+                        _ => {
+                            return Err(whereat::at!(JxlError::InvalidInput(
+                                "unrecognized GainMapRender mode".into()
+                            )));
+                        }
                     };
-                    reconstruct_hdr_base(
-                        pixels,
-                        info,
-                        gm,
-                        target,
-                        &self.preferred,
-                        native_limits.as_ref(),
-                        parallel,
-                        stop_ref,
-                        alloc_pref,
-                    )?
-                }
-                _ => (pixels, info),
-            };
+                #[cfg(not(feature = "reconstruct-hdr"))]
+                let _ = reconstruct_target;
 
-            // Fold in the extra orientation transform for the bake hints the
-            // decoder can't express natively (`ExactTransform`/
-            // `CorrectAndTransform`). For `Preserve`/`Correct` this is Identity
-            // and returns the pair untouched (no pixel copy). Applied after any
-            // HDR gain-map reconstruction so the final composited image is
-            // upright. Pixel-exact — orientation only reorders pixels.
-            let (pixels, info) =
-                JxlDecodeJob::apply_orientation_to_pixels(pixels, info, self.orientation);
+                // Native HDR reconstruction: apply the gain map to the decoded
+                // base. A ReconstructHdr request on a plain (no-jhgm) image is a
+                // normal decode — the base may itself be the HDR rendition.
+                #[cfg(feature = "reconstruct-hdr")]
+                let (pixels, info) = match (reconstruct_target, result.gain_map.as_ref()) {
+                    (Some(target), Some(gm)) => {
+                        let stop_ref: &dyn Stop = match &stop_for_apply {
+                            Some(s) => &**s,
+                            None => &enough::Unstoppable,
+                        };
+                        reconstruct_hdr_base(
+                            pixels,
+                            info,
+                            gm,
+                            target,
+                            &self.preferred,
+                            native_limits.as_ref(),
+                            parallel,
+                            stop_ref,
+                            alloc_pref,
+                        )?
+                    }
+                    _ => (pixels, info),
+                };
 
-            let mut output =
-                DecodeOutput::new(pixels, info).with_source_encoding_details(result.info);
-            if (self.extract_gain_map || surface_components)
-                && let Some(gm) = result.gain_map
-            {
-                // Components: recursively decode the gain-map JXL codestream
-                // (same resource limits as the base decode). Errors only when
-                // a present gain map is malformed.
-                if surface_components {
-                    // Same `alloc_pref` as the base decode so the gain-map
-                    // sub-image's untrusted output buffer honors the caller's
-                    // fallibility preference too. `adjust_orientation = true`,
-                    // `reject_progressive = false` matches `decode_with_options`.
-                    let gm_result = decode_with_options_oriented(
-                        &gm.gain_map_codestream,
-                        native_limits.as_ref(),
-                        &[],
-                        parallel,
-                        None,
-                        true,
-                        false,
-                        alloc_pref,
-                    )?;
-                    let source = bundle_to_gain_map_source(gm);
-                    let gm_info = source.metadata.clone();
-                    output = output.with_extras(zencodec::decode::DecodedGainMap::new(
-                        gm_result.pixels,
-                        gm_info,
-                    ));
-                    output = output.with_extras(source);
-                } else {
-                    output = output.with_extras(bundle_to_gain_map_source(gm));
+                // Fold in the extra orientation transform for the bake hints the
+                // decoder can't express natively (`ExactTransform`/
+                // `CorrectAndTransform`). For `Preserve`/`Correct` this is Identity
+                // and returns the pair untouched (no pixel copy). Applied after any
+                // HDR gain-map reconstruction so the final composited image is
+                // upright. Pixel-exact — orientation only reorders pixels.
+                let (pixels, info) =
+                    JxlDecodeJob::apply_orientation_to_pixels(pixels, info, self.orientation);
+
+                let mut output =
+                    DecodeOutput::new(pixels, info).with_source_encoding_details(result.info);
+                if (self.extract_gain_map || surface_components)
+                    && let Some(gm) = result.gain_map
+                {
+                    // Components: recursively decode the gain-map JXL codestream
+                    // (same resource limits as the base decode). Errors only when
+                    // a present gain map is malformed.
+                    if surface_components {
+                        // Same `alloc_pref` as the base decode so the gain-map
+                        // sub-image's untrusted output buffer honors the caller's
+                        // fallibility preference too. `adjust_orientation = true`,
+                        // `reject_progressive = false` matches `decode_with_options`.
+                        let gm_result = decode_with_options_oriented(
+                            &gm.gain_map_codestream,
+                            native_limits.as_ref(),
+                            &[],
+                            parallel,
+                            None,
+                            true,
+                            false,
+                            alloc_pref,
+                        )?;
+                        let source = bundle_to_gain_map_source(gm);
+                        let gm_info = source.metadata.clone();
+                        output = output.with_extras(zencodec::decode::DecodedGainMap::new(
+                            gm_result.pixels,
+                            gm_info,
+                        ));
+                        output = output.with_extras(source);
+                    } else {
+                        output = output.with_extras(bundle_to_gain_map_source(gm));
+                    }
                 }
-            }
-            Ok(output)
+                Ok(output)
+            })()
+            .map_err(zencodec::CodecError::of)
         }
     }
 
@@ -2832,10 +2892,10 @@ mod decoding {
     }
 
     impl zencodec::decode::AnimationFrameDecoder for JxlAnimationFrameDecoder {
-        type Error = At<JxlError>;
+        type Error = At<zencodec::CodecError>;
 
-        fn wrap_sink_error(err: SinkError) -> At<JxlError> {
-            whereat::at!(JxlError::Sink(err))
+        fn wrap_sink_error(err: SinkError) -> At<zencodec::CodecError> {
+            JxlError::Sink(err).into()
         }
 
         fn info(&self) -> &ImageInfo {
@@ -2855,9 +2915,13 @@ mod decoding {
         fn render_next_frame(
             &mut self,
             _stop: Option<&dyn Stop>,
-        ) -> Result<Option<AnimationFrame<'_>>, At<JxlError>> {
+        ) -> Result<Option<AnimationFrame<'_>>, At<zencodec::CodecError>> {
+            // Single fallible site (the eager all-frames decode): convert at the
+            // boundary. `render_next_frame` returns a frame borrowing `self`, so
+            // a closure-wrapped inner body cannot be used here (the borrow would
+            // not outlive the closure).
             if self.frames.is_none() {
-                self.decode_all_frames()?;
+                self.decode_all_frames().map_err(zencodec::CodecError::of)?;
             }
 
             let decoded = self.frames.as_mut().unwrap();
@@ -2869,16 +2933,18 @@ mod decoding {
             &mut self,
             stop: Option<&dyn Stop>,
             sink: &mut dyn zencodec::decode::DecodeRowSink,
-        ) -> Result<Option<OutputInfo>, At<JxlError>> {
+        ) -> Result<Option<OutputInfo>, At<zencodec::CodecError>> {
+            // The helper drives `render_next_frame_owned` + `wrap_sink_error`,
+            // both `Self::Error` (now `At<CodecError>`).
             zencodec::helpers::copy_frame_to_sink(self, stop, sink)
         }
 
         fn render_next_frame_owned(
             &mut self,
             _stop: Option<&dyn Stop>,
-        ) -> Result<Option<OwnedAnimationFrame>, At<JxlError>> {
+        ) -> Result<Option<OwnedAnimationFrame>, At<zencodec::CodecError>> {
             if self.frames.is_none() {
-                self.decode_all_frames()?;
+                self.decode_all_frames().map_err(zencodec::CodecError::of)?;
             }
 
             let decoded = self.frames.as_mut().unwrap();
@@ -3341,6 +3407,45 @@ mod tests {
             }
             Ok(_) => panic!("expected error"),
         }
+    }
+
+    /// Forcing test for the **envelope** error pattern (Pattern B): driving the
+    /// decoder through `DynDecoderConfig` erases the error to `BoxedError`
+    /// (`Box<dyn Error + Send + Sync>`), yet a generic consumer still recovers the
+    /// codec-agnostic [`ErrorCategory`] *and* the originating codec name from the
+    /// [`CodecError`] envelope. Under Pattern A (`type Error = At<JxlError>`) both
+    /// recoveries would be `None` after erasure — there would be no `CodecError`
+    /// to downcast to. This is the whole reason the trait impls return the
+    /// envelope rather than the typed error.
+    #[cfg(feature = "decode")]
+    #[test]
+    fn dyn_dispatch_preserves_category_and_codec_through_erasure() {
+        use zencodec::decode::DynDecoderConfig;
+        use zencodec::{CodecError, CodecErrorExt, ErrorCategory};
+
+        // Bad JXL magic, long enough to clear any "insufficient data for header"
+        // guard: the decoder reads the (invalid) signature and rejects the
+        // bitstream as malformed rather than asking for more input.
+        let malformed = [0xABu8; 256];
+
+        let dyn_cfg: &dyn DynDecoderConfig = &JxlDecoderConfig::new();
+        let erased = dyn_cfg
+            .dyn_job()
+            .probe(&malformed)
+            .expect_err("malformed JXL must fail to probe");
+
+        // The coarse category survives erasure to a plain `Box<dyn Error>`.
+        assert_eq!(
+            erased.error_category(),
+            Some(ErrorCategory::MalformedImage),
+            "bad JXL magic must categorize as MalformedImage through dyn dispatch"
+        );
+        // ...and so does the codec name, so a consumer can tell codecs apart.
+        assert_eq!(
+            erased.codec_error().and_then(CodecError::codec),
+            Some("zenjxl"),
+            "the originating codec must be recoverable through dyn dispatch"
+        );
     }
 
     #[cfg(feature = "encode")]
