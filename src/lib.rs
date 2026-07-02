@@ -72,10 +72,12 @@ pub use jxl_encoder::convenience::{
 // The encode input is a [`zenpixels::PixelSlice`]: it carries the pixel format,
 // width, height, and row stride, so the dimensions ride *with* the pixels —
 // there is no separate `width`/`height` to keep in sync and no buffer-length
-// mismatch to guard against (strided slices are packed before encode). The
-// typed `encode_rgba8` name is taken by the `imgref::ImgRef` re-export above, so
-// the slice one-shots are simply `encode` / `encode_lossless`. All three reuse
-// the crate's natural error type, `whereat::At<JxlError>`.
+// mismatch to guard against. Tightly-packed slices are passed through
+// zero-copy; strided slices are fed row-by-row into the streaming encoder, so
+// no full-image repack buffer is ever allocated. The typed `encode_rgba8` name
+// is taken by the `imgref::ImgRef` re-export above, so the slice one-shots are
+// simply `encode` / `encode_with_fidelity` / `encode_lossless`. All of them
+// reuse the crate's natural error type, `whereat::At<JxlError>`.
 // ---------------------------------------------------------------------------
 
 // Map a zenpixels PixelDescriptor onto the jxl-encoder PixelLayout. Mirrors the
@@ -118,12 +120,13 @@ fn layout_for_descriptor(
 /// The slice is self-describing: it carries the pixel format (RGBA8, RGB8,
 /// BGRA8, grayscale, 16-bit, linear-f32, …), the dimensions, and the row stride,
 /// so there is no separate `width`/`height` argument to keep in sync and no
-/// buffer-length mismatch to guard against — strided slices are packed before
-/// encode. Encodes at the default butteraugli distance `1.0` (≈ visually
-/// lossless — the same target as `cjxl -d 1.0`). For a different quality, a
-/// specific effort, embedded metadata, gain maps, or cancellation, build a
-/// [`LossyConfig`] (map a 0..=100 quality with [`quality_to_distance`] /
-/// [`calibrated_jxl_quality`]).
+/// buffer-length mismatch to guard against — tight slices are passed through
+/// zero-copy, strided slices are row-streamed (no full-image repack). Encodes
+/// at the default butteraugli distance `1.0` (≈ visually lossless — the same
+/// target as `cjxl -d 1.0`). For a different fidelity target use
+/// [`encode_with_fidelity`]; for a specific effort, embedded metadata, gain
+/// maps, or cancellation, build a [`LossyConfig`] (map a 0..=100 quality with
+/// [`quality_to_distance`] / [`calibrated_jxl_quality`]).
 ///
 /// # Errors
 /// Returns [`JxlError::UnsupportedOperation`] if the slice's pixel format is not
@@ -156,13 +159,140 @@ fn layout_for_descriptor(
 pub fn encode(
     img: zenpixels::PixelSlice<'_>,
 ) -> Result<alloc::vec::Vec<u8>, whereat::At<JxlError>> {
+    encode_lossy_slice(&img, &crate::LossyConfig::new(1.0))
+}
+
+/// Encode a [`zenpixels::PixelSlice`] to a JPEG XL codestream at a
+/// [`Fidelity`](zencodec::encode::Fidelity) target, in one call.
+///
+/// Same self-describing input as [`encode`] (format + dimensions + stride ride
+/// with the pixels; tight slices are zero-copy, strided slices row-streamed),
+/// but the quality knob is explicit. The [`Fidelity`](zencodec::encode::Fidelity)
+/// target is honored as natively as JPEG XL allows — the same mapping as the
+/// zencodec adapter's `with_fidelity`:
+///
+/// - [`Fidelity::Lossless`](zencodec::encode::Fidelity::Lossless) → modular
+///   lossless (identical to [`encode_lossless`]).
+/// - [`Fidelity::butteraugli(d)`](zencodec::encode::Fidelity::butteraugli) →
+///   **native** VarDCT butteraugli distance (clamped to `0.0..=25.0`).
+/// - [`Fidelity::codec_quality(q)`](zencodec::encode::Fidelity::codec_quality)
+///   → the calibrated jxl quality dial
+///   ([`calibrated_jxl_quality`] → [`quality_to_distance`]).
+/// - [`Fidelity::ssim2(s)`](zencodec::encode::Fidelity::ssim2) → jxl has no
+///   native SSIM2 target, so the score rides the quality dial (mirrors the
+///   zencodec adapter — honest that no SSIM2 convergence happens).
+///
+/// # Errors
+/// Returns [`JxlError::UnsupportedOperation`] if the slice's pixel format is not
+/// one the JXL encoder accepts, or [`JxlError::Encode`] for any encoder error.
+///
+#[cfg_attr(all(feature = "encode", feature = "decode"), doc = "```")]
+#[cfg_attr(not(all(feature = "encode", feature = "decode")), doc = "```ignore")]
+/// use zencodec::encode::Fidelity;
+/// use zenjxl::{decode_rgba8, encode_with_fidelity};
+/// use zenpixels::{PixelDescriptor, PixelSlice};
+///
+/// let (width, height) = (2u32, 2u32);
+/// let rgba = vec![
+///     255, 0, 0, 255, 0, 255, 0, 255, //
+///     0, 0, 255, 255, 255, 255, 255, 255,
+/// ];
+/// let stride = width as usize * 4;
+/// let img = PixelSlice::new(&rgba, width, height, stride, PixelDescriptor::RGBA8_SRGB)
+///     .expect("valid 2x2 RGBA8 slice");
+///
+/// // Explicit fidelity: a butteraugli distance, a 0..=100 quality, or lossless.
+/// let jxl = encode_with_fidelity(img, Fidelity::butteraugli(2.0))?;
+/// let (pixels, w, h) = decode_rgba8(&jxl)?;
+///
+/// assert_eq!((w, h), (width, height));
+/// assert_eq!(pixels.len(), (width * height * 4) as usize);
+/// # Ok::<(), whereat::At<zenjxl::JxlError>>(())
+/// ```
+#[cfg(feature = "encode")]
+pub fn encode_with_fidelity(
+    img: zenpixels::PixelSlice<'_>,
+    fidelity: zencodec::encode::Fidelity,
+) -> Result<alloc::vec::Vec<u8>, whereat::At<JxlError>> {
+    use zencodec::encode::{Fidelity, LossyTarget};
+    let distance = match fidelity {
+        Fidelity::Lossless => {
+            return encode_lossless_slice(&img, &crate::LosslessConfig::new());
+        }
+        // Native butteraugli distance; same clamp as the zencodec adapter's
+        // `with_distance` (0.0 = mathematically lossless VarDCT, 25.0 = floor).
+        Fidelity::Lossy(LossyTarget::ApproxButteraugli(d)) => d.clamp(0.0, 25.0),
+        // Generic 0..=100 quality → calibrated jxl quality → distance, the
+        // same chain the zencodec adapter's `with_generic_quality` uses.
+        Fidelity::Lossy(LossyTarget::CodecSpecificQuality(q)) => {
+            quality_to_distance(calibrated_jxl_quality(q))
+        }
+        // No native SSIM2 target in jxl: the score rides the quality dial,
+        // mirroring the zencodec adapter's mapping.
+        Fidelity::Lossy(LossyTarget::ApproxSsim2(s)) => {
+            quality_to_distance(calibrated_jxl_quality(s))
+        }
+        // `Fidelity` / `LossyTarget` are `#[non_exhaustive]` — unknown future
+        // targets fall back to the default distance (matches `encode`).
+        _ => 1.0,
+    };
+    encode_lossy_slice(&img, &crate::LossyConfig::new(distance))
+}
+
+/// Shared lossy one-shot body: zero-copy single-shot encode for tight slices,
+/// row-streaming for strided slices (no full-image repack buffer).
+#[cfg(feature = "encode")]
+fn encode_lossy_slice(
+    img: &zenpixels::PixelSlice<'_>,
+    cfg: &crate::LossyConfig,
+) -> Result<alloc::vec::Vec<u8>, whereat::At<JxlError>> {
     let width = img.width();
     let height = img.rows();
     let layout = layout_for_descriptor(img.descriptor())?;
-    let bytes = img.contiguous_bytes();
-    crate::LossyConfig::new(1.0)
-        .encode(&bytes, width, height, layout)
-        .map_err(|e| e.map_error(JxlError::Encode))
+    if let Some(bytes) = img.as_contiguous_bytes() {
+        // Tightly packed: hand the borrowed bytes straight to the encoder.
+        cfg.encode(bytes, width, height, layout)
+            .map_err(|e| e.map_error(JxlError::Encode))
+    } else {
+        // Strided: pull rows through the streaming encoder. Each `row(y)` is a
+        // contiguous `width * bpp` view into the strided buffer, so peak memory
+        // stays at input + the encoder's own working set — no repacked copy.
+        // Byte-identity with the tight path is pinned by
+        // `tests/oneshot.rs::strided_and_tight_encode_byte_identical`.
+        let mut enc = cfg
+            .encoder(width, height, layout)
+            .map_err(|e| e.map_error(JxlError::Encode))?;
+        for y in 0..height {
+            enc.push_rows(img.row(y), 1)
+                .map_err(|e| e.map_error(JxlError::Encode))?;
+        }
+        enc.finish().map_err(|e| e.map_error(JxlError::Encode))
+    }
+}
+
+/// Shared lossless one-shot body — same tight/strided split as
+/// [`encode_lossy_slice`].
+#[cfg(feature = "encode")]
+fn encode_lossless_slice(
+    img: &zenpixels::PixelSlice<'_>,
+    cfg: &crate::LosslessConfig,
+) -> Result<alloc::vec::Vec<u8>, whereat::At<JxlError>> {
+    let width = img.width();
+    let height = img.rows();
+    let layout = layout_for_descriptor(img.descriptor())?;
+    if let Some(bytes) = img.as_contiguous_bytes() {
+        cfg.encode(bytes, width, height, layout)
+            .map_err(|e| e.map_error(JxlError::Encode))
+    } else {
+        let mut enc = cfg
+            .encoder(width, height, layout)
+            .map_err(|e| e.map_error(JxlError::Encode))?;
+        for y in 0..height {
+            enc.push_rows(img.row(y), 1)
+                .map_err(|e| e.map_error(JxlError::Encode))?;
+        }
+        enc.finish().map_err(|e| e.map_error(JxlError::Encode))
+    }
 }
 
 /// Encode a [`zenpixels::PixelSlice`] to a lossless JPEG XL codestream in one
@@ -202,13 +332,7 @@ pub fn encode(
 pub fn encode_lossless(
     img: zenpixels::PixelSlice<'_>,
 ) -> Result<alloc::vec::Vec<u8>, whereat::At<JxlError>> {
-    let width = img.width();
-    let height = img.rows();
-    let layout = layout_for_descriptor(img.descriptor())?;
-    let bytes = img.contiguous_bytes();
-    crate::LosslessConfig::new()
-        .encode(&bytes, width, height, layout)
-        .map_err(|e| e.map_error(JxlError::Encode))
+    encode_lossless_slice(&img, &crate::LosslessConfig::new())
 }
 
 /// Decode a JPEG XL image (any color type / bit depth) to tightly-packed 8-bit

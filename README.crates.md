@@ -62,10 +62,15 @@ assert_eq!(pixels_lossless, rgba);
 
 `encode` / `encode_lossless` accept any `PixelSlice` format (RGB8, BGRA8,
 grayscale, 16-bit, linear-f32) — the descriptor rides with the pixels, so the
-buffer and dimensions can't disagree. `decode_rgba8` normalizes grayscale / RGB
-/ 16-bit / HDR sources to 8-bit RGBA (opaque sources get `A = 255`). Reach for
-the `LossyConfig`/`LosslessConfig` builders (below) when you need quality
-control, embedded metadata, gain maps, resource limits, or cancellation.
+buffer and dimensions can't disagree. Tightly-packed slices are passed through
+zero-copy and strided slices are row-streamed (no full-image repack buffer).
+For an explicit quality target, `encode_with_fidelity(img, fidelity)` takes a
+`zencodec::encode::Fidelity` — a butteraugli distance, a 0..=100 quality on the
+calibrated dial, an approximate SSIMULACRA2 score, or `Fidelity::Lossless`.
+`decode_rgba8` normalizes grayscale / RGB / 16-bit / HDR sources to 8-bit RGBA
+(opaque sources get `A = 255`). Reach for the `LossyConfig`/`LosslessConfig`
+builders (below) when you need effort control, embedded metadata, gain maps,
+resource limits, or cancellation.
 
 ### Decode
 
