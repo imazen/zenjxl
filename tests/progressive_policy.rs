@@ -63,10 +63,14 @@ fn non_progressive_jxl() -> Vec<u8> {
 }
 
 /// Decode `data` through the zencodec decode adapter under `policy`.
+///
+/// The adapter returns the envelope (`At<CodecError>`, Pattern B), not the
+/// typed `At<JxlError>`; the specific variant stays recoverable as the
+/// envelope's detail (asserted below).
 fn decode_with_policy(
     data: Vec<u8>,
     policy: DecodePolicy,
-) -> Result<zencodec::decode::DecodeOutput, whereat::At<JxlError>> {
+) -> Result<zencodec::decode::DecodeOutput, whereat::At<zencodec::CodecError>> {
     JxlDecoderConfig::new()
         .job()
         .with_policy(policy)
@@ -76,17 +80,36 @@ fn decode_with_policy(
 }
 
 /// `allow_progressive == Some(false)` rejects a progressive JXL during decode
-/// with the dedicated [`JxlError::ProgressiveRejected`] variant.
+/// with the dedicated [`JxlError::ProgressiveRejected`] variant — recovered here
+/// through the [`CodecError`](zencodec::CodecError) envelope as both the codec-
+/// agnostic [`PolicyRejected`](zencodec::ErrorCategory::PolicyRejected) category
+/// and the typed detail.
 #[test]
 fn progressive_rejected_when_policy_forbids() {
+    use zencodec::CodecErrorExt;
     let policy = DecodePolicy::none().with_allow_progressive(false);
     let result = decode_with_policy(progressive_jxl(), policy);
     match result {
-        Err(at) => assert!(
-            matches!(at.error(), JxlError::ProgressiveRejected),
-            "expected JxlError::ProgressiveRejected, got {:?}",
-            at.error()
-        ),
+        Err(at) => {
+            // Codec-agnostic axis: the category + codec name survive in the
+            // envelope (this is what a generic consumer routes on).
+            assert_eq!(
+                at.error().category(),
+                zencodec::ErrorCategory::PolicyRejected,
+                "progressive rejection must categorize as PolicyRejected"
+            );
+            assert_eq!(at.error().codec(), Some("zenjxl"));
+            // Typed axis: the exact JxlError variant is still recoverable as the
+            // envelope's detail.
+            assert!(
+                matches!(
+                    at.error().find_cause::<JxlError>(),
+                    Some(JxlError::ProgressiveRejected)
+                ),
+                "expected JxlError::ProgressiveRejected detail, got {:?}",
+                at.error()
+            );
+        }
         Ok(_) => panic!("progressive JXL must be rejected when allow_progressive == Some(false)"),
     }
 }
