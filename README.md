@@ -24,6 +24,52 @@ almost-enough = "0.4.4"        # a ready-made cancellation token (optional)
 
 ## Quick start
 
+The one-shot path needs only `zenjxl` + `zenpixels`: wrap your pixels in a
+self-describing `PixelSlice` (it carries the pixel format, dimensions, and row
+stride) and encode to JPEG XL, then decode any JPEG XL back to packed RGBA8 +
+dimensions — each in a single call.
+
+```rust
+use zenjxl::{decode_rgba8, encode, encode_lossless};
+use zenpixels::{PixelDescriptor, PixelSlice};
+
+// 2×2 RGBA, tightly packed — dims + stride + format ride with the pixels.
+let (width, height) = (2u32, 2u32);
+let rgba = vec![
+    255, 0, 0, 255,   0, 255, 0, 255,
+    0, 0, 255, 255,   255, 255, 255, 255,
+];
+let stride = width as usize * 4; // bytes per row (tightly packed)
+let img = PixelSlice::new(&rgba, width, height, stride, PixelDescriptor::RGBA8_SRGB)
+    .expect("valid 2x2 RGBA8 slice");
+
+// Lossy at the default butteraugli distance 1.0 (≈ visually lossless, the same
+// target as `cjxl -d 1.0`). JXL lossy is not bit-exact — check dims/length.
+let jxl = encode(img)?; // no separate width/height arguments
+let (pixels, w, h) = decode_rgba8(&jxl)?;
+assert_eq!((w, h), (width, height));
+assert_eq!(pixels.len(), (width * height * 4) as usize);
+
+// Lossless round-trips the bytes exactly.
+let img2 = PixelSlice::new(&rgba, width, height, stride, PixelDescriptor::RGBA8_SRGB)
+    .expect("valid 2x2 RGBA8 slice");
+let jxl_lossless = encode_lossless(img2)?;
+let (pixels_lossless, _, _) = decode_rgba8(&jxl_lossless)?;
+assert_eq!(pixels_lossless, rgba);
+```
+
+`encode` / `encode_lossless` accept any `PixelSlice` format (RGB8, BGRA8,
+grayscale, 16-bit, linear-f32) — the descriptor rides with the pixels, so the
+buffer and dimensions can't disagree. Tightly-packed slices are passed through
+zero-copy and strided slices are row-streamed (no full-image repack buffer).
+For an explicit quality target, `encode_with_fidelity(img, fidelity)` takes a
+`zencodec::encode::Fidelity` — a butteraugli distance, a 0..=100 quality on the
+calibrated dial, an approximate SSIMULACRA2 score, or `Fidelity::Lossless`.
+`decode_rgba8` normalizes grayscale / RGB / 16-bit / HDR sources to 8-bit RGBA
+(opaque sources get `A = 255`). Reach for the `LossyConfig`/`LosslessConfig`
+builders (below) when you need effort control, embedded metadata, gain maps,
+resource limits, or cancellation.
+
 ### Decode
 
 ```rust

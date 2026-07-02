@@ -107,7 +107,10 @@ zenjpeg-bench-utils = { path = "../zenjpeg/zenjpeg-bench-utils", default-feature
 
 [features]
 default = ["encode", "decode"]
-decode = ["dep:jxl"]
+# zenpixels-convert powers the `decode_rgba8` one-shot's `to_rgba8()`
+# normalization to packed RGBA8 (the `zencodec` feature also enables it, for the
+# decode adapter's orientation baking).
+decode = ["dep:jxl", "dep:zenpixels-convert"]
 threads = ["decode", "jxl/threads"]
 encode = ["dep:jxl-encoder"]
 # Enable rayon-based per-frame parallelism inside the JXL encoder.

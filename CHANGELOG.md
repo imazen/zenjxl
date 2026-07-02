@@ -57,6 +57,30 @@ is published).
   builds against `[patch.crates-io] zencodec = { git, branch =
   "cancellation-classification-99" }` until zencodec 0.1.26 ships #103; drop the
   patch and bump the `zencodec` dep at that point.
+- **Typed one-shot convenience free functions** (`src/lib.rs`): `encode(img:
+  zenpixels::PixelSlice) -> Vec<u8>` (lossy, default butteraugli distance 1.0),
+  `encode_with_fidelity(img, fidelity: zencodec::encode::Fidelity)` (explicit
+  target — native butteraugli distance, calibrated 0..=100 quality dial,
+  approximate SSIM2 via the dial, or `Fidelity::Lossless`; the same mapping as
+  the zencodec adapter's `with_fidelity`), and
+  `encode_lossless(img: zenpixels::PixelSlice)` (all gated `encode`), plus
+  `decode_rgba8(jxl) -> (rgba, w, h)` (gated `decode`). The encode input is a
+  self-describing `zenpixels::PixelSlice` — pixel format, dimensions, and row
+  stride ride with the pixels, so there is no separate `width`/`height` to keep
+  in sync and no buffer-length-mismatch class of bug; any encoder-supported
+  format (RGB/RGBA/BGRA/grayscale × 8/16-bit, plus linear-f32) is accepted.
+  Tight slices are passed through zero-copy; strided slices are row-streamed
+  through the streaming encoders (`LossyConfig::encoder` /
+  `LosslessConfig::encoder`), so no full-image repack buffer is allocated —
+  byte-identity between the tight and strided paths (and between
+  `encode_with_fidelity` and the equivalent hand-built configs) is pinned by
+  `tests/oneshot.rs`. `decode_rgba8` normalizes any source
+  to packed RGBA8 via `zenpixels-convert` (re-enabled on the `decode` feature).
+  All return the crate's natural `whereat::At<JxlError>`; the
+  `LossyConfig`/`LosslessConfig` builders stay the power API. README Quick start
+  leads with these; mirrored in `tests/readme_examples.rs`. (Replaces the
+  raw-`(&[u8], w, h)` `encode_rgba8_bytes` one-shots removed in the preceding
+  commit.)
 - **`AllocPreference` honored at untrusted decode allocations** (3-mode,
   per-site). The wrapper-owned output buffers — the single-image output buffer
   (`src/decode.rs`), the per-animation-frame buffer, and the recursive
