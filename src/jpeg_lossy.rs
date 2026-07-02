@@ -469,8 +469,7 @@ fn encode_pixel(
             })
             .collect();
         let img = imgref::ImgRef::new(&pixels, w as usize, h as usize);
-        return jxl_encoder::convenience::encode_rgb8(img, &cfg)
-            .map_err(|e| whereat::at!(JxlError::Encode(e)));
+        return jxl_encoder::convenience::encode_rgb8(img, &cfg).map_err_at(JxlError::Encode);
     };
 
     // Source carried an ICC: embed it via the full request API so the JXL

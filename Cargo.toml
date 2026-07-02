@@ -64,6 +64,14 @@ zenjpeg = { path = "../zenjpeg/zenjpeg" }
 # sibling so the policy→reject_progressive wiring resolves; bump the `jxl`
 # dep to 0.3.11 + drop this patch when zenjxl-decoder publishes.
 zenjxl-decoder = { path = "../zenjxl-decoder/zenjxl-decoder" }
+# jxl-encoder main needs butteraugli 0.9.4 (`ButteraugliReference::
+# estimated_reference_bytes`, the alloc-budget precompute API), which is not
+# on crates.io yet (latest published: 0.9.3). jxl-encoder's own workspace
+# patches butteraugli to the local path, but a dependency's [patch] table is
+# ignored when jxl-encoder is consumed here — so zenjxl must carry the same
+# patch. Drop this once butteraugli 0.9.4 publishes. Note the extra `../`:
+# the butteraugli repo lives beside `~/work/zen`, not inside it.
+butteraugli = { path = "../../butteraugli/butteraugli" }
 
 [dev-dependencies]
 # Concrete `enough::Stop` token for the README cancellation example
