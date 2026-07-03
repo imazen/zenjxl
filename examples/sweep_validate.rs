@@ -591,6 +591,7 @@ fn main() {
         predictor: None,
         group_size_shift: None,
         faster_decoding: 0,
+        palette_colors: None,
     };
     let byte_pair = |what: &str,
                      a: &SweepVariant,

@@ -26,7 +26,18 @@ mod decode;
 mod error;
 #[cfg(feature = "jpeg-lossy")]
 pub mod jpeg_lossy;
-#[cfg(feature = "encode")]
+/// Self-verified lossless encode for low-color-count content — a small
+/// fixed candidate set (via [`sweep::variant_from_cell_id`]) instead of
+/// trusting a single default config. See the module docs for the RD
+/// justification.
+///
+/// **Research-derived, not yet a long-term-stable API commitment.**
+/// Gated behind `__expert` alongside [`sweep`], consistent with this
+/// project's policy that MLP/research-derived work routes through the
+/// `__expert` escape hatch rather than being exposed as unconditionally
+/// stable API; the specific candidate set may change as more research
+/// happens.
+#[cfg(all(feature = "encode", feature = "__expert"))]
 pub mod lossless_verify;
 mod validate;
 // #[cfg(feature = "zennode")]

@@ -4,8 +4,8 @@
 //! (low color count) paths, and that the multi-candidate path never produces
 //! a LARGER result than the single default choice it's meant to improve on.
 //!
-//! Run: cargo test -p zenjxl --features encode --test lossless_verify
-#![cfg(all(feature = "encode", feature = "decode"))]
+//! Run: cargo test -p zenjxl --features encode,decode,__expert --test lossless_verify
+#![cfg(all(feature = "encode", feature = "decode", feature = "__expert"))]
 
 use imgref::{Img, ImgRef};
 use rgb::Rgb;
