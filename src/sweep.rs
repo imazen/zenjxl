@@ -287,6 +287,26 @@ pub struct LosslessVariant {
     /// Some(0)` — distinct fingerprints, identical bytes; an accepted
     /// under-merge).
     pub faster_decoding: u8,
+    /// Palette-transform colour cap (`with_modular_palette_colors`).
+    /// `None` = built-in 1024 default (palette detection runs whenever
+    /// the content qualifies); `Some(0)` disables palette detection
+    /// entirely. **Genuinely content-dependent, not a fixed win**:
+    /// measured 2026-07-02 on a fine-grid + sparse-color-dot synthetic
+    /// (32 colours) — default (palette on) 16,723 B vs `Some(0)` 3,011
+    /// B, a **5.5× regression from the palette transform** on this
+    /// pattern, while jxl-encoder#69 item 2's own bench showed −30% to
+    /// −44% wins on blocky/polygon low-colour content. The palette
+    /// transform remaps pixels through an index channel, which helps
+    /// when nearby index values stay spatially/predictively coherent
+    /// (flat regions, polygons) and hurts when the source structure
+    /// (e.g. a fine periodic grid) has strong spatial predictability
+    /// in RGB space that the index remapping destroys. This axis was
+    /// absent from every sweep before 2026-07-02 (see the module docs'
+    /// former "deliberately excluded axes" list, which cited
+    /// jxl-encoder#69 — closed 2026-06-11, items 2/3 shipped
+    /// `dd6b393f`/screenshot-verified; only item 1, lz77, remained
+    /// genuinely inert at the sweep level).
+    pub palette_colors: Option<i64>,
 }
 
 impl LosslessVariant {
@@ -301,6 +321,7 @@ impl LosslessVariant {
             .with_modular_group_size(self.group_size_shift)
             .with_faster_decoding(self.faster_decoding)
             .with_internal_params(self.internal.params.clone())
+            .with_modular_palette_colors(self.palette_colors)
     }
 }
 
@@ -376,7 +397,11 @@ pub struct LossyAxes {
 }
 
 /// Concrete values per lossless categorical axis, most-important first.
-/// (`lz77` / `palette_colors` are deliberately absent — jxl-encoder#69.)
+/// (`lz77` is deliberately absent — jxl-encoder#69 item 1, genuinely
+/// inert for lossless multi-group per the measured 129/129 byte-identical
+/// RD-regression. `palette_colors` was ALSO on this list until 2026-07-02
+/// — item 2 shipped `dd6b393f` on 2026-06-11 and is a real, strongly
+/// content-dependent axis; see [`LosslessVariant::palette_colors`].)
 #[derive(Clone, Debug)]
 pub struct LosslessAxes {
     /// Effort levels (floor 3 under the budget ladder).
@@ -392,6 +417,11 @@ pub struct LosslessAxes {
     pub group_size_shifts: Vec<Option<u8>>,
     /// Faster-decoding tiers.
     pub faster_decoding: Vec<u8>,
+    /// Palette-transform colour cap overrides. `vec![None]` = default
+    /// behavior only (palette detection always on, prior sweep history).
+    /// `vec![None, Some(0)]` lets the picker choose per-image — see
+    /// [`LosslessVariant::palette_colors`] for why this is a real axis.
+    pub palette_colors: Vec<Option<i64>>,
 }
 
 /// The full axis bundle: either or both modes. `None` = that mode is
@@ -688,15 +718,18 @@ impl LosslessAxes {
             predictors: vec![None],
             group_size_shifts: vec![None],
             faster_decoding: vec![0],
+            palette_colors: vec![None],
         }
     }
 
     /// Every *live* user-disableable lossless mode axis on top of
     /// [`rd_core`](Self::rd_core), plus the expert internal-params
-    /// probes from the provenance table. (lz77 / palette / patches
-    /// setters are not consumed by the modular path today —
-    /// jxl-encoder#69 — and Experimental mode is profile-invariant for
-    /// lossless, so none of those are axes.)
+    /// probes from the provenance table. (lz77 is not consumed by the
+    /// lossless multi-group path today — jxl-encoder#69 item 1,
+    /// measured genuinely inert — and Experimental mode is
+    /// profile-invariant for lossless, so neither is an axis.
+    /// `palette_colors` DOES vary output — see
+    /// [`LosslessVariant::palette_colors`] — and is included below.)
     #[must_use]
     pub fn modes_full() -> Self {
         let mut axes = Self::rd_core();
@@ -709,6 +742,11 @@ impl LosslessAxes {
         axes.group_size_shifts.extend([Some(0), Some(3)]);
         axes.faster_decoding.push(2);
         axes.internal.extend(lossless_internal_probes());
+        // Some(0) disables palette detection; None keeps the built-in
+        // default (on). Measured 2026-07-02: 5.5× regression from the
+        // default on a fine-grid synthetic vs -30..-44% wins on
+        // blocky/polygon content elsewhere — genuinely per-image.
+        axes.palette_colors.push(Some(0));
         axes
     }
 
@@ -725,18 +763,25 @@ impl LosslessAxes {
             predictors: vec![None],
             group_size_shifts: vec![None],
             faster_decoding: vec![0],
+            palette_colors: vec![None],
         }
     }
 
     /// Modular picker sweep: the FULL effort ladder `e1..=10` (as
     /// [`scalar_dense`](Self::scalar_dense) — `modes_full` only samples
-    /// {1,3,5,7,9}) crossed with the predictor + internal-RCT/WP probes. The
-    /// jxl-modular picker's two real levers are effort (compute/bytes) and the
-    /// predictor/RCT choice, so this drops the `group_size`/`faster_decoding`
-    /// (decode-speed) cross that `modes_full` carries — keeping it dense over
-    /// what the picker actually selects while satisfying the mandatory coverage
-    /// (every `e1..=10` + a predictor probe). Modular cells ride the q=0 sentinel,
-    /// so there is no `× q` multiply.
+    /// {1,3,5,7,9}) crossed with the predictor + internal-RCT/WP probes,
+    /// AND the palette on/off toggle (added 2026-07-02 — genuinely
+    /// content-dependent, see [`LosslessVariant::palette_colors`]; a
+    /// picker trained without it structurally cannot recover the
+    /// palette-off optimum on grid/periodic low-colour content, since
+    /// every pre-existing cell used the palette-on default). The
+    /// jxl-modular picker's real levers are effort (compute/bytes), the
+    /// predictor/RCT choice, and now palette, so this drops the
+    /// `group_size`/`faster_decoding` (decode-speed) cross that
+    /// `modes_full` carries — keeping it dense over what the picker
+    /// actually selects while satisfying the mandatory coverage (every
+    /// `e1..=10` + a predictor probe + the palette toggle). Modular
+    /// cells ride the q=0 sentinel, so there is no `× q` multiply.
     #[must_use]
     pub fn modular_dense() -> Self {
         let mut internal = vec![NamedLosslessParams::default_probe()];
@@ -750,6 +795,7 @@ impl LosslessAxes {
             predictors: vec![None, Some(6)],
             group_size_shifts: vec![None],
             faster_decoding: vec![0],
+            palette_colors: vec![None, Some(0)],
         }
     }
 }
@@ -1286,6 +1332,11 @@ fn collapse_one_axis(axes: &mut SweepAxes) -> Option<DroppedAxis> {
                     p.label.clone()
                 })
             })
+            // Shed near-last: measured 2026-07-02 as a genuinely high-value,
+            // content-dependent axis (5.5x swing on grid content, -30..-44%
+            // on blocky/polygon content) — protect it ahead of predictors/
+            // group_size/faster_decoding under budget pressure.
+            .or_else(|| collapse("lossless.palette_colors", &mut ll.palette_colors, 1))
             .or_else(|| collapse("lossless.efforts", &mut ll.efforts, 3));
         if d.is_some() {
             return d;
@@ -1383,6 +1434,9 @@ impl LosslessVariant {
         if self.faster_decoding != 0 {
             s.push_str(&format!("-fd{}", self.faster_decoding));
         }
+        if let Some(pc) = self.palette_colors {
+            s.push_str(&format!("-pal{pc}"));
+        }
         s
     }
 }
@@ -1475,29 +1529,34 @@ fn cross(
                     for (pi, &predictor) in ll.predictors.iter().enumerate() {
                         for (gi, &group_size_shift) in ll.group_size_shifts.iter().enumerate() {
                             for (fi, &faster_decoding) in ll.faster_decoding.iter().enumerate() {
-                                let idxs = [ei, mi, ii, pi, gi, fi];
-                                let v = LosslessVariant {
-                                    effort,
-                                    encoder_mode,
-                                    internal: internal.clone(),
-                                    predictor,
-                                    group_size_shift,
-                                    faster_decoding,
-                                };
-                                let base_id = v.base_id();
-                                if v.build().validate().is_err() {
-                                    invalid.push(base_id);
-                                    continue;
+                                for (pci, &palette_colors) in
+                                    ll.palette_colors.iter().enumerate()
+                                {
+                                    let idxs = [ei, mi, ii, pi, gi, fi, pci];
+                                    let v = LosslessVariant {
+                                        effort,
+                                        encoder_mode,
+                                        internal: internal.clone(),
+                                        predictor,
+                                        group_size_shift,
+                                        faster_decoding,
+                                        palette_colors,
+                                    };
+                                    let base_id = v.base_id();
+                                    if v.build().validate().is_err() {
+                                        invalid.push(base_id);
+                                        continue;
+                                    }
+                                    entries.push(Entry {
+                                        variant: SweepVariant::Lossless(v),
+                                        base_id,
+                                        deviations: idxs.iter().filter(|&&x| x != 0).count() as u8,
+                                        mode_rank: 1,
+                                        idx_sum: idxs.iter().sum(),
+                                        seq,
+                                    });
+                                    seq += 1;
                                 }
-                                entries.push(Entry {
-                                    variant: SweepVariant::Lossless(v),
-                                    base_id,
-                                    deviations: idxs.iter().filter(|&&x| x != 0).count() as u8,
-                                    mode_rank: 1,
-                                    idx_sum: idxs.iter().sum(),
-                                    seq,
-                                });
-                                seq += 1;
                             }
                         }
                     }
@@ -1716,6 +1775,7 @@ pub fn variant_from_cell_id(id: &str) -> Result<SweepVariant, String> {
             predictor: None,
             group_size_shift: None,
             faster_decoding: 0,
+            palette_colors: None,
         };
         for f in parts {
             match f {
@@ -1738,6 +1798,13 @@ pub fn variant_from_cell_id(id: &str) -> Result<SweepVariant, String> {
                     v.faster_decoding = f[2..]
                         .parse()
                         .map_err(|e| format!("bad fd in {id:?}: {e}"))?;
+                }
+                f if f.starts_with("pal") => {
+                    v.palette_colors = Some(
+                        f[3..]
+                            .parse()
+                            .map_err(|e| format!("bad pal in {id:?}: {e}"))?,
+                    );
                 }
                 other => return Err(format!("unknown lossless flag {other:?} in {id:?}")),
             }
@@ -2280,6 +2347,7 @@ mod tests {
                 predictor: None,
                 group_size_shift: None,
                 faster_decoding: 0,
+                palette_colors: None,
             })
         };
         assert_eq!(compute_tier(&mk(3)), 3);
@@ -2603,6 +2671,7 @@ mod tests {
             predictor: None,
             group_size_shift: None,
             faster_decoding: 0,
+            palette_colors: None,
         };
         let mut b = a.clone();
         a.internal.params.gather_dedup = Some(true);
@@ -2633,6 +2702,7 @@ mod tests {
             predictor: None,
             group_size_shift: None,
             faster_decoding: 0,
+            palette_colors: None,
         };
         let mut seeded = base.clone();
         seeded.internal.params.tree_learn_seeds = Some(1);
