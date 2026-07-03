@@ -26,6 +26,8 @@ mod decode;
 mod error;
 #[cfg(feature = "jpeg-lossy")]
 pub mod jpeg_lossy;
+#[cfg(feature = "encode")]
+pub mod lossless_verify;
 mod validate;
 // #[cfg(feature = "zennode")]
 // pub mod zennode_defs;

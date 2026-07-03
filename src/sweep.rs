@@ -1529,9 +1529,7 @@ fn cross(
                     for (pi, &predictor) in ll.predictors.iter().enumerate() {
                         for (gi, &group_size_shift) in ll.group_size_shifts.iter().enumerate() {
                             for (fi, &faster_decoding) in ll.faster_decoding.iter().enumerate() {
-                                for (pci, &palette_colors) in
-                                    ll.palette_colors.iter().enumerate()
-                                {
+                                for (pci, &palette_colors) in ll.palette_colors.iter().enumerate() {
                                     let idxs = [ei, mi, ii, pi, gi, fi, pci];
                                     let v = LosslessVariant {
                                         effort,
