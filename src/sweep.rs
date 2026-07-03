@@ -1889,6 +1889,18 @@ impl Fnv {
             }
         }
     }
+    fn i64(&mut self, v: i64) {
+        self.write(&v.to_le_bytes());
+    }
+    fn opt_i64(&mut self, v: Option<i64>) {
+        match v {
+            None => self.u8(0),
+            Some(x) => {
+                self.u8(1);
+                self.i64(x);
+            }
+        }
+    }
 }
 
 /// Byte-identity fingerprint of a variant's resolved state.
@@ -2038,6 +2050,7 @@ pub fn fingerprint(variant: &SweepVariant) -> u64 {
             // docs).
             h.opt_u8(p.tree_learn_seeds);
             h.opt_bool(p.lloyd_max_buckets);
+            h.opt_i64(v.palette_colors);
         }
     }
     h.0
@@ -2187,6 +2200,11 @@ pub fn encode_fingerprint(variant: &SweepVariant) -> u64 {
             h.opt_u8(v.predictor);
             h.opt_u8(v.group_size_shift);
             h.u8(v.faster_decoding);
+            // NOT byte-inert (measured 2026-07-02: 5.5x size swing on a
+            // fine-grid synthetic) — must be hashed or the compute-dedup
+            // would wrongly treat a palette-off cell as byte-identical to
+            // its palette-on counterpart and skip encoding it.
+            h.opt_i64(v.palette_colors);
         }
     }
     h.0
