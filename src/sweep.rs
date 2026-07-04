@@ -107,7 +107,7 @@ use jxl_encoder::api::EncoderStrategy;
 use jxl_encoder::entropy_coding::ans::ANSHistogramStrategy;
 use jxl_encoder::{
     EncoderMode, EntropyMulTable, LosslessConfig, LosslessInternalParams, LossyConfig,
-    LossyInternalParams, ProgressiveMode, calibrated_jxl_quality, quality_to_distance,
+    LossyInternalParams, ProgressiveMode, RctType, calibrated_jxl_quality, quality_to_distance,
 };
 
 // ============================================================================
@@ -769,25 +769,36 @@ impl LosslessAxes {
 
     /// Modular picker sweep: the FULL effort ladder `e1..=10` (as
     /// [`scalar_dense`](Self::scalar_dense) — `modes_full` only samples
-    /// {1,3,5,7,9}) crossed with the predictor + internal-RCT/WP probes,
-    /// AND the palette on/off toggle (added 2026-07-02 — genuinely
-    /// content-dependent, see [`LosslessVariant::palette_colors`]; a
-    /// picker trained without it structurally cannot recover the
-    /// palette-off optimum on grid/periodic low-colour content, since
-    /// every pre-existing cell used the palette-on default). The
-    /// jxl-modular picker's real levers are effort (compute/bytes), the
-    /// predictor/RCT choice, and now palette, so this drops the
-    /// `group_size`/`faster_decoding` (decode-speed) cross that
-    /// `modes_full` carries — keeping it dense over what the picker
-    /// actually selects while satisfying the mandatory coverage (every
-    /// `e1..=10` + a predictor probe + the palette toggle). Modular
-    /// cells ride the q=0 sentinel, so there is no `× q` multiply.
+    /// {1,3,5,7,9}) crossed with EVERY curated internal-params probe
+    /// (all 9 from [`lossless_internal_probes`] as of 2026-07-03 — see
+    /// that function's doc comment for what's covered and, just as
+    /// importantly, what's deliberately excluded and why), the
+    /// predictor axis, AND the palette on/off toggle (added 2026-07-02
+    /// — genuinely content-dependent, see
+    /// [`LosslessVariant::palette_colors`]; a picker trained without it
+    /// structurally cannot recover the palette-off optimum on
+    /// grid/periodic low-colour content, since every pre-existing cell
+    /// used the palette-on default). The jxl-modular picker's real
+    /// levers are effort (compute/bytes), the predictor/RCT/tree-search
+    /// choice, and palette, so this drops the `group_size`/
+    /// `faster_decoding` (decode-speed) cross that `modes_full` carries
+    /// — keeping it dense over what the picker actually selects while
+    /// satisfying the mandatory coverage (every `e1..=10` + a predictor
+    /// probe + the palette toggle). Modular cells ride the q=0
+    /// sentinel, so there is no `× q` multiply.
+    ///
+    /// UNTIL 2026-07-03 this sweep silently used only 2 of the (already)
+    /// 6 curated internal-params probes (`.take(2)`, kept just enough to
+    /// satisfy the mandatory-coverage gate's `rct`/`wp` token check) —
+    /// a real coverage gap relative to the project's __expert policy
+    /// ("MLP/research work must exercise the full expert-gated knob
+    /// space so knobs can be promoted out of __expert once proven, or
+    /// ruled out with evidence instead of never being tried"). Fixed by
+    /// using every curated probe.
     #[must_use]
     pub fn modular_dense() -> Self {
         let mut internal = vec![NamedLosslessParams::default_probe()];
-        // First two curated probes are rct1 + wp5 — supply the `rct`/`wp`
-        // predictor-probe tokens the mandatory-coverage gate checks for.
-        internal.extend(lossless_internal_probes().into_iter().take(2));
+        internal.extend(lossless_internal_probes());
         Self {
             efforts: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
             encoder_modes: vec![EncoderMode::Reference],
@@ -817,6 +828,33 @@ impl LosslessAxes {
 ///   surviving set). It REMAINS in the fingerprint (upstream documents
 ///   content where bytes can differ); it is just not worth a curated
 ///   axis slot.
+///
+/// `LosslessInternalParams` has 16 total fields. 3 more are DELIBERATELY
+/// excluded here (not oversight): `tree_parallel_max_depth`,
+/// `tree_parallel_floor`, `tree_parallel_root_threshold`,
+/// `tree_parallel_small_image_fallback` — jxl-encoder's own doc comments
+/// confirm these are pure rayon fork/threshold scheduling for tree
+/// learning (same resulting tree either way), not output-affecting; the
+/// last one is explicitly documented as "intended for sweep harnesses
+/// A/B-ing the gate; production callers should leave this None," i.e. a
+/// wall-clock knob, not an RD one.
+///
+/// Added 2026-07-03 (closing a real coverage gap — `modular_dense`'s
+/// sweep only exercised `rct1`/`wp5` via `.take(2)`, silently dropping
+/// `buckets256`/`props16`/`seeds2`/`lloyd` from ITS OWN already-curated
+/// list, and 3 more RD-relevant fields had no probe at all):
+/// - `threshold30` (`tree_threshold_base`): jxl-encoder's own
+///   `lossless_override_tree_threshold_base` test proves this changes
+///   output bytes; never curated before.
+/// - `maxsamples8192` (`tree_max_samples_fixed`, paired with
+///   `tree_sample_fraction = Some(0.0)` to force the fixed-cap code path
+///   — matches jxl-encoder's `lossless_override_tree_max_samples_fixed`
+///   test setup exactly): also proven to change output.
+/// - `ycocg` (`forced_rct = Some(RctType::YCOCG)`): distinct from
+///   `rct1` — `nb_rcts_to_try(1)` narrows the SEARCH to one candidate
+///   (which the search still picks, typically GBR_SUBGR), while
+///   `forced_rct` skips search entirely and forces a SPECIFIC named
+///   colorspace, so the two probes cover genuinely different behavior.
 #[must_use]
 pub fn lossless_internal_probes() -> Vec<NamedLosslessParams> {
     let mut probes = Vec::new();
@@ -844,6 +882,19 @@ pub fn lossless_internal_probes() -> Vec<NamedLosslessParams> {
     let mut p = LosslessInternalParams::default();
     p.lloyd_max_buckets = Some(true);
     probes.push(NamedLosslessParams::new("lloyd", p));
+
+    let mut p = LosslessInternalParams::default();
+    p.tree_threshold_base = Some(30.0);
+    probes.push(NamedLosslessParams::new("threshold30", p));
+
+    let mut p = LosslessInternalParams::default();
+    p.tree_sample_fraction = Some(0.0);
+    p.tree_max_samples_fixed = Some(8_192);
+    probes.push(NamedLosslessParams::new("maxsamples8192", p));
+
+    let mut p = LosslessInternalParams::default();
+    p.forced_rct = Some(RctType::YCOCG);
+    probes.push(NamedLosslessParams::new("ycocg", p));
 
     probes
 }
