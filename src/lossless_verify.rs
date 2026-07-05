@@ -70,8 +70,12 @@ const LOW_COLOR_COUNT_CAP: usize = 256;
 /// The fixed, research-validated candidate set for low-color-count
 /// content, as sweep cell-id strings (parsed via
 /// [`crate::sweep::variant_from_cell_id`]).
-const LOW_COLOR_COUNT_CANDIDATES: [&str; 4] =
-    ["mod-e10_def", "mod-e10_def-pal0", "mod-e6_def", "mod-e6_def-pal0"];
+const LOW_COLOR_COUNT_CANDIDATES: [&str; 4] = [
+    "mod-e10_def",
+    "mod-e10_def-pal0",
+    "mod-e6_def",
+    "mod-e6_def-pal0",
+];
 
 /// The single default candidate for typical (higher color count) content.
 const DEFAULT_CANDIDATE: &str = "mod-e10_def";
@@ -99,9 +103,8 @@ fn has_at_most_distinct_colors(img: ImgRef<'_, Rgb<u8>>, cap: usize) -> bool {
 /// errors (the candidate list above is a fixed, validated constant), not
 /// runtime conditions callers need to handle.
 fn encode_cell(img: ImgRef<'_, Rgb<u8>>, id: &str) -> Result<Vec<u8>, At<JxlError>> {
-    let variant = variant_from_cell_id(id).unwrap_or_else(|e| {
-        panic!("lossless_verify: fixed candidate id {id:?} must parse: {e}")
-    });
+    let variant = variant_from_cell_id(id)
+        .unwrap_or_else(|e| panic!("lossless_verify: fixed candidate id {id:?} must parse: {e}"));
     let BuiltConfig::Lossless(cfg) = variant.build() else {
         panic!("lossless_verify: fixed candidate id {id:?} must be a lossless variant");
     };
