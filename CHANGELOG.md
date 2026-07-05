@@ -1,16 +1,31 @@
 # Changelog
 
-## [0.3.0] - Unreleased
+## [Unreleased]
 
-**Breaking release** (0.x minor bump): the zencodec trait impls' associated
-`Error` type changed (see *Changed* below; merged as `9b948f4`, PR #16). The
-package version was bumped 0.2.1 → 0.3.0 in-tree ahead of release.
+### QUEUED BREAKING CHANGES
+- zencodec trait impls' associated `Error` type changed from `At<JxlError>`
+  to `At<zencodec::CodecError>` (the envelope, Pattern B) — breaking for code
+  that names the trait impls' associated `Error` type. See *Changed* below
+  for the full description (merged as `9b948f4`, PR #16). The package
+  version was already bumped 0.2.1 → 0.3.0 in-tree ahead of release.
+
 **Release gate:** publishing 0.3.0 requires zencodec 0.1.26 (the
 CategorizedError taxonomy, zencodec#103) on crates.io; until then the
 `[patch.crates-io]` git pin on the `cancellation-classification-99` branch
 stays in place and the declared `zencodec` requirement stays at 0.1.25 (a
 0.1.26 requirement would not match the patch's 0.1.25 and nothing >= 0.1.26
 is published).
+
+### Fixed
+- `JxlError::OutOfMemory` split out from `LimitExceeded` (bug #21, `e9a14bb`):
+  allocation failures and size-computation overflows (`alloc_util`'s
+  `try_reserve_exact` OOM path, `decode::checked_buf_size`'s `checked_mul`
+  overflow, `codec.rs`'s RGB-capacity-overflow check) now report
+  `ErrorCategory::OutOfMemory` instead of being folded into
+  `LimitsExceeded(LimitKind::Memory)`, matching the zenjpeg
+  `AllocationFailed`/`SizeOverflow` precedent. Genuine caller-configured caps
+  (`zencodec::ResourceLimits` checks, `JxlLimits::validate`) are unchanged and
+  still report `LimitsExceeded`.
 
 ### Documentation
 - README overhaul: full badge row (CI/crates.io/lib.rs/docs.rs/MSRV/license),
@@ -50,10 +65,12 @@ is published).
   maps every variant to one `ErrorCategory`: `Decode` → `MalformedImage`,
   `ProgressiveRejected` → `PolicyRejected`, `Encode` → `Internal`,
   `InvalidInput` → `InvalidParameters`, `LimitExceeded` →
-  `LimitsExceeded(LimitKind::Memory)`, `Sink` → `Io(opaque)`, with `Cancelled`
-  and `UnsupportedOperation` delegating to the zencodec cause type's own
-  `category()` (cancelled-vs-timed-out, operation-vs-pixel-format). New
-  `error::categorized_error_tests` covers the per-variant mapping. **TEMP**:
+  `LimitsExceeded(LimitKind::Memory)`, `OutOfMemory` → `OutOfMemory` (split
+  from `LimitExceeded`, see *Fixed* above), `Sink` → `Io(opaque)`, with
+  `Cancelled` and `UnsupportedOperation` delegating to the zencodec cause
+  type's own `category()` (cancelled-vs-timed-out,
+  operation-vs-pixel-format). New `error::categorized_error_tests` covers the
+  per-variant mapping. **TEMP**:
   builds against `[patch.crates-io] zencodec = { git, branch =
   "cancellation-classification-99" }` until zencodec 0.1.26 ships #103; drop the
   patch and bump the `zencodec` dep at that point.
@@ -62,7 +79,8 @@ is published).
   (`src/decode.rs`), the per-animation-frame buffer, and the recursive
   gain-map sub-image buffers (`src/codec.rs`) — are all sized from the
   untrusted header dimensions, so they default to the *fallible* `try_reserve`
-  path (graceful `JxlError::LimitExceeded` on a forged header) and honor
+  path (graceful `JxlError::OutOfMemory` on a forged header, see *Fixed*
+  above) and honor
   `zencodec::AllocPreference` (`Fallible`/`Infallible` override; `CodecDefault`
   keeps the site default). Threaded from
   `ResourceLimits::prefer_fallible_allocations` at the zencodec decode boundary;
