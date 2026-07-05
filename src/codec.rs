@@ -1068,14 +1068,14 @@ mod encoding {
                     self.check_limits(width, height, 3)?;
                     // check_limits already gates dimensions, but use checked_mul
                     // here so a degenerate width/height pair can't overflow the
-                    // capacity computation on its way to a panic.
+                    // capacity computation on its way to a panic. A size
+                    // overflow is not a configured cap, so it surfaces as
+                    // `OutOfMemory`, not `LimitExceeded`.
                     let rgb_capacity =
                         w.checked_mul(h)
                             .and_then(|v| v.checked_mul(3))
                             .ok_or_else(|| {
-                                whereat::at!(JxlError::LimitExceeded(
-                                    "RGB capacity overflow".into(),
-                                ))
+                                whereat::at!(JxlError::OutOfMemory("RGB capacity overflow".into(),))
                             })?;
                     let mut rgb = Vec::with_capacity(rgb_capacity);
                     for y in 0..h {

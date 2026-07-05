@@ -30,9 +30,19 @@ pub enum JxlError {
     #[error("invalid input: {0}")]
     InvalidInput(alloc::string::String),
 
-    /// Resource limit exceeded.
+    /// A configured resource cap (dimensions, memory, frame count, input/output
+    /// size — see [`zencodec::ResourceLimits`]) was exceeded.
     #[error("limit exceeded: {0}")]
     LimitExceeded(alloc::string::String),
+
+    /// A fallible allocation or a size computation overflowed, not a
+    /// caller-configured cap. Distinct from [`JxlError::LimitExceeded`] so a
+    /// generic consumer's [`ErrorCategory`] routing (see [`category`](
+    /// CategorizedError::category)) doesn't conflate "your configured limit
+    /// was hit" with "the process ran out of memory / the size computation
+    /// wrapped".
+    #[error("out of memory: {0}")]
+    OutOfMemory(alloc::string::String),
 
     /// Operation was cancelled via Stop token.
     #[error("cancelled: {0}")]
@@ -85,14 +95,17 @@ impl CategorizedError for JxlError {
             JxlError::Encode(_) => ErrorCategory::Internal,
             // Caller-supplied parameters / dimensions were invalid.
             JxlError::InvalidInput(_) => ErrorCategory::InvalidParameters,
-            // A configured resource cap (or a graceful allocation/sizing failure
-            // deliberately routed as a limit rather than an abort) was exceeded.
-            // The variant is stringly and conflates several caps (pixel count,
-            // buffer/byte-size overflow, allocation failure), so a single
-            // representative `LimitKind` is reported — `Memory` dominates the
-            // construction sites (the `alloc_util` graceful-allocation path plus
-            // the buffer-size overflow checks).
+            // A caller-configured `zencodec::ResourceLimits` cap (dimensions,
+            // memory, frame count, input/output size) was exceeded. The variant
+            // is stringly and conflates several caps, so a single representative
+            // `LimitKind` is reported — `Memory` dominates the construction
+            // sites.
             JxlError::LimitExceeded(_) => ErrorCategory::LimitsExceeded(LimitKind::Memory),
+            // A fallible allocation failed, or a size computation overflowed —
+            // not a caller-configured cap. Matches the zenjpeg precedent of
+            // routing allocation-failure / size-overflow to `OutOfMemory`
+            // rather than folding it into `LimitsExceeded`.
+            JxlError::OutOfMemory(_) => ErrorCategory::OutOfMemory,
             // Delegate to the zencodec cause type: cancelled vs timed out.
             JxlError::Cancelled(reason) => reason.category(),
             // Delegate to the zencodec cause type: unsupported operation vs
@@ -161,6 +174,10 @@ mod categorized_error_tests {
             (
                 JxlError::LimitExceeded("pixel count exceeds limit".into()),
                 ErrorCategory::LimitsExceeded(LimitKind::Memory),
+            ),
+            (
+                JxlError::OutOfMemory("out of memory allocating 4096 bytes".into()),
+                ErrorCategory::OutOfMemory,
             ),
             // `Cancelled` / `UnsupportedOperation` delegate to the cause type.
             (

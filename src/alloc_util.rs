@@ -5,7 +5,7 @@
 //! * **Big, untrusted-sized buffers** (the full-image / per-frame output pixel
 //!   buffer, sized from the decoded header dimensions) default to the
 //!   *fallible* `try_reserve` path — a malicious header can demand gigabytes,
-//!   so we want a graceful [`JxlError::LimitExceeded`] rather than an abort.
+//!   so we want a graceful [`JxlError::OutOfMemory`] rather than an abort.
 //! * **Small, bounded scratch** (when present) defaults to the *infallible*
 //!   `vec!` path — a single `calloc` is faster and the size is bounded, not
 //!   attacker-controlled in any unbounded way.
@@ -54,7 +54,7 @@ pub(crate) fn resolve_fallible(
 /// `site_default_fallible` is this site's default when `pref` is `CodecDefault`.
 ///
 /// * fallible → `try_reserve_exact` then zero-fill, returning
-///   [`JxlError::LimitExceeded`] on allocation failure.
+///   [`JxlError::OutOfMemory`] on allocation failure.
 /// * infallible → `vec![0u8; n]` (single `calloc`, aborts on OOM).
 pub(crate) fn alloc_zeroed(
     pref: zencodec::AllocPreference,
@@ -64,7 +64,7 @@ pub(crate) fn alloc_zeroed(
     if resolve_fallible(pref, site_default_fallible) {
         let mut v = Vec::new();
         v.try_reserve_exact(n).map_err(|_| {
-            at!(JxlError::LimitExceeded(alloc::format!(
+            at!(JxlError::OutOfMemory(alloc::format!(
                 "out of memory allocating {n} bytes"
             )))
         })?;
@@ -81,7 +81,7 @@ pub(crate) fn alloc_zeroed(
 /// `pref` is the caller's [`AllocPreference`](zencodec::AllocPreference);
 /// `site_default_fallible` is this site's default when `pref` is `CodecDefault`.
 ///
-/// * fallible → `try_reserve_exact`, returning [`JxlError::LimitExceeded`] on
+/// * fallible → `try_reserve_exact`, returning [`JxlError::OutOfMemory`] on
 ///   allocation failure.
 /// * infallible → `Vec::with_capacity(cap)` (aborts on OOM).
 ///
@@ -100,7 +100,7 @@ pub(crate) fn vec_with_capacity(
     if resolve_fallible(pref, site_default_fallible) {
         let mut v = Vec::new();
         v.try_reserve_exact(cap).map_err(|_| {
-            at!(JxlError::LimitExceeded(alloc::format!(
+            at!(JxlError::OutOfMemory(alloc::format!(
                 "out of memory allocating {cap} bytes"
             )))
         })?;
@@ -165,16 +165,17 @@ mod tests {
     #[test]
     fn alloc_zeroed_fallible_oom_returns_err() {
         // Request an impossibly large allocation; the fallible path must
-        // return Err (mapped to LimitExceeded) rather than abort.
+        // return Err (mapped to OutOfMemory, not a configured LimitExceeded
+        // cap) rather than abort.
         let r = alloc_zeroed(AllocPreference::Fallible, true, usize::MAX);
         assert!(r.is_err());
-        assert!(matches!(r.unwrap_err().error(), JxlError::LimitExceeded(_)));
+        assert!(matches!(r.unwrap_err().error(), JxlError::OutOfMemory(_)));
     }
 
     #[test]
     fn vec_with_capacity_fallible_oom_returns_err() {
         let r = vec_with_capacity(AllocPreference::Fallible, true, usize::MAX);
         assert!(r.is_err());
-        assert!(matches!(r.unwrap_err().error(), JxlError::LimitExceeded(_)));
+        assert!(matches!(r.unwrap_err().error(), JxlError::OutOfMemory(_)));
     }
 }

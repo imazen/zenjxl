@@ -255,7 +255,8 @@ pub(crate) fn dim_to_u32(value: usize, label: &'static str) -> Result<u32, JxlEr
 }
 
 /// Compute a `usize` buffer size as `width * channels * bytes_per_sample * height`
-/// using checked multiplication, returning a `LimitExceeded` error on overflow.
+/// using checked multiplication, returning an `OutOfMemory` error on overflow
+/// (a size computation overflowing is not a caller-configured limit).
 ///
 /// Used in the decoder to size the per-frame pixel buffer; a wraparound here
 /// would silently allocate a too-small buffer.
@@ -268,10 +269,10 @@ pub(crate) fn checked_buf_size(
     let bytes_per_row = width
         .checked_mul(channels)
         .and_then(|v| v.checked_mul(bytes_per_sample))
-        .ok_or_else(|| JxlError::LimitExceeded("bytes_per_row overflow".into()))?;
+        .ok_or_else(|| JxlError::OutOfMemory("bytes_per_row overflow".into()))?;
     let buf_size = bytes_per_row
         .checked_mul(height)
-        .ok_or_else(|| JxlError::LimitExceeded("frame buffer size overflow".into()))?;
+        .ok_or_else(|| JxlError::OutOfMemory("frame buffer size overflow".into()))?;
     Ok((bytes_per_row, buf_size))
 }
 
@@ -777,7 +778,7 @@ pub fn decode_with_options(
 /// one untrusted-sized allocation the wrapper owns — the full-image output
 /// buffer, sized from the decoded header dimensions. Its site default is
 /// *fallible* (a forged header demanding gigabytes yields a graceful
-/// [`JxlError::LimitExceeded`] instead of aborting); `Fallible`/`Infallible`
+/// [`JxlError::OutOfMemory`] instead of aborting); `Fallible`/`Infallible`
 /// override it, `CodecDefault` keeps it. The public `decode*` entry points pass
 /// `CodecDefault` (behaviour unchanged); the zencodec adapter forwards the
 /// caller's `ResourceLimits::prefer_fallible_allocations`. The heavy
@@ -1350,17 +1351,18 @@ mod tests {
     }
 
     /// H4: the buffer-size product overflowing usize must surface as
-    /// `LimitExceeded`, not wrap and produce an undersized allocation.
+    /// `OutOfMemory` (a size overflow, not a configured `LimitExceeded` cap),
+    /// not wrap and produce an undersized allocation.
     #[test]
     fn checked_buf_size_rejects_overflow() {
         // Pick a width and height whose product overflows usize on both
         // 32- and 64-bit. usize::MAX as both factors guarantees that.
         let res = checked_buf_size(usize::MAX, 2, 1, 1);
-        assert!(matches!(res, Err(JxlError::LimitExceeded(_))));
+        assert!(matches!(res, Err(JxlError::OutOfMemory(_))));
 
         // Overflow further down the multiplication chain.
         let res = checked_buf_size(usize::MAX / 4 + 1, 1, 4, 1);
-        assert!(matches!(res, Err(JxlError::LimitExceeded(_))));
+        assert!(matches!(res, Err(JxlError::OutOfMemory(_))));
     }
 
     /// H4: small dimensions compute the expected sizes.
