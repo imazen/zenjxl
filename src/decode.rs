@@ -634,7 +634,7 @@ pub(crate) fn probe_with_orientation(
     let decoder = match result {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
-            return Err(whereat::at!(JxlError::InvalidInput(
+            return Err(whereat::at!(JxlError::UnexpectedEof(
                 "JXL: insufficient data for header".into(),
             )));
         }
@@ -831,7 +831,7 @@ pub(crate) fn decode_with_options_oriented(
     let mut decoder = match result {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
-            return Err(whereat::at!(JxlError::InvalidInput(
+            return Err(whereat::at!(JxlError::UnexpectedEof(
                 "JXL: insufficient data for header".into(),
             )));
         }
@@ -898,7 +898,7 @@ pub(crate) fn decode_with_options_oriented(
     let decoder = match result {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
-            return Err(whereat::at!(JxlError::InvalidInput(
+            return Err(whereat::at!(JxlError::UnexpectedEof(
                 "JXL: insufficient data for frame".into(),
             )));
         }
@@ -919,7 +919,7 @@ pub(crate) fn decode_with_options_oriented(
     let mut final_decoder = match result {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
-            return Err(whereat::at!(JxlError::InvalidInput(
+            return Err(whereat::at!(JxlError::UnexpectedEof(
                 "JXL: insufficient data for pixels".into(),
             )));
         }

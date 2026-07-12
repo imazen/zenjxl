@@ -11,12 +11,28 @@
 
 **Release gate:** publishing 0.3.0 requires zencodec 0.1.26 (the
 CategorizedError taxonomy, zencodec#103) on crates.io; until then the
-`[patch.crates-io]` git pin on the `cancellation-classification-99` branch
+`[patch.crates-io]` git pin (now rev `c3220d51` on zencodec `main`, which carries
+the taxonomy plus the zencodec-testkit `check_decode_truncation_series` check)
 stays in place and the declared `zencodec` requirement stays at 0.1.25 (a
 0.1.26 requirement would not match the patch's 0.1.25 and nothing >= 0.1.26
 is published).
 
+### Added
+- Wired the zencodec-testkit `check_decode_truncation_series` EOF/truncation
+  conformance check into the decode test suite (`tests/truncation_series.rs`),
+  gated `#![cfg(all(feature = "zencodec", feature = "encode", feature = "decode"))]`
+  and run by CI's `--all-features` job. `zencodec-testkit` is git-pinned to the same
+  rev as the `zencodec` `[patch.crates-io]` so both resolve to one unified zencodec.
+
 ### Fixed
+- Truncated/incomplete JXL input was mis-categorized as
+  `ErrorCategory::InvalidParameters` (a caller-fault 4xx) instead of
+  `ErrorCategory::UnexpectedEof`. The decoder's `ProcessingResult::NeedsMoreInput`
+  (definitionally "needs more bytes") was mapped to `JxlError::InvalidInput` at all
+  four one-shot decode sites (header/frame/pixels). Added a dedicated
+  `JxlError::UnexpectedEof` variant (additive — the enum is `#[non_exhaustive]`),
+  routed the four `NeedsMoreInput` arms to it, and mapped it to
+  `ErrorCategory::UnexpectedEof`. Surfaced by the new truncation-series check.
 - `JxlError::OutOfMemory` split out from `LimitExceeded` (bug #21, `e9a14bb`):
   allocation failures and size-computation overflows (`alloc_util`'s
   `try_reserve_exact` OOM path, `decode::checked_buf_size`'s `checked_mul`

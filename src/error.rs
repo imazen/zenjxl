@@ -30,6 +30,15 @@ pub enum JxlError {
     #[error("invalid input: {0}")]
     InvalidInput(alloc::string::String),
 
+    /// The input ended before a complete JXL codestream could be decoded — the
+    /// decoder reported `NeedsMoreInput` on a one-shot buffer (truncated /
+    /// incomplete input). Distinct from [`InvalidInput`](JxlError::InvalidInput)
+    /// so a generic consumer routes truncated input to
+    /// [`ErrorCategory::UnexpectedEof`] (a 4xx incomplete-request) rather than
+    /// [`InvalidParameters`](ErrorCategory::InvalidParameters).
+    #[error("unexpected end of input: {0}")]
+    UnexpectedEof(alloc::string::String),
+
     /// A configured resource cap (dimensions, memory, frame count, input/output
     /// size — see [`zencodec::ResourceLimits`]) was exceeded.
     #[error("limit exceeded: {0}")]
@@ -95,6 +104,10 @@ impl CategorizedError for JxlError {
             JxlError::Encode(_) => ErrorCategory::Internal,
             // Caller-supplied parameters / dimensions were invalid.
             JxlError::InvalidInput(_) => ErrorCategory::InvalidParameters,
+            // The input ended mid-codestream (decoder returned `NeedsMoreInput`
+            // on a one-shot buffer) → incomplete client input, not a bad
+            // parameter. A truncated request is a 4xx `UnexpectedEof`.
+            JxlError::UnexpectedEof(_) => ErrorCategory::UnexpectedEof,
             // A caller-configured `zencodec::ResourceLimits` cap (dimensions,
             // memory, frame count, input/output size) was exceeded. The variant
             // is stringly and conflates several caps, so a single representative
@@ -170,6 +183,10 @@ mod categorized_error_tests {
             (
                 JxlError::InvalidInput("bad dims".into()),
                 ErrorCategory::InvalidParameters,
+            ),
+            (
+                JxlError::UnexpectedEof("insufficient data for header".into()),
+                ErrorCategory::UnexpectedEof,
             ),
             (
                 JxlError::LimitExceeded("pixel count exceeds limit".into()),

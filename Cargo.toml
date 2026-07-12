@@ -63,7 +63,11 @@ ultrahdr-core = { version = "0.5.0", optional = true, default-features = false, 
 # TEMP: until zencodec 0.1.26 ships (PR #103 — CategorizedError taxonomy).
 # Remove this patch and bump the `zencodec` dep to the released version once
 # zencodec 0.1.26 is published.
-zencodec = { git = "https://github.com/imazen/zencodec", branch = "cancellation-classification-99" }
+# Pinned to the merged main rev c3220d51, which carries both the CategorizedError
+# taxonomy AND the zencodec-testkit `check_decode_truncation_series` conformance
+# check (PR #112). The `zencodec-testkit` dev-dep below is pinned to the SAME rev
+# so the patched `zencodec` and the testkit resolve to one unified zencodec.
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "c3220d51d2ef8ec16e8328ada2d5a04c7e6750ee" }
 jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../zenjpeg/zenjpeg" }
 # The `JxlDecoderOptions::reject_progressive` decode-time gate is on
@@ -81,6 +85,11 @@ zenjxl-decoder = { path = "../zenjxl-decoder/zenjxl-decoder" }
 butteraugli = { path = "../../butteraugli/butteraugli" }
 
 [dev-dependencies]
+# Conformance harness (unpublished companion crate) for the EOF/truncation-series
+# decode check (tests/truncation_series.rs). Pinned to the SAME git rev as the
+# `zencodec` [patch.crates-io] above so both resolve to one unified zencodec.
+# Drop for a crates.io version dep once zencodec 0.1.26 + testkit publish.
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "c3220d51d2ef8ec16e8328ada2d5a04c7e6750ee" }
 # Concrete `enough::Stop` token for the README cancellation example
 # (tests/readme_examples.rs compiles the documented snippets).
 almost-enough = "0.4.4"
