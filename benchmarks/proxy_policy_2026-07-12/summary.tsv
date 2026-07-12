@@ -1,0 +1,13 @@
+split	policy	n	avg_encode_ms	oh_mean_pct	oh_p99_pct	oh_max_pct	n_over20pct	rich_frac	worst_image
+train	single_e10_def	3627	5571.2	4.0008	58.99	222.37	248	0.0	o_7048.png.scale1024x1024.png
+train	single_e9_def	3627	3160.1	4.4637	58.733	1589.4	252	0.0	o_7046.png.scale1024x1024.png
+train	prev_shipped_palette_ship4	3627	6222.3	1.6461	49.36	75.23	62	0.2269	o_9714.png.scale43x64.png
+train	B10_shipped_e9lloydpal0_gate_rich4	3627	4280.3	0.5374	5.149	81.67	6	0.2283	o_7048.png.scale1024x1024.png
+val	single_e10_def	2014	5562.9	4.124	54.863	800.41	130	0.0	o_7053.png.scale1024x1024.png
+val	single_e9_def	2014	3123.1	4.1846	54.181	1220.97	131	0.0	o_7053.png.scale1024x1024.png
+val	prev_shipped_palette_ship4	2014	6330.4	1.3028	18.88	95.94	20	0.2825	o_7053.png.scale640x640.png
+val	B10_shipped_e9lloydpal0_gate_rich4	2014	4512.7	0.4384	3.677	68.8	2	0.2855	o_7053.png.scale1024x1024.png
+test	single_e10_def	1200	5677.3	3.8444	57.346	224.02	80	0.0	o_7047.png.scale1024x1024.png
+test	single_e9_def	1200	3188.1	4.5356	59.681	705.28	88	0.0	o_7049.png.scale1024x1024.png
+test	prev_shipped_palette_ship4	1200	6181.6	1.4754	40.051	76.24	16	0.1958	o_9907.png.scale43x64.png
+test	B10_shipped_e9lloydpal0_gate_rich4	1200	4060.4	0.7942	8.576	79.93	7	0.2	o_7047.png.scale768x768.png

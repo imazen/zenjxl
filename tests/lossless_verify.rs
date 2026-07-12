@@ -1,16 +1,18 @@
 //! Integration tests for `zenjxl::lossless_verify` — proves the self-verified
 //! lossless encode round-trips exactly (zero tolerance for pixel corruption)
-//! for both the single-encode (high color count) and multi-candidate
-//! (low color count) paths, and that the multi-candidate path never produces
-//! a LARGER result than the single default choice it's meant to improve on.
+//! for both the single-encode (typical content) and multi-candidate
+//! (low-color / near-gray content) branches, and that the multi-candidate
+//! branch never produces a LARGER result than its own lean member (the lean
+//! cell is a member of the rich candidate set, so this is a strict
+//! keep-the-smallest guarantee, not a probabilistic one).
 //!
 //! Run: cargo test -p zenjxl --features encode,decode,__expert --test lossless_verify
 #![cfg(all(feature = "encode", feature = "decode", feature = "__expert"))]
 
 use imgref::{Img, ImgRef};
 use rgb::Rgb;
-use zenjxl::LosslessConfig;
 use zenjxl::lossless_verify::encode_rgb8_lossless_verified;
+use zenjxl::sweep::{BuiltConfig, variant_from_cell_id};
 
 fn decode_rgb8(cs: &[u8]) -> (Vec<Rgb<u8>>, u32, u32) {
     let out = zenjxl::decode(cs, None, &[zenpixels::PixelDescriptor::RGB8])
@@ -40,10 +42,10 @@ fn assert_lossless_roundtrip(img: ImgRef<'_, Rgb<u8>>) -> Vec<u8> {
     encoded
 }
 
-/// High color count (a smooth gradient over a large palette): must take the
-/// single-encode path and still round-trip exactly.
+/// Typical content (a chromatic gradient over a large palette, far from
+/// gray): takes the single lean-encode branch and must round-trip exactly.
 #[test]
-fn high_color_count_roundtrips_losslessly() {
+fn typical_content_roundtrips_losslessly() {
     let (w, h) = (64usize, 64usize);
     let pixels: Vec<Rgb<u8>> = (0..w * h)
         .map(|i| {
@@ -61,7 +63,7 @@ fn high_color_count_roundtrips_losslessly() {
 }
 
 /// Low color count (a 3-color flat-region image, well under the 256 cap):
-/// must take the multi-candidate path and still round-trip exactly.
+/// takes the multi-candidate branch and must round-trip exactly.
 #[test]
 fn low_color_count_roundtrips_losslessly() {
     let (w, h) = (64usize, 64usize);
@@ -87,15 +89,41 @@ fn low_color_count_roundtrips_losslessly() {
     assert_lossless_roundtrip(img.as_ref());
 }
 
-/// The multi-candidate path (low color count) must never produce a result
-/// LARGER than a naive single fixed-effort encode -- it's a strict "keep the
-/// smallest of several candidates" guarantee, not a probabilistic one.
+/// Near-grayscale content with MANY distinct colors (gradient of grays with
+/// tiny per-channel jitter): the >256-distinct-colors path alone would miss
+/// it; the grayscale side of the gate must route it to the multi-candidate
+/// branch (this is exactly the mid-size-rescaled-plot family the 2026-07-12
+/// sweep found slipping through a colors-only gate). Round-trip proof is the
+/// same either way; this test exists so a regression in the gray gate shows
+/// up as a branch change in coverage, not silently.
 #[test]
-fn low_color_count_never_worse_than_naive_single_encode() {
+fn near_gray_many_colors_roundtrips_losslessly() {
+    let (w, h) = (96usize, 96usize);
+    let pixels: Vec<Rgb<u8>> = (0..w * h)
+        .map(|i| {
+            let v = (i % 251) as u8;
+            // spread <= 2, well inside the gray tolerance, but thousands of
+            // distinct (r,g,b) triples.
+            Rgb {
+                r: v,
+                g: v.saturating_add((i % 3) as u8),
+                b: v.saturating_add((i % 2) as u8),
+            }
+        })
+        .collect();
+    let img = Img::new(pixels, w, h);
+    assert_lossless_roundtrip(img.as_ref());
+}
+
+/// The multi-candidate branch must never produce a result LARGER than its
+/// own lean member encoded alone -- the lean cell is a member of the rich
+/// candidate set and the branch keeps the byte-smallest candidate.
+#[test]
+fn gated_branch_never_worse_than_lean_member() {
     let (w, h) = (128usize, 128usize);
-    // A pattern specifically chosen to be low-color-count (2 colors) but with
-    // fine spatial structure (checkerboard), the kind of content the module
-    // docs identify as having a jagged effort x predictor RD landscape.
+    // 2-color checkerboard: low color count -> multi-candidate branch, with
+    // the fine spatial structure the module docs identify as the jagged-RD
+    // regime.
     let pixels: Vec<Rgb<u8>> = (0..w * h)
         .map(|i| {
             let x = i % w;
@@ -115,14 +143,17 @@ fn low_color_count_never_worse_than_naive_single_encode() {
 
     let verified = assert_lossless_roundtrip(img.as_ref());
 
-    let naive_cfg = LosslessConfig::new().with_effort(10);
-    let naive = jxl_encoder::convenience::encode_rgb8_lossless(img.as_ref(), &naive_cfg)
-        .expect("naive single-config encode");
+    let variant = variant_from_cell_id("mod-e9_lloyd-pal0").expect("lean cell id parses");
+    let BuiltConfig::Lossless(cfg) = variant.build() else {
+        panic!("lean cell must be lossless");
+    };
+    let lean = jxl_encoder::convenience::encode_rgb8_lossless(img.as_ref(), &cfg)
+        .expect("lean member encode");
 
     assert!(
-        verified.len() <= naive.len(),
-        "verified path ({} bytes) must be <= naive single-config encode ({} bytes)",
+        verified.len() <= lean.len(),
+        "verified branch ({} bytes) must be <= its lean member alone ({} bytes)",
         verified.len(),
-        naive.len()
+        lean.len()
     );
 }
