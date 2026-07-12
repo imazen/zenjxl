@@ -1,0 +1,4 @@
+policy	n	avg_encode_ms	oh_mean_pct	oh_p99_pct	oh_max_pct	n_over20pct	rich_frac	worst_image
+single_e10_def	984	7606.8	6.6355	67.699	94.21	129	0.0	o_9317.png.scale43x64.png
+prev_shipped	984	8360.9	1.8426	53.563	85.99	19	0.2785	o_9819.png.scale64x43.png
+B10_shipped	984	5589.3	0.4451	3.487	5.72	0	0.2785	o_9917.png.scale43x64.png

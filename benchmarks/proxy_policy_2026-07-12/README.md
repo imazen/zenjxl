@@ -52,3 +52,22 @@ maxsamples8192 loses on average but is the oracle on the pathological
 low-color family (+30-86% rescued there).
 
 Commits: zenjxl 697ca51, jxl-encoder eeb52735. Host: lilith.
+
+## Confirmation set (added same day, after shipping)
+246 additional fresh test-parity (7/9) origins — every remaining unused
+one in imazen-26 — 984 renditions, swept on the same 32-cell grid, with
+ALL policies FROZEN before this data existed (no selection, menu, or
+gate decision ever saw these origins). Files: `testexp_confirmation.tsv`
++ `confirm_testexp.py`. Result (n=984):
+
+| policy | avg ms | mean oh | p99 oh | max oh | >20% |
+|---|---|---|---|---|---|
+| single e10_def | 7607 | 6.64% | 67.7% | 94% | 129 |
+| prev shipped | 8361 | 1.84% | 53.6% | 86% | 19 |
+| **B10 shipped** | **5589** | **0.45%** | **3.5%** | **5.7%** | **0** |
+
+Stronger than the original test split on every axis — the residual
+~80% worst-case family there does not recur in fresh origins (it is one
+specific origin cluster), and the previous policy's weakness (86% max,
+19 outliers) replicates on fresh data, confirming it was structural,
+not corpus-specific.
