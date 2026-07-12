@@ -43,8 +43,11 @@ jxl = { version = "0.3.10", package = "zenjxl-decoder", optional = true }
 jxl-encoder = { version = "0.3.2", optional = true, default-features = false, features = ["std", "convenience"] }
 # Source-quality detection (header-only) for the inferred-target floor predictor
 # (jpeg-lossy feature). detect is ungated in zenjpeg; default-features = false
-# keeps it light (no decoder pulled).
-zenjpeg = { version = "0.8.7", optional = true, default-features = false }
+# keeps it light (no decoder pulled). 0.9.0 tracks the sibling's defensive
+# Pattern-B pre-bump (zenjpeg b03e7253) — the [patch.crates-io] path entry
+# below stopped matching the old ^0.8.7 req the moment the sibling bumped,
+# breaking every zenjxl dev build that resolves dev-deps (examples/tests).
+zenjpeg = { version = "0.9.0", optional = true, default-features = false }
 # Gain-map application for GainMapRender::ReconstructHdr (reconstruct-hdr
 # feature). Pure gain-map math; jhgm ISO 21496-1 parameter parsing comes
 # from zencodec, so the registry release suffices.
