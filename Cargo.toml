@@ -24,13 +24,14 @@ whereat = { version = "0.1.5"}
 rgb = { version = "0.8.53", default-features = false, features = ["as-bytes"] }
 imgref = "1.12.0"
 enough = "0.4.3"
-# RELEASE GATE: 0.3.0 consumes the CategorizedError taxonomy (zencodec#103),
-# which is unreleased — it lives on the `cancellation-classification-99` branch
-# (still versioned 0.1.25) via the [patch.crates-io] pin below. The published
-# zencodec 0.1.25 does NOT have it, so this requirement MUST be bumped to
-# "0.1.26" (and the patch dropped) before zenjxl 0.3.0 can be published.
-# Declaring "0.1.26" today would break resolution: the patch's 0.1.25 would no
-# longer match the requirement and crates.io has nothing >= 0.1.26 yet.
+# RELEASE GATE: 0.3.0 consumes the CategorizedError taxonomy (zencodec#103,
+# reshaped into a two-level origin-first taxonomy by #116), which is
+# unreleased — it lives on the `caterr-reshape` branch (still versioned
+# 0.1.25) via the [patch.crates-io] pin below. The published zencodec 0.1.25
+# does NOT have it, so this requirement MUST be bumped to "0.1.26" (and the
+# patch dropped) before zenjxl 0.3.0 can be published. Declaring "0.1.26"
+# today would break resolution: the patch's 0.1.25 would no longer match the
+# requirement and crates.io has nothing >= 0.1.26 yet.
 zencodec = { version = "0.1.25" }
 zenpixels = { version = "0.2.11", default-features = false, features = ["rgb"] }
 # Pixel-exact orientation baking (`orient::apply_orientation`) for the zencodec
@@ -63,14 +64,17 @@ ultrahdr-core = { version = "0.5.0", optional = true, default-features = false, 
 # consumes — is now published, so its path-patch was dropped and the `jxl`
 # dep above bumped to 0.3.10.)
 [patch.crates-io]
-# TEMP: until zencodec 0.1.26 ships (PR #103 — CategorizedError taxonomy).
-# Remove this patch and bump the `zencodec` dep to the released version once
-# zencodec 0.1.26 is published.
-# Pinned to the merged main rev c3220d51, which carries both the CategorizedError
-# taxonomy AND the zencodec-testkit `check_decode_truncation_series` conformance
-# check (PR #112). The `zencodec-testkit` dev-dep below is pinned to the SAME rev
-# so the patched `zencodec` and the testkit resolve to one unified zencodec.
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "c3220d51d2ef8ec16e8328ada2d5a04c7e6750ee" }
+# TEMP: until zencodec 0.1.26 ships (PR #116 — two-level origin-first
+# ErrorCategory reshape, branch `caterr-reshape`). Remove this patch and bump
+# the `zencodec` dep to the released version once zencodec 0.1.26 is published.
+# Pinned to rev 2427387f on the (unmerged, CI-green) `caterr-reshape` branch,
+# one commit ahead of the prior pin (c3220d51) — that commit reshapes the flat
+# 17-variant CategorizedError taxonomy (PR #103/#112) into the two-level
+# Image/Request/Resource/Policy/Lifecycle/Io/Internal origin-first shape.
+# `ErrorCategory` was never published, so this is not a break of released API.
+# The `zencodec-testkit` dev-dep below is pinned to the SAME rev so the patched
+# `zencodec` and the testkit resolve to one unified zencodec.
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "2427387f86c77fdf773ae2fa219926a49cd32d99" }
 jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../zenjpeg/zenjpeg" }
 # The `JxlDecoderOptions::reject_progressive` decode-time gate is on
@@ -92,7 +96,7 @@ butteraugli = { path = "../../butteraugli/butteraugli" }
 # decode check (tests/truncation_series.rs). Pinned to the SAME git rev as the
 # `zencodec` [patch.crates-io] above so both resolve to one unified zencodec.
 # Drop for a crates.io version dep once zencodec 0.1.26 + testkit publish.
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "c3220d51d2ef8ec16e8328ada2d5a04c7e6750ee" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "2427387f86c77fdf773ae2fa219926a49cd32d99" }
 # Concrete `enough::Stop` token for the README cancellation example
 # (tests/readme_examples.rs compiles the documented snippets).
 almost-enough = "0.4.4"

@@ -216,7 +216,10 @@ impl JxlLimits {
         if let Some(max_px) = self.max_pixels {
             let pixels = width as u64 * height as u64;
             if pixels > max_px {
-                return Err(JxlError::LimitExceeded("pixel count exceeds limit".into()));
+                return Err(JxlError::LimitExceeded(
+                    "pixel count exceeds limit".into(),
+                    zencodec::LimitKind::Pixels,
+                ));
             }
         }
         if let Some(max_mem) = self.max_memory_bytes {
@@ -224,6 +227,7 @@ impl JxlLimits {
             if estimated > max_mem {
                 return Err(JxlError::LimitExceeded(
                     "estimated memory exceeds limit".into(),
+                    zencodec::LimitKind::Memory,
                 ));
             }
         }
@@ -246,11 +250,14 @@ pub(crate) fn map_err(e: jxl::api::Error) -> JxlError {
 /// Convert a header-reported dimension (`usize`) to `u32` with a checked cast.
 ///
 /// JXL dimensions max out at 2^30 per spec, so a header value that does not
-/// fit in `u32` is malformed input. On 32-bit targets the conversion is
-/// always a no-op; on 64-bit targets it catches header forgeries.
+/// fit in `u32` is malformed input — the value came from decoding the
+/// bitstream, not from a caller-supplied parameter, so a failure here is
+/// image-bytes-origin ([`JxlError::MalformedImage`], not
+/// [`JxlError::InvalidInput`]). On 32-bit targets the conversion is always a
+/// no-op; on 64-bit targets it catches header forgeries.
 pub(crate) fn dim_to_u32(value: usize, label: &'static str) -> Result<u32, JxlError> {
     u32::try_from(value).map_err(|_| {
-        JxlError::InvalidInput(alloc::format!("JXL: {label} dimension {value} exceeds u32"))
+        JxlError::MalformedImage(alloc::format!("JXL: {label} dimension {value} exceeds u32"))
     })
 }
 
@@ -1338,7 +1345,7 @@ mod tests {
         }
         let too_big: usize = (u32::MAX as usize) + 1;
         let err = dim_to_u32(too_big, "width").expect_err("must reject");
-        assert!(matches!(err, JxlError::InvalidInput(_)));
+        assert!(matches!(err, JxlError::MalformedImage(_)));
     }
 
     /// H3: dimensions that fit pass through unchanged.

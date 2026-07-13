@@ -8,14 +8,26 @@
   that names the trait impls' associated `Error` type. See *Changed* below
   for the full description (merged as `9b948f4`, PR #16). The package
   version was already bumped 0.2.1 → 0.3.0 in-tree ahead of release.
+- `JxlError::LimitExceeded` gained a second field: was `LimitExceeded(String)`,
+  now `LimitExceeded(String, zencodec::LimitKind)` — breaking for code that
+  pattern-matches the old 1-tuple shape. Carries the real cap that was hit
+  (`Width`/`Height`/`Pixels`/`Memory`/`InputSize`/`OutputSize`/`Frames`)
+  instead of a single hardcoded `LimitKind::Memory` value. See *Fixed* below.
+- Two additive `JxlError` variants (`MalformedImage`, `InvalidState`) were
+  added alongside the taxonomy reshape — additive on the already
+  `#[non_exhaustive]` enum, but batched here since they land in the same
+  0.3.0 release as the other breaks. See *Fixed* below.
 
 **Release gate:** publishing 0.3.0 requires zencodec 0.1.26 (the
-CategorizedError taxonomy, zencodec#103) on crates.io; until then the
-`[patch.crates-io]` git pin (now rev `c3220d51` on zencodec `main`, which carries
-the taxonomy plus the zencodec-testkit `check_decode_truncation_series` check)
-stays in place and the declared `zencodec` requirement stays at 0.1.25 (a
-0.1.26 requirement would not match the patch's 0.1.25 and nothing >= 0.1.26
-is published).
+CategorizedError taxonomy, zencodec#103, reshaped into a two-level
+origin-first taxonomy — `Image`/`Request`/`Resource`/`Policy`/`Lifecycle`/
+`Io`/`Internal` — by #116) on crates.io; until then the `[patch.crates-io]`
+git pin (now rev `2427387f` on the unmerged `caterr-reshape` branch, which
+carries the reshape plus the zencodec-testkit
+`check_decode_truncation_series` check) stays in place and the declared
+`zencodec` requirement stays at 0.1.25 (a 0.1.26 requirement would not match
+the patch's 0.1.25 and nothing >= 0.1.26 is published). `ErrorCategory` was
+never published, so adopting the reshape is not a break of released API.
 
 ### Added
 - Wired the zencodec-testkit `check_decode_truncation_series` EOF/truncation
@@ -24,24 +36,67 @@ is published).
   and run by CI's `--all-features` job. `zencodec-testkit` is git-pinned to the same
   rev as the `zencodec` `[patch.crates-io]` so both resolve to one unified zencodec.
 
+### Changed
+- Adopted zencodec's two-level origin-first `ErrorCategory` taxonomy
+  end-to-end: `CategorizedError::category()` now introspects the *foreign*
+  decode/encode errors' own sub-variants instead of blanket-folding them —
+  `JxlError::Decode` matches on `jxl::api::Error::kind()`'s `ErrorClass`
+  (`InvalidBitstream`/`Unsupported`/`LimitExceeded`/`OutOfMemory`/
+  `Cancelled`/`Io`/`OutputConfiguration`/`Internal`) instead of always
+  reporting `Malformed`, and `JxlError::Encode` matches on
+  `jxl_encoder::EncodeError`'s own variants instead of always reporting an
+  internal bug. A caller-request-origin `EncodeError` (bad config, an
+  unsupported pixel layout) previously read as a producer-side `Internal`
+  fault; it now reports `Request(Invalid(Parameters))` /
+  `Request(Unsupported(PixelFormat))` as appropriate.
+
 ### Fixed
 - Truncated/incomplete JXL input was mis-categorized as
-  `ErrorCategory::InvalidParameters` (a caller-fault 4xx) instead of
-  `ErrorCategory::UnexpectedEof`. The decoder's `ProcessingResult::NeedsMoreInput`
-  (definitionally "needs more bytes") was mapped to `JxlError::InvalidInput` at all
-  four one-shot decode sites (header/frame/pixels). Added a dedicated
-  `JxlError::UnexpectedEof` variant (additive — the enum is `#[non_exhaustive]`),
-  routed the four `NeedsMoreInput` arms to it, and mapped it to
-  `ErrorCategory::UnexpectedEof`. Surfaced by the new truncation-series check.
+  `ErrorCategory::Request(RequestError::Invalid(InvalidKind::Parameters))`
+  (a caller-fault 4xx) instead of
+  `ErrorCategory::Image(ImageError::UnexpectedEof)`. The decoder's
+  `ProcessingResult::NeedsMoreInput` (definitionally "needs more bytes") was
+  mapped to `JxlError::InvalidInput` at six one-shot decode sites — four in
+  `decode.rs` (header/frame/pixels) plus two in `codec.rs`'s streaming
+  animation decoder that the first pass missed (same audit, same bug, found
+  while wiring the taxonomy reshape). Added a dedicated `JxlError::UnexpectedEof`
+  variant (additive — the enum is `#[non_exhaustive]`), routed all six
+  `NeedsMoreInput` arms to it, and mapped it to
+  `ErrorCategory::Image(ImageError::UnexpectedEof)`. Surfaced by the
+  truncation-series check.
 - `JxlError::OutOfMemory` split out from `LimitExceeded` (bug #21, `e9a14bb`):
   allocation failures and size-computation overflows (`alloc_util`'s
   `try_reserve_exact` OOM path, `decode::checked_buf_size`'s `checked_mul`
   overflow, `codec.rs`'s RGB-capacity-overflow check) now report
-  `ErrorCategory::OutOfMemory` instead of being folded into
-  `LimitsExceeded(LimitKind::Memory)`, matching the zenjpeg
-  `AllocationFailed`/`SizeOverflow` precedent. Genuine caller-configured caps
-  (`zencodec::ResourceLimits` checks, `JxlLimits::validate`) are unchanged and
-  still report `LimitsExceeded`.
+  `ErrorCategory::Resource(ResourceError::OutOfMemory)` instead of being
+  folded into `Resource(ResourceError::Limits(LimitKind::Memory))`, matching
+  the zenjpeg `AllocationFailed`/`SizeOverflow` precedent. Genuine
+  caller-configured caps (`zencodec::ResourceLimits` checks,
+  `JxlLimits::validate`) are unchanged and still report `Resource(Limits(_))`.
+- `JxlError::LimitExceeded`'s category hardcoded `LimitKind::Memory` for
+  every one of the ~15 `zencodec::ResourceLimits` call sites, regardless of
+  which cap (dimensions/frames/input size/output size/memory) actually
+  fired. `LimitExceeded` now carries the real `LimitKind`, read from the
+  triggering `zencodec::LimitExceeded::kind()` at each construction site (or
+  set directly for zenjxl's own `JxlLimits::validate` pixel/memory checks).
+- `finish()` called before any rows or frames were pushed (both the
+  one-shot streaming encoder and the animation encoder) categorized as
+  `Request(Invalid(Parameters))` (`JxlError::InvalidInput`) — a caller-fault
+  parameter issue — when it is a call-sequencing violation (the operation
+  was invoked out of sequence, not given a bad value). Added
+  `JxlError::InvalidState` (additive) and rerouted both sites; now
+  categorizes as `Request(Invalid(InvalidKind::State))`.
+- A header-reported JXL dimension overflowing `u32` (`decode::dim_to_u32`)
+  and a `ReconstructHdr` gain-map bundle's unparsable embedded `jhgm`
+  ISO 21496-1 metadata both categorized as `Request(Invalid(Parameters))`
+  (`JxlError::InvalidInput`) even though the values came from decoding the
+  bitstream/container, not from a caller parameter. Added
+  `JxlError::MalformedImage` (additive) and rerouted both sites; now
+  categorizes as `Image(ImageError::Malformed)`. Two adjacent
+  `ReconstructHdr` sites (an unsupported gain-map codestream pixel format,
+  and `ultrahdr-core`'s `apply_gainmap` failure) were reviewed but left as
+  `InvalidInput` — reclassifying them needs a third new variant plus
+  `ultrahdr-core` error-semantics research, out of scope for this pass.
 
 ### Documentation
 - README overhaul: full badge row (CI/crates.io/lib.rs/docs.rs/MSRV/license),

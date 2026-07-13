@@ -82,8 +82,8 @@ fn decode_with_policy(
 /// `allow_progressive == Some(false)` rejects a progressive JXL during decode
 /// with the dedicated [`JxlError::ProgressiveRejected`] variant — recovered here
 /// through the [`CodecError`](zencodec::CodecError) envelope as both the codec-
-/// agnostic [`PolicyRejected`](zencodec::ErrorCategory::PolicyRejected) category
-/// and the typed detail.
+/// agnostic [`Policy`](zencodec::ErrorCategory::Policy)`(`[`PolicyKind::Decode`](
+/// zencodec::PolicyKind::Decode)`)` category and the typed detail.
 #[test]
 fn progressive_rejected_when_policy_forbids() {
     use zencodec::CodecErrorExt;
@@ -95,8 +95,8 @@ fn progressive_rejected_when_policy_forbids() {
             // envelope (this is what a generic consumer routes on).
             assert_eq!(
                 at.error().category(),
-                zencodec::ErrorCategory::PolicyRejected,
-                "progressive rejection must categorize as PolicyRejected"
+                zencodec::ErrorCategory::Policy(zencodec::PolicyKind::Decode),
+                "progressive rejection must categorize as Policy(Decode)"
             );
             assert_eq!(at.error().codec(), Some("zenjxl"));
             // Typed axis: the exact JxlError variant is still recoverable as the
