@@ -112,7 +112,7 @@ pub enum JxlError {
 
 /// Coarse, codec-agnostic classification of [`JxlError`] for the zencodec error
 /// taxonomy (zencodec PR #116 — the two-level origin-first `ErrorCategory`
-/// reshape: `Image`/`Request`/`Resource`/`Policy`/`Lifecycle`/`Io`/`Internal`).
+/// reshape: `Image`/`Request`/`Resource`/`Policy`/`Stopped`/`Io`/`Internal`).
 /// A generic consumer routes on the [`ErrorCategory`] — HTTP status, retry
 /// policy, logging — without naming the concrete enum, and
 /// [`codec_name`](CategorizedError::codec_name) tags the originating codec.
@@ -163,7 +163,7 @@ impl CategorizedError for JxlError {
                     ErrorCategory::Resource(ResourceError::OutOfMemory)
                 }
                 jxl::api::ErrorClass::Cancelled => {
-                    ErrorCategory::Lifecycle(enough::StopReason::Cancelled)
+                    ErrorCategory::Stopped(enough::StopReason::Cancelled)
                 }
                 jxl::api::ErrorClass::Io => ErrorCategory::Io(CodecIoKind::opaque()),
                 // "wrong output buffer size/count, grayscale mismatch, or an
@@ -202,7 +202,7 @@ impl CategorizedError for JxlError {
                     ErrorCategory::Resource(ResourceError::Limits(LimitKind::Memory))
                 }
                 jxl_encoder::EncodeError::Cancelled => {
-                    ErrorCategory::Lifecycle(enough::StopReason::Cancelled)
+                    ErrorCategory::Stopped(enough::StopReason::Cancelled)
                 }
                 jxl_encoder::EncodeError::Oom(_) => {
                     ErrorCategory::Resource(ResourceError::OutOfMemory)
@@ -342,11 +342,11 @@ mod categorized_error_tests {
             // `Cancelled` / `UnsupportedOperation` delegate to the cause type.
             (
                 JxlError::Cancelled(enough::StopReason::Cancelled),
-                ErrorCategory::Lifecycle(enough::StopReason::Cancelled),
+                ErrorCategory::Stopped(enough::StopReason::Cancelled),
             ),
             (
                 JxlError::Cancelled(enough::StopReason::TimedOut),
-                ErrorCategory::Lifecycle(enough::StopReason::TimedOut),
+                ErrorCategory::Stopped(enough::StopReason::TimedOut),
             ),
             (
                 JxlError::UnsupportedOperation(UnsupportedOperation::AnimationDecode),
@@ -443,7 +443,7 @@ mod categorized_error_tests {
             ));
             cases.push((
                 JxlError::Encode(jxl_encoder::EncodeError::Cancelled),
-                ErrorCategory::Lifecycle(enough::StopReason::Cancelled),
+                ErrorCategory::Stopped(enough::StopReason::Cancelled),
             ));
         }
 

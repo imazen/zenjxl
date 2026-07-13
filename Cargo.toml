@@ -74,7 +74,7 @@ ultrahdr-core = { version = "0.5.0", optional = true, default-features = false, 
 # `ErrorCategory` was never published, so this is not a break of released API.
 # The `zencodec-testkit` dev-dep below is pinned to the SAME rev so the patched
 # `zencodec` and the testkit resolve to one unified zencodec.
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "2427387f86c77fdf773ae2fa219926a49cd32d99" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "44ca79279b265ba7dfe01a2b31ef74788429509a" }
 jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../zenjpeg/zenjpeg" }
 # The `JxlDecoderOptions::reject_progressive` decode-time gate is on
@@ -96,7 +96,7 @@ butteraugli = { path = "../../butteraugli/butteraugli" }
 # decode check (tests/truncation_series.rs). Pinned to the SAME git rev as the
 # `zencodec` [patch.crates-io] above so both resolve to one unified zencodec.
 # Drop for a crates.io version dep once zencodec 0.1.26 + testkit publish.
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "2427387f86c77fdf773ae2fa219926a49cd32d99" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "44ca79279b265ba7dfe01a2b31ef74788429509a" }
 # Concrete `enough::Stop` token for the README cancellation example
 # (tests/readme_examples.rs compiles the documented snippets).
 almost-enough = "0.4.4"
