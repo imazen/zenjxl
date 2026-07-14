@@ -18,23 +18,24 @@
   `#[non_exhaustive]` enum, but batched here since they land in the same
   0.3.0 release as the other breaks. See *Fixed* below.
 
-**Release gate:** publishing 0.3.0 requires zencodec 0.1.26 (the
-CategorizedError taxonomy, zencodec#103, reshaped into a two-level
-origin-first taxonomy — `Image`/`Request`/`Resource`/`Policy`/`Lifecycle`/
-`Io`/`Internal` — by #116) on crates.io; until then the `[patch.crates-io]`
-git pin (now rev `2427387f` on the unmerged `caterr-reshape` branch, which
-carries the reshape plus the zencodec-testkit
-`check_decode_truncation_series` check) stays in place and the declared
-`zencodec` requirement stays at 0.1.25 (a 0.1.26 requirement would not match
-the patch's 0.1.25 and nothing >= 0.1.26 is published). `ErrorCategory` was
-never published, so adopting the reshape is not a break of released API.
+**Release gate cleared:** zenjxl 0.3.0's `CategorizedError` taxonomy adoption
+(zencodec#103, reshaped into a two-level origin-first taxonomy —
+`Image`/`Request`/`Resource`/`Policy`/`Stopped`/`Io`/`Internal` — by #116, and
+including the `Lifecycle` -> `Stopped` rename) now resolves directly against
+the published zencodec 0.1.26. The temporary `[patch.crates-io]` git pin
+(`caterr-reshape` branch) has been dropped and the declared `zencodec`
+requirement bumped to `"0.1.26"`. `zencodec-testkit` (the dev-only
+conformance-harness dependency providing `check_decode_truncation_series`)
+remains git-pinned to the same rev, since that companion crate is still
+unpublished. `ErrorCategory` was never published prior to 0.1.26, so
+adopting the reshape was not a break of released API.
 
 ### Added
 - Wired the zencodec-testkit `check_decode_truncation_series` EOF/truncation
   conformance check into the decode test suite (`tests/truncation_series.rs`),
   gated `#![cfg(all(feature = "zencodec", feature = "encode", feature = "decode"))]`
-  and run by CI's `--all-features` job. `zencodec-testkit` is git-pinned to the same
-  rev as the `zencodec` `[patch.crates-io]` so both resolve to one unified zencodec.
+  and run by CI's `--all-features` job. `zencodec-testkit` is git-pinned (still
+  unpublished) to the same rev the `zencodec` patch used to carry.
 
 ### Changed
 - Adopted zencodec's two-level origin-first `ErrorCategory` taxonomy
