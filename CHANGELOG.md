@@ -22,20 +22,27 @@
 (zencodec#103, reshaped into a two-level origin-first taxonomy —
 `Image`/`Request`/`Resource`/`Policy`/`Stopped`/`Io`/`Internal` — by #116, and
 including the `Lifecycle` -> `Stopped` rename) now resolves directly against
-the published zencodec 0.1.26. The temporary `[patch.crates-io]` git pin
-(`caterr-reshape` branch) has been dropped and the declared `zencodec`
-requirement bumped to `"0.1.26"`. `zencodec-testkit` (the dev-only
-conformance-harness dependency providing `check_decode_truncation_series`)
-remains git-pinned to the same rev, since that companion crate is still
-unpublished. `ErrorCategory` was never published prior to 0.1.26, so
-adopting the reshape was not a break of released API.
+the published zencodec 0.1.26: the declared `zencodec` requirement is bumped
+to `"0.1.26"` and the `[patch.crates-io]` git pin no longer floats on an
+unmerged branch/rev. The patch entry itself stays, repointed at the
+content-identical `v0.1.26` release tag, because `zencodec-testkit` (the
+dev-only conformance-harness dependency providing
+`check_decode_truncation_series`) is still unpublished and path-deps
+`zencodec` internally — without the patch, the graph would resolve two
+distinct `zencodec` crates (crates.io 0.1.26 + the testkit's git checkout)
+and fail with "multiple different versions of crate zencodec". Both the
+patch and the `zencodec-testkit` dev-dep are tag-pinned (not a bare rev) to
+`v0.1.26` so they can't drift apart. `ErrorCategory` was never published
+prior to 0.1.26, so adopting the reshape was not a break of released API.
 
 ### Added
 - Wired the zencodec-testkit `check_decode_truncation_series` EOF/truncation
   conformance check into the decode test suite (`tests/truncation_series.rs`),
   gated `#![cfg(all(feature = "zencodec", feature = "encode", feature = "decode"))]`
   and run by CI's `--all-features` job. `zencodec-testkit` is git-pinned (still
-  unpublished) to the same rev the `zencodec` patch used to carry.
+  unpublished, tag `v0.1.26`) to the same release the `zencodec`
+  `[patch.crates-io]` entry also points at, so both resolve to one unified
+  `zencodec` crate.
 
 ### Changed
 - Adopted zencodec's two-level origin-first `ErrorCategory` taxonomy

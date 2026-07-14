@@ -27,7 +27,10 @@ enough = "0.4.3"
 # zencodec 0.1.26 (published) carries the CategorizedError taxonomy
 # (zencodec#103, reshaped into a two-level origin-first taxonomy by #116,
 # including the Lifecycle -> Stopped rename) that this crate's error.rs
-# already consumes. No patch needed any more.
+# already consumes. Still unified via the [patch.crates-io] tag pin below
+# with zencodec-testkit's internal (path-based) zencodec dependency -- see
+# that patch entry's comment for why the patch remains despite 0.1.26 being
+# published.
 zencodec = { version = "0.1.26" }
 zenpixels = { version = "0.2.11", default-features = false, features = ["rgb"] }
 # Pixel-exact orientation baking (`orient::apply_orientation`) for the zencodec
@@ -60,6 +63,10 @@ ultrahdr-core = { version = "0.5.0", optional = true, default-features = false, 
 # consumes — is now published, so its path-patch was dropped and the `jxl`
 # dep above bumped to 0.3.10.)
 [patch.crates-io]
+# zencodec-testkit is unpublished (path-deps zencodec internally); unify the
+# graph on the content-identical released tag until the testkit ships on
+# crates.io.
+zencodec = { git = "https://github.com/imazen/zencodec", tag = "v0.1.26" }
 jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../zenjpeg/zenjpeg" }
 # The `JxlDecoderOptions::reject_progressive` decode-time gate is on
@@ -78,11 +85,14 @@ butteraugli = { path = "../../butteraugli/butteraugli" }
 
 [dev-dependencies]
 # Conformance harness (unpublished companion crate) for the EOF/truncation-series
-# decode check (tests/truncation_series.rs). Still git-pinned because the
-# testkit crate itself has not published to crates.io yet (zencodec proper
-# published 0.1.26; testkit is a separate, still-unpublished workspace
-# member). Drop for a crates.io version dep once testkit publishes.
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "44ca79279b265ba7dfe01a2b31ef74788429509a" }
+# decode check (tests/truncation_series.rs). Tag-pinned (not a bare rev) to
+# v0.1.26 -- the same content-identical release the [patch.crates-io]
+# `zencodec` entry above points at, so both resolve to one unified zencodec
+# crate (a bare rev here that drifted from the patch's tag would silently
+# reintroduce "multiple different versions of crate zencodec"). Drop both the
+# patch and this tag pin for a plain crates.io version dep once zencodec-testkit
+# itself publishes.
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", tag = "v0.1.26" }
 # Concrete `enough::Stop` token for the README cancellation example
 # (tests/readme_examples.rs compiles the documented snippets).
 almost-enough = "0.4.4"
