@@ -33,15 +33,16 @@ lives in `zenjpeg/docs/VARIANT_GENERATION.md`.
 - jxl-encoder's #68 fixes are **not yet in a crates.io release** — local
   builds get them via the `[patch.crates-io]` path dep; published-dep
   consumers (CI clones siblings, so it's covered) need the next
-  jxl-encoder release. zenjxl-decoder 0.3.9 is published (`^0.3.7`
-  resolves to it).
+  jxl-encoder release (re-verified 2026-07-19: still true — crates.io
+  0.3.1 tagged 2026-05-02; release ~11 weeks overdue). zenjxl-decoder
+  0.3.9 is published (`^0.3.7` resolves to it).
 
 ## Canonical training data + indexes (added 2026-05-20)
 
 **The canonical index for all ML data lives at `~/work/zen/DATA_PROVENANCE.md`.**
 
 Quick paths:
-- Trainer input: `/mnt/v/zen/zensim-training/canonical-2026-05-21/`
+- Trainer input: `s3://zentrain/canonical/2026-06-27/` (per `~/work/zen/DATA_PROVENANCE.md`; 2026-05-21 superseded)
 - Master inventory: `~/work/zen/_ml-inventory-2026-05-20/00-MASTER-SYNTHESIS.md`
 - Per-codec picker audit: `~/work/zen/_ml-inventory-2026-05-20/05-per-codec-pickers.md`
 
