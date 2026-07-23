@@ -132,11 +132,12 @@ butteraugli-loop = ["encode", "jxl-encoder/butteraugli-loop"]
 # Needs both encode (jxl-encoder's coefficient-domain coarsener, behind its
 # `jpeg-reencoding` feature) AND decode (to score each candidate in-process).
 # Metric-agnostic: the caller supplies a scorer callback over decoded RGB8.
-# zenjpeg/decoder provides the source-ICC extractor (`extract_icc_profile`, a pure
+# zenjpeg provides the source-ICC extractor (`extract_icc_profile`, a pure
 # APP2 byte-scanner) so the Reencode path preserves a wide-gamut source's color
 # profile instead of silently relabeling it sRGB. (No `zenjpeg/moxcms` needed — the
-# extractor does no color management; its re-export was ungated in zenjpeg.)
-jpeg-lossy = ["encode", "decode", "jxl-encoder/jpeg-reencoding", "dep:zenjpeg", "zenjpeg/decoder"]
+# extractor does no color management.) zenjpeg 0.9.0 dropped the `decoder` feature
+# (decoding is now unconditional), so it's no longer requested here.
+jpeg-lossy = ["encode", "decode", "jxl-encoder/jpeg-reencoding", "dep:zenjpeg"]
 # Expert / unstable: forwards jxl-encoder's `__expert` feature so picker
 # training and codec calibration sweeps can apply
 # `LossyConfig::with_internal_params(LossyInternalParams)` /
