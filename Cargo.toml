@@ -168,3 +168,11 @@ reconstruct-hdr = ["zencodec", "decode", "dep:ultrahdr-core"]
 [[example]]
 name = "sweep_validate"
 required-features = ["encode", "decode", "__expert"]
+
+# Per-image lossless cell-sweep harness. Uses the sweep grammar
+# (`zenjxl::sweep::variant_from_cell_id`), which is gated behind
+# `encode` + `__expert` — without this declaration, auto-discovery
+# builds (and breaks) the example on every non-`__expert` `cargo test`.
+[[example]]
+name = "proxy_policy_sweep"
+required-features = ["encode", "__expert"]
