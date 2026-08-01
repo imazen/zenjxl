@@ -35,17 +35,6 @@ jobs:
           git clone --depth 1 --branch main https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Pin archmage/magetypes 0.9.26 (pre-break)
-        shell: bash
-        # magetypes/archmage 0.9.27 removed the concrete per-platform SIMD
-        # constructors (e.g. `f32x4::from_float32x4_t`) that jxl-encoder-simd
-        # main still uses on NEON. Cargo.lock is gitignored here, so without a
-        # pin CI floats to 0.9.27 and the aarch64 jobs break. Drop this step
-        # once jxl-encoder migrates to magetypes >= 0.9.27 (it will then fail
-        # loudly: 0.9.26 no longer satisfies the requirement).
-        run: |
-          cargo update -p magetypes --precise 0.9.26
-          cargo update -p archmage --precise 0.9.26
       - name: Check (no default features)
         run: cargo check --no-default-features
       - name: Test (no default features)
@@ -80,17 +69,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: features
-      - name: Pin archmage/magetypes 0.9.26 (pre-break)
-        shell: bash
-        # magetypes/archmage 0.9.27 removed the concrete per-platform SIMD
-        # constructors (e.g. `f32x4::from_float32x4_t`) that jxl-encoder-simd
-        # main still uses on NEON. Cargo.lock is gitignored here, so without a
-        # pin CI floats to 0.9.27 and the aarch64 jobs break. Drop this step
-        # once jxl-encoder migrates to magetypes >= 0.9.27 (it will then fail
-        # loudly: 0.9.26 no longer satisfies the requirement).
-        run: |
-          cargo update -p magetypes --precise 0.9.26
-          cargo update -p archmage --precise 0.9.26
       - name: Check (decode only)
         run: cargo check --no-default-features --features decode
       - name: Test (decode only)
@@ -122,17 +100,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: cross-i686
-      - name: Pin archmage/magetypes 0.9.26 (pre-break)
-        shell: bash
-        # magetypes/archmage 0.9.27 removed the concrete per-platform SIMD
-        # constructors (e.g. `f32x4::from_float32x4_t`) that jxl-encoder-simd
-        # main still uses on NEON. Cargo.lock is gitignored here, so without a
-        # pin CI floats to 0.9.27 and the aarch64 jobs break. Drop this step
-        # once jxl-encoder migrates to magetypes >= 0.9.27 (it will then fail
-        # loudly: 0.9.26 no longer satisfies the requirement).
-        run: |
-          cargo update -p magetypes --precise 0.9.26
-          cargo update -p archmage --precise 0.9.26
       - name: Test (i686, no default features)
         env:
           # Mount the patched siblings into the cross container so the
@@ -161,17 +128,6 @@ jobs:
         with:
           targets: wasm32-wasip1
       - uses: Swatinem/rust-cache@v2
-      - name: Pin archmage/magetypes 0.9.26 (pre-break)
-        shell: bash
-        # magetypes/archmage 0.9.27 removed the concrete per-platform SIMD
-        # constructors (e.g. `f32x4::from_float32x4_t`) that jxl-encoder-simd
-        # main still uses on NEON. Cargo.lock is gitignored here, so without a
-        # pin CI floats to 0.9.27 and the aarch64 jobs break. Drop this step
-        # once jxl-encoder migrates to magetypes >= 0.9.27 (it will then fail
-        # loudly: 0.9.26 no longer satisfies the requirement).
-        run: |
-          cargo update -p magetypes --precise 0.9.26
-          cargo update -p archmage --precise 0.9.26
       - name: Check WASM (no default features)
         run: cargo check --target wasm32-wasip1 --no-default-features
 
@@ -192,17 +148,6 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Pin archmage/magetypes 0.9.26 (pre-break)
-        shell: bash
-        # magetypes/archmage 0.9.27 removed the concrete per-platform SIMD
-        # constructors (e.g. `f32x4::from_float32x4_t`) that jxl-encoder-simd
-        # main still uses on NEON. Cargo.lock is gitignored here, so without a
-        # pin CI floats to 0.9.27 and the aarch64 jobs break. Drop this step
-        # once jxl-encoder migrates to magetypes >= 0.9.27 (it will then fail
-        # loudly: 0.9.26 no longer satisfies the requirement).
-        run: |
-          cargo update -p magetypes --precise 0.9.26
-          cargo update -p archmage --precise 0.9.26
       - name: Clippy (no default features)
         run: cargo clippy --no-default-features --all-targets -- -D warnings
       - name: Clippy (zencodec only)
@@ -241,17 +186,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
-      - name: Pin archmage/magetypes 0.9.26 (pre-break)
-        shell: bash
-        # magetypes/archmage 0.9.27 removed the concrete per-platform SIMD
-        # constructors (e.g. `f32x4::from_float32x4_t`) that jxl-encoder-simd
-        # main still uses on NEON. Cargo.lock is gitignored here, so without a
-        # pin CI floats to 0.9.27 and the aarch64 jobs break. Drop this step
-        # once jxl-encoder migrates to magetypes >= 0.9.27 (it will then fail
-        # loudly: 0.9.26 no longer satisfies the requirement).
-        run: |
-          cargo update -p magetypes --precise 0.9.26
-          cargo update -p archmage --precise 0.9.26
       - name: Check MSRV (no default features)
         run: cargo hack check --rust-version --no-default-features
       - name: Check MSRV (all features)
@@ -274,17 +208,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: Swatinem/rust-cache@v2
-      - name: Pin archmage/magetypes 0.9.26 (pre-break)
-        shell: bash
-        # magetypes/archmage 0.9.27 removed the concrete per-platform SIMD
-        # constructors (e.g. `f32x4::from_float32x4_t`) that jxl-encoder-simd
-        # main still uses on NEON. Cargo.lock is gitignored here, so without a
-        # pin CI floats to 0.9.27 and the aarch64 jobs break. Drop this step
-        # once jxl-encoder migrates to magetypes >= 0.9.27 (it will then fail
-        # loudly: 0.9.26 no longer satisfies the requirement).
-        run: |
-          cargo update -p magetypes --precise 0.9.26
-          cargo update -p archmage --precise 0.9.26
       - name: Generate coverage
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
       - name: Upload coverage
