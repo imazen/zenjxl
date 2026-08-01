@@ -35,6 +35,39 @@ patch and the `zencodec-testkit` dev-dep are tag-pinned (not a bare rev) to
 `v0.1.26` so they can't drift apart. `ErrorCategory` was never published
 prior to 0.1.26, so adopting the reshape was not a break of released API.
 
+### Fixed (unreleased)
+- **Encode memory limits now flow into jxl-encoder's honest pre-flight**
+  (codec memory plan wave 4). The zencodec adapter previously (a) checked
+  `ResourceLimits::max_memory_bytes` against the `w*h*bpp` INPUT buffer — a
+  dishonest proxy for the encoder's true peak working set (tens to hundreds
+  of bytes per pixel) — and (b) forwarded a `jxl_encoder::Limits` only when
+  `max_memory_bytes` was set, dropping the caller's
+  `prefer_fallible_allocations` on every encode path. Now a single mapping
+  (`to_jxl_encode_limits`) forwards BOTH the memory budget and the
+  allocation preference (`AllocPreference::Fallible` →
+  `Limits::with_fallible_alloc(true)`) on the one-shot, streaming
+  (`push_rows`/`finish`), and animation encode paths (the animation path
+  previously forwarded NO limits at all — it now uses
+  `encode_animation_with_limits`). The adapter's own memory arm was removed
+  from `check_limits` (dimension caps stay adapter-side): the core's
+  calibrated size/effort/path/thread-aware `encode_preflight` performs the
+  honest admission check, walks the thread count down to fit the budget, and
+  rejects — with the `raise the cap via Limits::with_max_memory_bytes` hint
+  preserved — only when even the single-threaded estimate exceeds the cap.
+  The core's estimate includes the input buffer, so every encode the old arm
+  rejected is still rejected (strictly more enforcement). Note the flip
+  side: with no explicit `max_memory_bytes`, jxl-encoder's path-aware
+  default caps (4 GiB lossy / 8 GiB lossless) now honestly reject very large
+  encodes (≳50 MP lossy e≤6 / ≳30 MP e7 / ≳15.7 MP lossless-e7) — callers
+  with real budgets must set `ResourceLimits::max_memory_bytes`, which this
+  change forwards. Tests: `encode_memory_cap_delegates_to_core_estimate`,
+  `encode_limits_mapping_forwards_budget_and_alloc_preference`,
+  `encode_moderate_memory_budget_succeeds`,
+  `animation_encode_memory_cap_delegates_to_core`.
+- `proxy_policy_sweep` example gained its missing
+  `required-features = ["encode", "__expert"]` declaration — auto-discovery
+  was building (and breaking) it on every non-`__expert` `cargo test`.
+
 ### Added
 - Wired the zencodec-testkit `check_decode_truncation_series` EOF/truncation
   conformance check into the decode test suite (`tests/truncation_series.rs`),

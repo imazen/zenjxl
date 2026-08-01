@@ -68,6 +68,45 @@ mod encoding {
         }
     }
 
+    /// Map the caller's [`ResourceLimits`] onto a [`jxl_encoder::Limits`] for
+    /// the encode paths.
+    ///
+    /// Returns `Some` when the caller set an explicit memory budget OR a
+    /// non-default [`zencodec::AllocPreference`] — both must reach the core:
+    ///
+    /// - `max_memory_bytes` becomes the hard budget for jxl-encoder's
+    ///   calibrated `encode_preflight` (size / effort / path / thread-aware):
+    ///   the encoder picks the largest thread count whose estimated peak fits
+    ///   the budget and rejects (`EncodeError::LimitExceeded`, mapped to
+    ///   `Resource(Limits(Memory))` by [`crate::error`]) only when even the
+    ///   single-threaded estimate exceeds it. When unset, the core applies
+    ///   its path-aware default cap (4 GiB lossy / 8 GiB lossless) — so
+    ///   forwarding the caller's real budget matters in BOTH directions: a
+    ///   tight cap is enforced honestly, and a raised cap admits large
+    ///   encodes the default would reject (≳50 MP lossy / ≳15.7 MP
+    ///   lossless-e7 estimate past the defaults).
+    /// - `prefer_fallible_allocations == Fallible` selects `try_reserve` for
+    ///   the encoder's dimension-driven buffers (graceful `Oom` error instead
+    ///   of an allocator abort). `Infallible` and `CodecDefault` both map to
+    ///   the core's default infallible path (`fallible_alloc(false)`).
+    pub(super) fn to_jxl_encode_limits(
+        limits: &Option<ResourceLimits>,
+    ) -> Option<jxl_encoder::Limits> {
+        use zencodec::AllocPreference;
+        let l = limits.as_ref()?;
+        if l.max_memory_bytes.is_none()
+            && l.prefer_fallible_allocations == AllocPreference::CodecDefault
+        {
+            return None;
+        }
+        let mut out = jxl_encoder::Limits::new()
+            .with_fallible_alloc(l.prefer_fallible_allocations == AllocPreference::Fallible);
+        if let Some(bytes) = l.max_memory_bytes {
+            out = out.with_max_memory_bytes(bytes);
+        }
+        Some(out)
+    }
+
     // ── Capabilities ────────────────────────────────────────────────────
 
     static JXL_ENCODE_CAPS: EncodeCapabilities = EncodeCapabilities::new()
@@ -901,15 +940,23 @@ mod encoding {
             })
         }
 
-        /// Check ResourceLimits against the given dimensions and bytes-per-pixel.
-        fn check_limits(&self, width: u32, height: u32, bpp: u32) -> Result<(), At<JxlError>> {
+        /// Check ResourceLimits dimension caps (max_width / max_height /
+        /// max_pixels) against the given dimensions.
+        ///
+        /// The memory cap (`ResourceLimits::max_memory_bytes`) is deliberately
+        /// NOT checked here. The old `w*h*bpp` input-buffer arm was dishonest
+        /// versus the encoder's true peak working set (tens to hundreds of
+        /// bytes per pixel, not `bpp`). The cap is forwarded to jxl-encoder
+        /// instead (see [`to_jxl_encode_limits`]), whose calibrated
+        /// `encode_preflight` performs the honest size/effort/path/thread-aware
+        /// admission check and walks the thread count down to fit the budget.
+        /// The core's estimate includes the input buffer, so every encode the
+        /// old arm rejected is still rejected — this is strictly more
+        /// enforcement, not less.
+        fn check_limits(&self, width: u32, height: u32) -> Result<(), At<JxlError>> {
             if let Some(ref limits) = self.limits {
                 limits
                     .check_dimensions(width, height)
-                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind())))?;
-                let estimated = width as u64 * height as u64 * bpp as u64;
-                limits
-                    .check_memory(estimated)
                     .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind())))?;
             }
             Ok(())
@@ -936,16 +983,14 @@ mod encoding {
             let (color_encoding, embed_icc) = self.resolve_jxl_color(layout);
             let jxl_meta = self.build_jxl_metadata(embed_icc);
 
-            // Thread the caller's memory budget into the encoder. Without this
-            // the encoder applies its default ~2 GiB budget, which large HDR
-            // frames (≥12 MP at 16-bit) blow through (`memory budget exceeded`).
-            // `ResourceLimits::max_memory_bytes` (e.g. set high for a trusted
-            // batch sweep) → `jxl_encoder::Limits`.
-            let jxl_limits = self
-                .limits
-                .as_ref()
-                .and_then(|l| l.max_memory_bytes)
-                .map(|b| jxl_encoder::Limits::default().with_max_memory_bytes(b));
+            // Thread the caller's memory budget AND allocation preference into
+            // the encoder (see `to_jxl_encode_limits`). The budget drives
+            // jxl-encoder's honest pre-flight admission + thread walk-down;
+            // without it the core applies its path-aware default cap (4 GiB
+            // lossy / 8 GiB lossless), which large trusted batch encodes
+            // (≳50 MP lossy) blow through unless the caller's raised
+            // `ResourceLimits::max_memory_bytes` is forwarded here.
+            let jxl_limits = to_jxl_encode_limits(&self.limits);
 
             let encode = |req: jxl_encoder::EncodeRequest<'_>| -> Result<Vec<u8>, At<JxlError>> {
                 let req = if let Some(ref ce) = color_encoding {
@@ -1011,7 +1056,7 @@ mod encoding {
                 // so the encoder doesn't treat the padding as alpha.
                 let pf = pixels.descriptor().pixel_format();
                 if matches!(pf, PixelFormat::Rgbx8 | PixelFormat::Bgrx8) {
-                    self.check_limits(width, height, 3)?;
+                    self.check_limits(width, height)?;
                     let raw = pixels.contiguous_bytes();
                     let mut rgb =
                         alloc::vec::Vec::with_capacity((width as usize) * (height as usize) * 3);
@@ -1035,8 +1080,7 @@ mod encoding {
                 }
 
                 let layout = Self::descriptor_to_layout(pixels.descriptor())?;
-                let bpp = pixels.descriptor().bytes_per_pixel() as u32;
-                self.check_limits(width, height, bpp)?;
+                self.check_limits(width, height)?;
 
                 let data = pixels.contiguous_bytes();
                 let encoded = self.encode_with_metadata(&data, width, height, layout)?;
@@ -1065,7 +1109,7 @@ mod encoding {
 
                 if make_opaque {
                     // Encode as RGB — strip alpha entirely for smaller output.
-                    self.check_limits(width, height, 3)?;
+                    self.check_limits(width, height)?;
                     // check_limits already gates dimensions, but use checked_mul
                     // here so a degenerate width/height pair can't overflow the
                     // capacity computation on its way to a panic. A size
@@ -1096,7 +1140,7 @@ mod encoding {
                         .with_extension("jxl"))
                 } else {
                     // RGBA path — copy contiguous if strided, otherwise zero-copy.
-                    self.check_limits(width, height, 4)?;
+                    self.check_limits(width, height)?;
                     let pixel_data: alloc::borrow::Cow<'_, [u8]> = if stride == w {
                         alloc::borrow::Cow::Borrowed(&data[..w * h * 4])
                     } else {
@@ -1189,7 +1233,6 @@ mod encoding {
                 let StreamState::Accumulating {
                     width,
                     layout,
-                    descriptor,
                     ref data,
                     rows_pushed,
                     ..
@@ -1202,8 +1245,7 @@ mod encoding {
                     )));
                 };
 
-                let bpp = descriptor.bytes_per_pixel() as u32;
-                self.check_limits(width, rows_pushed, bpp)?;
+                self.check_limits(width, rows_pushed)?;
 
                 let encoded = self.encode_with_metadata(data, width, rows_pushed, layout)?;
                 let encoded = self.maybe_attach_gain_map(encoded);
@@ -1463,11 +1505,38 @@ mod encoding {
                     .map(|(data, &duration)| AnimationFrame::new(data, duration))
                     .collect();
 
-                let encoded = match &self.mode {
-                    JxlEncMode::Lossy(cfg) => cfg
+                // Forward the caller's memory budget / allocation preference to
+                // the core (same mapping as the still-image paths). The
+                // `_with_limits` variant runs the honest pre-flight with the
+                // caller's cap and charges every per-frame allocation against
+                // one shared budget; without it the core's path-aware default
+                // cap applies.
+                let jxl_limits = to_jxl_encode_limits(&self.limits);
+                let encoded = match (&self.mode, &jxl_limits) {
+                    (JxlEncMode::Lossy(cfg), Some(lim)) => cfg
+                        .encode_animation_with_limits(
+                            self.width,
+                            self.height,
+                            layout,
+                            &animation,
+                            &anim_frames,
+                            lim,
+                        )
+                        .map_err_at(JxlError::Encode)?,
+                    (JxlEncMode::Lossy(cfg), None) => cfg
                         .encode_animation(self.width, self.height, layout, &animation, &anim_frames)
                         .map_err_at(JxlError::Encode)?,
-                    JxlEncMode::Lossless(cfg) => cfg
+                    (JxlEncMode::Lossless(cfg), Some(lim)) => cfg
+                        .encode_animation_with_limits(
+                            self.width,
+                            self.height,
+                            layout,
+                            &animation,
+                            &anim_frames,
+                            lim,
+                        )
+                        .map_err_at(JxlError::Encode)?,
+                    (JxlEncMode::Lossless(cfg), None) => cfg
                         .encode_animation(self.width, self.height, layout, &animation, &anim_frames)
                         .map_err_at(JxlError::Encode)?,
                 };
@@ -3790,6 +3859,191 @@ mod tests {
         assert!(
             result.is_err(),
             "animation render with 3 frames under max_frames=2 must error"
+        );
+    }
+
+    /// Wave-4 (codec memory plan): the encode memory cap is enforced by
+    /// jxl-encoder's calibrated pre-flight, not the old `w*h*bpp`
+    /// input-buffer check. A 256×256 RGB8 input buffer is 196,608 bytes —
+    /// under a 300,000-byte cap, so the OLD check ADMITTED it — but the
+    /// core's honest single-threaded peak estimate (tens of bytes per pixel
+    /// plus fixed overhead) exceeds the cap, so the encode must now be
+    /// rejected as a zencodec memory-limit error with the core's override
+    /// hint preserved. Proves the delegation.
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encode_memory_cap_delegates_to_core_estimate() {
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::{CategorizedError, ErrorCategory, LimitKind, ResourceError, ResourceLimits};
+
+        let width = 256u32;
+        let height = 256u32;
+        let pixels: Vec<rgb::Rgb<u8>> = (0..width * height)
+            .map(|i| rgb::Rgb {
+                r: (i % 256) as u8,
+                g: ((i / 3) % 256) as u8,
+                b: ((i / 7) % 256) as u8,
+            })
+            .collect();
+        let buf =
+            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, width, height).unwrap();
+
+        // 300 KB: above the input-buffer bytes (the old check's whole model),
+        // far below the honest peak working-set estimate.
+        let limits = ResourceLimits::none().with_max_memory(300_000);
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let encoder = config.job().with_limits(limits).encoder().unwrap();
+        let err = encoder
+            .encode(buf.as_slice().into())
+            .expect_err("tight memory cap must reject via the core's honest pre-flight");
+
+        assert_eq!(
+            err.category(),
+            ErrorCategory::Resource(ResourceError::Limits(LimitKind::Memory)),
+            "core LimitExceeded must surface as the zencodec memory-limit kind, got {err:?}"
+        );
+        let msg = alloc::format!("{err:?}");
+        assert!(
+            msg.contains("Limits::with_max_memory_bytes"),
+            "the core's raise-the-cap override hint must be preserved, got {msg}"
+        );
+    }
+
+    /// `to_jxl_encode_limits` mapping (wave-4): a `Fallible` allocation
+    /// preference ALONE must produce a `jxl_encoder::Limits` with
+    /// `fallible_alloc = true` (previously nothing was forwarded unless
+    /// `max_memory_bytes` was also set); an explicit budget forwards
+    /// `max_memory_bytes`; default `ResourceLimits` map to `None` so the
+    /// core keeps its path-aware default caps.
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encode_limits_mapping_forwards_budget_and_alloc_preference() {
+        use super::encoding::to_jxl_encode_limits;
+        use zencodec::{AllocPreference, ResourceLimits};
+
+        assert!(to_jxl_encode_limits(&None).is_none());
+        assert!(
+            to_jxl_encode_limits(&Some(ResourceLimits::none())).is_none(),
+            "no budget + CodecDefault → no Limits object (core defaults apply)"
+        );
+
+        let fallible_only = to_jxl_encode_limits(&Some(
+            ResourceLimits::none().with_prefer_fallible_allocations(AllocPreference::Fallible),
+        ))
+        .expect("Fallible preference alone must reach the encoder");
+        assert!(fallible_only.fallible_alloc());
+        assert_eq!(fallible_only.max_memory_bytes(), None);
+
+        let budget_only =
+            to_jxl_encode_limits(&Some(ResourceLimits::none().with_max_memory(123_456)))
+                .expect("budget must reach the encoder");
+        assert!(!budget_only.fallible_alloc());
+        assert_eq!(budget_only.max_memory_bytes(), Some(123_456));
+
+        let both = to_jxl_encode_limits(&Some(
+            ResourceLimits::none()
+                .with_max_memory(7_000_000)
+                .with_prefer_fallible_allocations(AllocPreference::Fallible),
+        ))
+        .unwrap();
+        assert!(both.fallible_alloc());
+        assert_eq!(both.max_memory_bytes(), Some(7_000_000));
+
+        // Infallible is non-default → an explicit Limits object is built,
+        // selecting the core's infallible path (behaviourally the same as
+        // the core default — just explicit).
+        let infallible = to_jxl_encode_limits(&Some(
+            ResourceLimits::none().with_prefer_fallible_allocations(AllocPreference::Infallible),
+        ))
+        .unwrap();
+        assert!(!infallible.fallible_alloc());
+        assert_eq!(infallible.max_memory_bytes(), None);
+    }
+
+    /// A moderate explicit budget admits a normal encode: the core's
+    /// pre-flight accepts (walking threads down internally if needed — the
+    /// thread choice is the core's tested behaviour, not asserted here) and
+    /// the encode completes. Guards the delegation against over-rejection.
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encode_moderate_memory_budget_succeeds() {
+        use zencodec::ResourceLimits;
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+
+        let width = 128u32;
+        let height = 128u32;
+        let pixels: Vec<rgb::Rgb<u8>> = (0..width * height)
+            .map(|i| rgb::Rgb {
+                r: (i % 256) as u8,
+                g: ((i / 5) % 256) as u8,
+                b: ((i / 11) % 256) as u8,
+            })
+            .collect();
+        let buf =
+            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, width, height).unwrap();
+
+        // 1 GiB comfortably covers the honest 128×128 estimate.
+        let limits = ResourceLimits::none().with_max_memory(1024 * 1024 * 1024);
+        let config = JxlEncoderConfig::new()
+            .with_lossless(true)
+            .with_generic_effort(1);
+        let encoder = config.job().with_limits(limits).encoder().unwrap();
+        let output = encoder
+            .encode(buf.as_slice().into())
+            .expect("moderate budget must admit a normal encode");
+        assert!(!output.data().is_empty());
+        assert_eq!(output.format(), ImageFormat::Jxl);
+    }
+
+    /// Wave-4: the ANIMATION encode path forwards the memory budget too.
+    /// Two 256×256 RGB frames accumulate 393,216 input bytes — under a
+    /// 500,000-byte cap, so the adapter's own input-accumulation gate in
+    /// `push_frame` admits them — but the core's honest per-frame estimate
+    /// exceeds the cap, so `finish()` must reject (previously the animation
+    /// path forwarded NO limits at all and encoded happily under any cap).
+    #[cfg(feature = "encode")]
+    #[test]
+    fn animation_encode_memory_cap_delegates_to_core() {
+        use zencodec::encode::{AnimationFrameEncoder, EncodeJob, EncoderConfig};
+        use zencodec::{CategorizedError, ErrorCategory, LimitKind, ResourceError, ResourceLimits};
+        use zenpixels::{PixelDescriptor, PixelSlice};
+
+        let width = 256u32;
+        let height = 256u32;
+        let stride = (width as usize) * 3;
+        let frame_bytes = stride * height as usize;
+        let make_frame = |seed: u8| -> Vec<u8> {
+            (0..frame_bytes)
+                .map(|i| seed.wrapping_add(i as u8))
+                .collect()
+        };
+
+        let limits = ResourceLimits::none().with_max_memory(500_000);
+        let config = JxlEncoderConfig::new().with_lossless(true);
+        let mut enc = config
+            .job()
+            .with_limits(limits)
+            .animation_frame_encoder()
+            .unwrap();
+        for seed in 0u8..2 {
+            let frame = make_frame(seed * 31);
+            let slice =
+                PixelSlice::new(&frame, width, height, stride, PixelDescriptor::RGB8_SRGB).unwrap();
+            enc.push_frame(slice, 100, None)
+                .expect("accumulated input bytes are under the cap — push_frame must admit");
+        }
+        let err = AnimationFrameEncoder::finish(enc, None)
+            .expect_err("animation finish under a tight cap must reject via the core pre-flight");
+
+        assert_eq!(
+            err.category(),
+            ErrorCategory::Resource(ResourceError::Limits(LimitKind::Memory)),
+            "animation core LimitExceeded must surface as the memory-limit kind, got {err:?}"
+        );
+        let msg = alloc::format!("{err:?}");
+        assert!(
+            msg.contains("Limits::with_max_memory_bytes"),
+            "the core's override hint must be preserved on the animation path, got {msg}"
         );
     }
 
