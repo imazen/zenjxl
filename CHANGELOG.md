@@ -63,10 +63,11 @@ prior to 0.1.26, so adopting the reshape was not a break of released API.
   change forwards. Tests: `encode_memory_cap_delegates_to_core_estimate`,
   `encode_limits_mapping_forwards_budget_and_alloc_preference`,
   `encode_moderate_memory_budget_succeeds`,
-  `animation_encode_memory_cap_delegates_to_core`.
+  `animation_encode_memory_cap_delegates_to_core`. (b3619bc)
 - `proxy_policy_sweep` example gained its missing
   `required-features = ["encode", "__expert"]` declaration — auto-discovery
   was building (and breaking) it on every non-`__expert` `cargo test`.
+  (63339aa)
 
 ### Added
 - Wired the zencodec-testkit `check_decode_truncation_series` EOF/truncation
