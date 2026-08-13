@@ -84,6 +84,11 @@ zenjxl-decoder = { path = "../zenjxl-decoder/zenjxl-decoder" }
 butteraugli = { path = "../../butteraugli/butteraugli" }
 
 [dev-dependencies]
+# Raw-frame capture + lazy symbolization for the per-site allocation profiler
+# in examples/mem_probe_encode.rs (JXL_ALLOC_SITES=1). Capture must be cheap
+# (unresolved instruction pointers, hashable) which std::backtrace cannot do
+# on stable; resolution happens once at exit.
+backtrace = "0.3.76"
 # Conformance harness (unpublished companion crate) for the EOF/truncation-series
 # decode check (tests/truncation_series.rs). Tag-pinned (not a bare rev) to
 # v0.1.26 -- the same content-identical release the [patch.crates-io]
@@ -176,3 +181,11 @@ required-features = ["encode", "decode", "__expert"]
 [[example]]
 name = "proxy_policy_sweep"
 required-features = ["encode", "__expert"]
+
+# line-tables-only: file:line info for the peak-moment backtraces
+# (JXL_PEAK_TRACE_AT) and the per-site allocation profiler
+# (JXL_ALLOC_SITES=1) in examples/mem_probe_encode.rs. Without it, macOS
+# symbolization has symbol names but no filenames, so per-line attribution
+# is impossible. Negligible runtime cost; moderate build-size cost.
+[profile.release]
+debug = "line-tables-only"
