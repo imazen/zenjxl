@@ -38,7 +38,20 @@
 //! the optional `est` marker; if you pass `est`, you must pass threads first.
 //!
 //! TSV row:
-//!   w  h  pixels  mode  effort  quality  threads  out_bytes  pre_rss_kb  vmhwm_kb  marginal_kb  encode_ms
+//!   w h pixels mode effort quality threads out_bytes pre_rss_kb vmhwm_kb
+//!   marginal_kb encode_ms alloc_count peak_live_kb
+//!
+//! `alloc_count` (allocations during the encode call) and `peak_live_kb` (the
+//! high-water mark of LIVE allocated bytes) come from the probe's counting
+//! global allocator. They are the two numbers the memory work is actually
+//! judged on:
+//!   * `peak_live_kb` is ALLOCATOR-AGNOSTIC. `vmhwm_kb` / peak RSS include
+//!     whatever this platform's malloc declined to return to the OS, so they
+//!     move with the allocator; `peak_live_kb` does not.
+//!   * `alloc_count` guards the Windows path, where allocation is slow enough
+//!     that trading bytes for many more small allocations regresses overall.
+//! On non-Linux hosts `pre_rss_kb`/`vmhwm_kb` read 0 (they use /proc); wrap the
+//! binary in `/usr/bin/time -l` for peak RSS there.
 //!
 //! `encode_ms` is the wall time of the `encode()` call only (file read +
 //! process startup excluded), so it is comparable to the `est` row's
@@ -47,6 +60,79 @@
 use std::hint::black_box;
 
 use jxl_encoder::{LosslessConfig, LossyConfig, PixelLayout};
+
+/// Counting allocator: tracks allocation COUNT and the high-water mark of
+/// LIVE bytes.
+///
+/// Peak RSS answers "how big does the process get on THIS allocator" — it
+/// folds in whatever the platform's malloc chose not to return to the OS, so
+/// it moves when the allocator changes even if the encoder does not.
+/// `peak_live` is the allocator-agnostic number: the largest total the encoder
+/// ever had outstanding. A change that lowers RSS but not `peak_live` only
+/// flattered this platform's retention policy; a change that lowers
+/// `peak_live` is a real reduction on glibc, libmalloc, jemalloc and mimalloc
+/// alike.
+///
+/// `count` is tracked because allocation *count* is its own cost — Windows'
+/// allocator is slow enough that trading bytes for many more small
+/// allocations is a net regression there. Any buffer change must report both.
+mod counting_alloc {
+    use core::alloc::{GlobalAlloc, Layout};
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    pub static COUNT: AtomicUsize = AtomicUsize::new(0);
+    pub static LIVE: AtomicUsize = AtomicUsize::new(0);
+    pub static PEAK_LIVE: AtomicUsize = AtomicUsize::new(0);
+
+    pub struct Counting;
+
+    impl Counting {
+        fn record_alloc(size: usize) {
+            COUNT.fetch_add(1, Ordering::Relaxed);
+            let live = LIVE.fetch_add(size, Ordering::Relaxed) + size;
+            // Monotonic max. Racy under contention by at most one concurrent
+            // delta, which is irrelevant at the magnitudes we report.
+            PEAK_LIVE.fetch_max(live, Ordering::Relaxed);
+        }
+    }
+
+    unsafe impl GlobalAlloc for Counting {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let p = unsafe { std::alloc::System.alloc(layout) };
+            if !p.is_null() {
+                Self::record_alloc(layout.size());
+            }
+            p
+        }
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            let p = unsafe { std::alloc::System.alloc_zeroed(layout) };
+            if !p.is_null() {
+                Self::record_alloc(layout.size());
+            }
+            p
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
+            unsafe { std::alloc::System.dealloc(ptr, layout) }
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            let p = unsafe { std::alloc::System.realloc(ptr, layout, new_size) };
+            if !p.is_null() {
+                // A realloc is one allocator round-trip, and between the two
+                // sizes the allocator may hold both — model the worst case so
+                // growth-by-realloc shows up in the peak rather than hiding.
+                COUNT.fetch_add(1, Ordering::Relaxed);
+                let live = LIVE.fetch_add(new_size, Ordering::Relaxed) + new_size;
+                PEAK_LIVE.fetch_max(live, Ordering::Relaxed);
+                LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
+            }
+            p
+        }
+    }
+}
+
+#[global_allocator]
+static ALLOC: counting_alloc::Counting = counting_alloc::Counting;
 
 /// A `/proc/self/status` field in KiB (e.g. `VmRSS:`, `VmHWM:`).
 fn status_kb(field: &str) -> u64 {
@@ -179,6 +265,12 @@ fn main() {
     // engages real parallelism when the probe is built `--features parallel`.
     // Wall time of the encode() call only (file read + startup excluded), so
     // it lines up with the `est` row's predicted time_ms.
+    // Allocator counters are read around the encode call only, so the file
+    // read and process startup don't pollute them. PEAK_LIVE is monotonic, so
+    // it is taken as an absolute (it can only have been set during the encode
+    // if the encode exceeded the pre-encode high-water).
+    use core::sync::atomic::Ordering;
+    let alloc_count_pre = counting_alloc::COUNT.load(Ordering::Relaxed);
     let t0 = std::time::Instant::now();
     let out = if is_lossless {
         LosslessConfig::new()
@@ -200,9 +292,12 @@ fn main() {
     // reflects the peak *during* the encode.
     let peak = status_kb("VmHWM:");
 
+    let alloc_count = counting_alloc::COUNT.load(Ordering::Relaxed) - alloc_count_pre;
+    let peak_live_kb = counting_alloc::PEAK_LIVE.load(Ordering::Relaxed) / 1024;
+
     let pixels = (w as u64) * (h as u64);
     println!(
-        "{w}\t{h}\t{pixels}\t{mode}\t{effort}\t{quality}\t{threads}\t{}\t{pre}\t{peak}\t{}\t{encode_ms:.1}",
+        "{w}\t{h}\t{pixels}\t{mode}\t{effort}\t{quality}\t{threads}\t{}\t{pre}\t{peak}\t{}\t{encode_ms:.1}\t{alloc_count}\t{peak_live_kb}",
         out.len(),
         peak.saturating_sub(pre)
     );
