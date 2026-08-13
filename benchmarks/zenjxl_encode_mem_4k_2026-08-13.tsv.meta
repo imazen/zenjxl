@@ -1,0 +1,88 @@
+# zenjxl 4K ENCODE peak-RSS measurement — 2026-08-13 (macOS arm64)
+#
+# Purpose: answer "how much RAM does a system need to encode a 4K JXL?" at real
+# 4K. jxl-encoder's own calibration (jxl-encoder/benchmarks/
+# jxl_encode_mem_threads_postfix_2026-08-01.tsv) anchors at 12/20/27/48/75/108
+# MP on x86-64 Linux; 8.29 MP on arm64/macOS is measured here rather than
+# interpolated (CLAUDE.md never-extrapolate-memory).
+#
+# Commits under test:
+#   zenjxl 5a92f93 (0.3.0) -> jxl-encoder 8205c895, zenjxl-decoder 4d7860f
+#   rustc 1.97.1 (8bab26f4f 2026-07-14), release profile, --features
+#   encode,decode,parallel (so `with_threads(N)` engages real parallelism).
+# Host: macOS 26.5.2, Apple M4 Pro (12 cores / 8 performance), 24 GiB RAM.
+#   NOTE: DIFFERENT platform from the 2026-08-01 calibration (WSL2 x86-64 /
+#   glibc). Absolute peaks are a second data point, not a re-fit — no constant
+#   in jxl-encoder/src/heuristics.rs was changed on the strength of this run.
+#
+# Harness: zenjxl examples/mem_probe_encode.rs, one encode per process,
+#   unmodified (it already carries the threads axis).
+#
+# MEASUREMENT: peak RSS is `/usr/bin/time -l` "maximum resident set size",
+#   which on macOS is reported in BYTES. The probe's own pre_rss_kb/vmhwm_kb
+#   columns read /proc/self/status and are therefore 0 here — use
+#   peak_rss_bytes. That is the WHOLE-PROCESS high-water mark: binary floor +
+#   the 24.9 MB raw input buffer + the encoder working set. (The JXL probe
+#   encodes straight from the read buffer, so unlike the AVIF probe there is
+#   no second packed-pixel copy.)
+#
+# Content: real corpus images MOSAICKED at native scale (no upscaling — an
+#   upscale smooths high-frequency detail and would under-state memory).
+#   photo = 6 CLIC2025 training photos; screen = gb82-sc/imac_g3 + imageflow
+#   whitespace-issue + a wikimedia screenshot.
+#
+# Grid (48 cells, all measured, 0 failures): 3840x2160 (8.29 MP) x
+#   {lossy q85, lossless} x effort {3,7,9} x threads {1,8} x
+#   content {photo,screen} x 2 reps.
+#
+# RESULTS — max / median peak RSS over content x reps:
+#   mode      effort thr   max MB   med MB   max wall s
+#   lossy       3     1      447      447       0.3
+#   lossy       3     8      477      473       0.1
+#   lossy       7     1      706      706       2.1
+#   lossy       7     8      778      777       0.7
+#   lossy       9     1      719      715       5.4
+#   lossy       9     8      954      947       2.4
+#   lossless    3     1      614      614       0.6
+#   lossless    3     8      653      645       0.4
+#   lossless    7     1     4773     4667      15.6
+#   lossless    7     8     4600     4530      10.5
+#   lossless    9     1     4830     4744      84.0
+#   lossless    9     8     4847     4804      76.6
+#
+# Findings:
+#   * Effort is the dominant axis, and it is a CLIFF, not a ramp: lossless
+#     e3 -> e7 is 653 MB -> 4773 MB, a 7.3x jump at the MA tree-learning
+#     band boundary. Lossy e3 -> e9 is a milder 477 -> 954 MB.
+#   * Lossless e7+ at 4K needs ~4.8-5.9 GB. A 4K lossless JXL encode at
+#     default-ish effort will not fit in a 4 GB container.
+#   * Threading barely parallelizes lossless here: e9 t1 84.0 s vs t8 76.6 s
+#     (user 79.7 s vs real 72.6 s on a spot check = ~1.1x), and the peak is
+#     essentially thread-invariant. Lossy parallelizes fine (5.4 -> 2.4 s)
+#     but pays ~230 MB for it at e9.
+#   * Content spread (photo vs screen) is small: screen is the worst case for
+#     lossless (4847 vs 4773 MB), photo for lossy (954 vs 886 MB).
+#
+# MODEL CHECK vs jxl_encoder::heuristics::estimate_encode_threaded
+# (RGB8, 3840x2160, has_alpha=false):
+#   mode/effort  thr   model min/typ/max MB    measured max MB   measured/TYP
+#   lossy    3    1       612 /  707 / 1213          447            0.63  safe
+#   lossy    7    1       981 / 1142 / 1996          706            0.62  safe
+#   lossy    9    8       998 / 1158 / 2013          954            0.82  safe
+#   lossless 3    1       658 /  767 / 1350          614            0.80  safe
+#   lossless 7    1      3670 / 4311 / 7728         4772.8          1.11  OVER
+#   lossless 9    8      3670 / 4311 / 7728         4847.2          1.12  OVER
+#   => The lossless e7-e9 band's TYP tier UNDER-predicts measured peak on this
+#      host by 11-12%. heuristics.rs documents the invariant "TYP >= measured
+#      worst case + 10% margin"; that invariant holds on the x86-64/glibc
+#      corpus it was fit on but does NOT hold here. The MAX tier still covers
+#      the measurement with a 1.59x margin, so "will it fit" decisions that
+#      read peak_memory_bytes_max remain correct — only the p50 capacity-
+#      planning tier is optimistic for lossless e>=7. Not re-fit here: one
+#      platform + one 8.29 MP point is not enough to move a constant that was
+#      fit across 12-108 MP. Flagged for a cross-platform re-check.
+#
+# Columns: codec backend subsampling content w h pixels mode effort quality
+#          threads rep out_bytes encode_ms peak_rss_bytes wall_s
+#   encode_ms is the encode() call only (file read + startup excluded);
+#   wall_s is the whole process.
