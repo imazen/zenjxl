@@ -92,6 +92,17 @@ mod counting_alloc {
     /// realloc transiently holds old+new, so a realloc-triggered peak means the
     /// fix is to pre-size the buffer, not to shrink it.
     pub static PEAK_FROM_REALLOC: AtomicUsize = AtomicUsize::new(0);
+    /// `JXL_PEAK_TRACE_AT=<bytes>`: capture and print ONE backtrace the first
+    /// time live bytes cross this threshold.
+    ///
+    /// Attribution taken from an RSS-polled `malloc_history` snapshot is
+    /// unreliable — RSS crosses a threshold at a different instant than
+    /// `PEAK_LIVE` is set, so the snapshot shows a nearby moment, not the peak.
+    /// That error sent this work after the wrong allocation for several rounds.
+    /// Run once to learn the peak, then set this just below it to get the stack
+    /// AT the peak.
+    pub static TRACE_AT: AtomicUsize = AtomicUsize::new(0);
+    pub static TRACED: AtomicUsize = AtomicUsize::new(0);
 
     pub struct Counting;
 
@@ -106,6 +117,21 @@ mod counting_alloc {
                 PEAK_TRIGGER.store(size, Ordering::Relaxed);
                 PEAK_FROM_REALLOC.store(0, Ordering::Relaxed);
             }
+            Self::maybe_trace(live, size);
+        }
+
+        /// Print one backtrace when live bytes first cross `TRACE_AT`.
+        /// Guarded so the capture itself (which allocates) cannot recurse.
+        fn maybe_trace(live: usize, size: usize) {
+            let at = TRACE_AT.load(Ordering::Relaxed);
+            if at == 0 || live < at {
+                return;
+            }
+            if TRACED.swap(1, Ordering::Relaxed) != 0 {
+                return;
+            }
+            let bt = std::backtrace::Backtrace::force_capture();
+            eprintln!("[peak-trace] live={live} triggered_by={size}\n{bt}");
         }
     }
 
@@ -141,6 +167,7 @@ mod counting_alloc {
                     PEAK_TRIGGER.store(new_size, Ordering::Relaxed);
                     PEAK_FROM_REALLOC.store(1, Ordering::Relaxed);
                 }
+                Self::maybe_trace(live, new_size);
                 LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
             }
             p
@@ -287,6 +314,11 @@ fn main() {
     // it is taken as an absolute (it can only have been set during the encode
     // if the encode exceeded the pre-encode high-water).
     use core::sync::atomic::Ordering;
+    if let Ok(v) = std::env::var("JXL_PEAK_TRACE_AT") {
+        if let Ok(n) = v.parse::<usize>() {
+            counting_alloc::TRACE_AT.store(n, Ordering::Relaxed);
+        }
+    }
     let alloc_count_pre = counting_alloc::COUNT.load(Ordering::Relaxed);
     let t0 = std::time::Instant::now();
     let out = if is_lossless {
