@@ -83,6 +83,15 @@ mod counting_alloc {
     pub static COUNT: AtomicUsize = AtomicUsize::new(0);
     pub static LIVE: AtomicUsize = AtomicUsize::new(0);
     pub static PEAK_LIVE: AtomicUsize = AtomicUsize::new(0);
+    /// Size of the single allocation that last pushed `PEAK_LIVE` to a new
+    /// high. Identifies the transient responsible for the peak, which
+    /// `malloc_history` cannot show (it only samples LIVE allocations, so a
+    /// short-lived spike is invisible to it).
+    pub static PEAK_TRIGGER: AtomicUsize = AtomicUsize::new(0);
+    /// Whether the peak was set by a realloc rather than a fresh alloc. A
+    /// realloc transiently holds old+new, so a realloc-triggered peak means the
+    /// fix is to pre-size the buffer, not to shrink it.
+    pub static PEAK_FROM_REALLOC: AtomicUsize = AtomicUsize::new(0);
 
     pub struct Counting;
 
@@ -92,7 +101,11 @@ mod counting_alloc {
             let live = LIVE.fetch_add(size, Ordering::Relaxed) + size;
             // Monotonic max. Racy under contention by at most one concurrent
             // delta, which is irrelevant at the magnitudes we report.
-            PEAK_LIVE.fetch_max(live, Ordering::Relaxed);
+            let prev = PEAK_LIVE.fetch_max(live, Ordering::Relaxed);
+            if live > prev {
+                PEAK_TRIGGER.store(size, Ordering::Relaxed);
+                PEAK_FROM_REALLOC.store(0, Ordering::Relaxed);
+            }
         }
     }
 
@@ -123,7 +136,11 @@ mod counting_alloc {
                 // growth-by-realloc shows up in the peak rather than hiding.
                 COUNT.fetch_add(1, Ordering::Relaxed);
                 let live = LIVE.fetch_add(new_size, Ordering::Relaxed) + new_size;
-                PEAK_LIVE.fetch_max(live, Ordering::Relaxed);
+                let prev = PEAK_LIVE.fetch_max(live, Ordering::Relaxed);
+                if live > prev {
+                    PEAK_TRIGGER.store(new_size, Ordering::Relaxed);
+                    PEAK_FROM_REALLOC.store(1, Ordering::Relaxed);
+                }
                 LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
             }
             p
@@ -294,6 +311,12 @@ fn main() {
 
     let alloc_count = counting_alloc::COUNT.load(Ordering::Relaxed) - alloc_count_pre;
     let peak_live_kb = counting_alloc::PEAK_LIVE.load(Ordering::Relaxed) / 1024;
+    let peak_trigger_kb = counting_alloc::PEAK_TRIGGER.load(Ordering::Relaxed) / 1024;
+    let peak_from_realloc = counting_alloc::PEAK_FROM_REALLOC.load(Ordering::Relaxed);
+    eprintln!(
+        "[peak] peak_live={peak_live_kb} KB  triggered_by={peak_trigger_kb} KB  \
+         from_realloc={peak_from_realloc}"
+    );
 
     let pixels = (w as u64) * (h as u64);
     println!(
