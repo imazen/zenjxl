@@ -501,8 +501,19 @@ mod alloc_sites {
             "__",
             "_rjem",
         ];
+        // File-based rules catch the capture/allocator plumbing whose
+        // inline-expanded symbols dodge the prefix list (thread-local
+        // closures, RawVec internals) — without these the full-stack dump's
+        // frame budget is spent before any encoder frame appears.
+        const NOISE_FILE: &[&str] = &[
+            "/rustlib/",
+            "backtrace-0.",
+            "examples/mem_probe_encode",
+        ];
         let s = fr.sym.trim_start_matches('<');
-        s.is_empty() || NOISE_PREFIX.iter().any(|n| s.starts_with(n))
+        s.is_empty()
+            || NOISE_PREFIX.iter().any(|n| s.starts_with(n))
+            || NOISE_FILE.iter().any(|n| fr.file.contains(n))
     }
 
     /// The frame a site is attributed to: innermost frame whose function is in
