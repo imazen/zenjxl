@@ -131,7 +131,7 @@ encode = ["dep:jxl-encoder"]
 # Useful when a single encode call should saturate multiple cores
 # (e.g. high-effort encodes); not needed when the caller already runs
 # many encode tasks in parallel.
-parallel = ["encode", "jxl-encoder/parallel"]
+parallel = ["encode", "jxl-encoder/parallel", "jxl-encoder/parallel-tree-learning"]
 butteraugli-loop = ["encode", "jxl-encoder/butteraugli-loop"]
 # Lossy JPEG -> JXL recompression to a quality target (PreserveJxl closed loop).
 # Needs both encode (jxl-encoder's coefficient-domain coarsener, behind its
