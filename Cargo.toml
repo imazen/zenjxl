@@ -189,3 +189,9 @@ required-features = ["encode", "__expert"]
 # is impossible. Negligible runtime cost; moderate build-size cost.
 [profile.release]
 debug = "line-tables-only"
+
+# Ad-hoc repro harness for the 2026-08-24/25 fleetbench OOM +
+# encoder-panic investigation (see zenmetrics `Known Bugs`).
+[[example]]
+name = "fleetbench_repro"
+required-features = ["encode", "__expert"]
