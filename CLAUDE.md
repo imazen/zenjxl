@@ -28,8 +28,10 @@ lives in `zenjpeg/docs/VARIANT_GENERATION.md`.
 - The harness's maiden runs found jxl-encoder#68 (two independent e9+
   lossless bitstream-corruption causes, both fixed upstream 2026-06-10/11:
   `5eefe5f7` + `329f207d`) and #69 (lossless lz77/palette/patches knobs
-  not consumed — those axes stay out until wired). Follow-ups tracked in
-  **imazen/zenjxl#8**.
+  not consumed at the time; #69 closed 2026-06-11 — palette detection
+  shipped and `palette_colors` is a real `LosslessAxes` axis since
+  2026-07-02, while lz77/patches still stay out until wired). Follow-ups
+  tracked in **imazen/zenjxl#8**.
 - jxl-encoder's #68 fixes are **not yet in a crates.io release** — local
   builds get them via the `[patch.crates-io]` path dep; published-dep
   consumers (CI clones siblings, so it's covered) need the next

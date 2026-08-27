@@ -145,10 +145,15 @@ Everything else output-plausible IS hashed, including every
 search-bound knob (`tree_learn_seeds`, `ans_histogram_strategy_vardct`,
 `gather_dedup`, `use_streaming_dedup`, `lloyd_max_buckets`).
 
-Known under-merge: an override equal to its effort-derived default
-(`nb_rcts_to_try: Some(7)` at e7) does not merge with `None`, because
-jxl-encoder does not expose the per-effort defaults. Under-merging
-costs duplicate encodes, never correctness; the safe direction.
+Under-merge, and how it is handled today: an override equal to its
+effort-derived default (`nb_rcts_to_try: Some(7)` at e7) does not merge
+with `None` under `fingerprint` — by design, that is the per-knobset
+*identity* key (one row per input knobset). The *compute* key is
+`encode_fingerprint`, which hashes `LossyConfig`/`LosslessConfig::
+resolved_profile()` (jxl-encoder exposes the resolved per-effort state
+publicly), so override-equals-default spellings share one encode and
+fan out to their rows. Under-merging at the identity level costs a row,
+never an encode and never correctness.
 
 ### 5. Budgeted, ordered, no-silent-caps sweep plans
 
@@ -323,27 +328,35 @@ Adopting the canonical playbook patterns 17–18 (see
   path-dep builds carry it; published-dep consumers get it with the
   next jxl-encoder release. Harness verified green end-to-end
   2026-06-11 against the stock published zenjxl-decoder 0.3.8.
-- **jxl-encoder#69** (rescoped): lossless LZ77 needs per-section
-  support before the lz77/lz77_method knobs can act (byte-changing,
-  hash-lock-rebake work); palette/patches detection on the lossless
-  path is unimplemented. Those knobs rejoin the axes when wired.
-  `tree_sample_fraction` works but is stride-quantized — sweep it at
-  values ≤ 0.5 where strides are distinct.
+- **jxl-encoder#69** (closed 2026-06-11; items 2/3 shipped): palette
+  detection landed and `palette_colors` became a real `LosslessAxes`
+  axis on 2026-07-02 (a strongly content-dependent one — see the
+  `LosslessVariant::palette_colors` doc). Lossless LZ77 still needs
+  per-section support before the lz77/lz77_method knobs can act
+  (byte-changing, hash-lock-rebake work) and `patches` is still not
+  consumed on the lossless path; those two rejoin the axes when wired.
+  `tree_sample_fraction` is consumed upstream but stride-quantized —
+  a probe must sit at a value ≤ 0.5 (distinct strides) with
+  `tree_max_samples_fixed = Some(0)`, and is owed a harness liveness
+  run before it takes an axis slot.
 - **No exact trials shipped.** The audit above identifies the
   candidates (entropy-stage knobs, lossless candidate sets); the
   adoption order in the zenjpeg doc puts trials last for exactly the
   reason observed here — the fingerprint work is what surfaced which
   knobs are byte-only. The cheap-shared-state versions belong
   upstream.
-- **Fingerprint under-merge** on override-equals-default spellings;
-  fixable if jxl-encoder exposes per-effort resolved defaults under
-  `__expert`.
+- **Fingerprint under-merge** on override-equals-default spellings is
+  handled at the compute level: `encode_fingerprint` hashes upstream's
+  public `resolved_profile()` (see §4), so aliases encode once. The
+  identity-level `fingerprint` keeps them as separate rows on purpose.
 - **resolve_plan is `__expert`-gated.** Promoting it (and a
   `LosslessConfig`-side introspection of the effort profile) to stable
   needs an API review; nothing blocks it technically.
-- **chroma_subsampling** is rejected by the encoder for non-444 today
-  (jxl-encoder issue #47 chunk 4); it becomes a lossy axis the day it
-  lands.
+- **chroma_subsampling** is rejected by the encoder for non-444 today.
+  jxl-encoder's `vardct/chroma_subsampling.rs` ships the conversion
+  helpers ("chunk 3"); the VarDCT pipeline wiring ("chunk 4") is still
+  queued upstream with no open tracking issue (#47 is a closed PR). It
+  becomes a lossy axis the day it lands.
 - **LeanFaster soft-exemption** should be retired by adding a
   confirmed gate-tripping image (screenshot-class) to the harness
   corpus.

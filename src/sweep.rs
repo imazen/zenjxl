@@ -66,7 +66,7 @@
 //! | wp_num_param_sets | 0–5 | 5 probe | effort schedule (0 at e<8, 2 at e8, 5 at e9+) |
 //! | tree_max_buckets | ≥ 1 | 256 probe | effort schedule (32/48/64/96/128/256) |
 //! | tree_num_properties | 1–16 | 16 probe | effort schedule (3/4/5/7/10/16) |
-//! | tree_sample_fraction | 0–1 | (none) | effort schedule (0.15 at e≤4 → 0.65 at e9+); the override is not consumed upstream (jxl-encoder#69) — re-add when plumbed |
+//! | tree_sample_fraction | 0–1 | (none as a fraction probe; `Some(0.0)` rides `maxsamples8192`) | effort schedule (0.15 at e≤4 → 0.65 at e9+). The override IS consumed upstream now (`LosslessConfig::effective_profile` applies it; jxl-encoder's `lossless_override_tree_sample_fraction` test proves 0.05 vs the e7 0.5 default changes bytes when `tree_max_samples_fixed = Some(0)` disables the fixed cap). A fraction probe at a value ≤ 0.5 is owed a `sweep_validate` liveness run on the corpus before it takes an axis slot (#8) |
 //! | tree_learn_seeds | ≥ 1 | 2 probe | RFC#45 chunk 5 (1 at e≤9, 2 at e10) |
 //! | lloyd_max_buckets | bool | on probe | EX-J5 Lloyd-Max bucket boundaries |
 //! | gather_dedup | bool | (none) | issue #41 Phase 2. Validated byte-identical to the sort-only path on the whole 2026-06-10 corpus (the post-sort dedup converges); stays in the fingerprint, not worth an axis slot |
@@ -77,13 +77,17 @@
 //! **Deliberately excluded axes** (no silent caps — exclusions are
 //! documented): `resampling` (changes output geometry class; belongs in
 //! a dedicated downscale study), `chroma_subsampling` (non-444 modes
-//! are rejected by the encoder today — issue #47 chunk 4 pending),
+//! are rejected by the encoder today — jxl-encoder's
+//! `vardct/chroma_subsampling.rs` ships the conversion helpers, the
+//! pipeline wiring is still queued upstream; #47 itself is a closed PR),
 //! `alpha_distance` / `alpha_squeeze` / `simplify_invisible` (alpha
 //! axes need an alpha corpus), `photon_noise_iso` / `manual_noise_lut`
 //! (parameterized noise needs its own grid), lossless `lz77` /
-//! `lz77_method` / `patches` / `palette_colors` (setters accepted but
-//! not consumed by the modular path — jxl-encoder#69; they return as
-//! axes when plumbed), `splines` / `force_strategy`
+//! `lz77_method` / `patches` (setters accepted but not consumed by the
+//! lossless multi-group path — jxl-encoder#69 item 1; `lz77` measured
+//! inert on the 2026-06-10 corpus; they return as axes when plumbed —
+//! NOTE `palette_colors` is NOT on this list any more: it became a real
+//! [`LosslessAxes::palette_colors`] axis on 2026-07-02), `splines` / `force_strategy`
 //! / `max_strategy_size` (debug knobs), `lossy_palette` (changes pixels
 //! under a "lossless" config; needs metric-class treatment),
 //! `butteraugli_iters` and the perceptual-loop family (feature-gated,
@@ -256,12 +260,13 @@ impl LossyVariant {
 ///
 /// No distance, no noise, no VarDCT knobs — those are structurally
 /// unspellable here. Also deliberately absent: `lz77`, `lz77_method`,
-/// `patches`, and `palette_colors` — those `LosslessConfig` setters are
-/// accepted but not consumed by the modular path today
-/// (jxl-encoder#69, proven inert in both directions by
-/// `sweep_validate` 2026-06-10, including palette's best-case 2-color
-/// checkerboard). Knobs live on the variant only when they act; these
-/// return as axes when upstream plumbs them.
+/// and `patches` — those `LosslessConfig` setters are accepted but not
+/// consumed by the lossless multi-group path today (jxl-encoder#69
+/// item 1, proven inert by `sweep_validate` 2026-06-10). Knobs live on
+/// the variant only when they act; these return as axes when upstream
+/// plumbs them. `palette_colors` WAS on this list until 2026-07-02 —
+/// jxl-encoder#69 item 2 shipped palette detection, and the knob is now
+/// a real field below (see [`Self::palette_colors`]).
 #[derive(Clone, Debug)]
 pub struct LosslessVariant {
     /// Effort 1–10 (7 = upstream default).
@@ -821,8 +826,12 @@ impl LosslessAxes {
 /// - `rct19` (search width 7→19): zero new winners across the 7-image
 ///   corpus — the probe carried no signal; `rct1` keeps the
 ///   override-liveness coverage.
-/// - `frac065` (`tree_sample_fraction`): the override is not consumed
-///   upstream (jxl-encoder#69) — a structurally-dead probe.
+/// - `frac065` (`tree_sample_fraction`): at the time the override was
+///   not consumed upstream (jxl-encoder#69) — a structurally-dead probe.
+///   Upstream consumes it now (`effective_profile`), and 0.65 would
+///   still alias the e7 default (values in (0.5, 1.0) stride-quantize to
+///   0.5); a re-added probe must sit at ≤ 0.5 with the fixed cap
+///   disabled and pass a harness liveness run first (#8).
 /// - `gatherdedup`: byte-identical to the sort-only path on the whole
 ///   corpus (the post-`pre_quantize` sort dedup converges to the same
 ///   surviving set). It REMAINS in the fingerprint (upstream documents

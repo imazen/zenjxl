@@ -69,6 +69,16 @@ prior to 0.1.26, so adopting the reshape was not a break of released API.
   was building (and breaking) it on every non-`__expert` `cargo test`.
   (63339aa)
 
+### Documentation
+- `src/sweep.rs` module docs + `docs/VARIANT_GENERATION.md` brought back in
+  line with the code for the #8 follow-ups: `palette_colors` is a real
+  lossless axis (since 2026-07-02), not an excluded one; `tree_sample_fraction`
+  IS consumed upstream now (a ≤ 0.5 probe is owed a harness liveness run,
+  not "plumbing"); the fingerprint under-merge is handled by
+  `encode_fingerprint` over upstream's public `resolved_profile()`; and the
+  `chroma_subsampling` gate no longer cites the closed PR #47 as an open
+  tracker. (#8)
+
 ### Added
 - Wired the zencodec-testkit `check_decode_truncation_series` EOF/truncation
   conformance check into the decode test suite (`tests/truncation_series.rs`),
