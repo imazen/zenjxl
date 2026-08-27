@@ -69,6 +69,29 @@ prior to 0.1.26, so adopting the reshape was not a break of released API.
   was building (and breaking) it on every non-`__expert` `cargo test`.
   (63339aa)
 
+### Fixed (build)
+- **The lib did not compile with `decode` enabled** (CI red 2026-08-14..27:
+  `cannot find ErrorClass in api`). `src/error.rs` had been written against
+  zenjxl-decoder's unreleased 0.4.0 (`jxl::api::ErrorClass`), but the `jxl`
+  dependency still required `^0.3.10`, so the `[patch.crates-io]` path entry
+  (now at 0.4.0 after the sibling's breaking bump) no longer applied and the
+  registry 0.3.10 resolved. The requirement is now `0.4.0` (unpublished; the
+  path patch supplies it — drop the patch when it ships). No code changes
+  were needed: `cargo check --all-targets` with `parallel,zencodec,__expert`
+  is clean against the sibling. (#8)
+
+### Added
+- `tests/parallel_determinism.rs` (`--features parallel`): threads 1 vs
+  2/4/ambient must be byte-identical — lossy e7/e9, lossless e9 (default),
+  and every explicit `SectionedTrees` mode (`Off`/`On`/`Hybrid`) at
+  e5/e7/e9. Confirmed via `JXL_DBG_PARALLEL_TREE=1` that the parallel
+  tree-learning fork is actually taken. **Finding:** the default
+  `SectionedTrees::Auto` is thread-DEPENDENT at lossless e≤7 on `parallel`
+  builds (upstream policy, `Auto@1 ≡ Off`, `Auto@N>1 ≡ On`; e7 265,500 B vs
+  279,016 B on the test image) and `sectioned_trees` is not in the sweep
+  fingerprint — documented in `docs/VARIANT_GENERATION.md` §4 as an open
+  policy decision; that case is not asserted. (#8 item 4)
+
 ### Documentation
 - `src/sweep.rs` module docs + `docs/VARIANT_GENERATION.md` brought back in
   line with the code for the #8 follow-ups: `palette_colors` is a real

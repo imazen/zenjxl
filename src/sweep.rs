@@ -93,7 +93,11 @@
 //! `butteraugli_iters` and the perceptual-loop family (feature-gated,
 //! interacts with `butteraugli-loop` builds), container/metadata knobs
 //! (orthogonal to encode params; pinned by the harness), threading
-//! knobs (must be byte-neutral; pinned to 1 thread in harnesses).
+//! knobs (must be byte-neutral; pinned to 1 thread in harnesses —
+//! CAVEAT: upstream's default `SectionedTrees::Auto` consults the
+//! thread count at lossless e≤7 on `parallel` builds, and
+//! `sectioned_trees` is not hashed here; see `docs/VARIANT_GENERATION.md`
+//! §4 and `tests/parallel_determinism.rs`, open decision on #8).
 //!
 //! The plan is **per config-cell**; multiply by corpus images and size
 //! buckets with [`SweepPlan::encodes`] to get the real encode count.

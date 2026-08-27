@@ -138,8 +138,22 @@ Exclusions (each must be encode-provable, per the zenjpeg
 - `tree_parallel_{max_depth, floor, root_threshold,
   small_image_fallback}` and `smart_fanout` — scheduling-only by
   upstream design. The harness proves the sequential build; the
-  parallel-build bitstream-equivalence claim is upstream's (backed by
-  its hash-lock suite). These are not sweep axes.
+  parallel-build bitstream-equivalence is now ALSO checked on this side
+  by `tests/parallel_determinism.rs` (`--features parallel`, threads
+  1 vs 2/4/ambient). These are not sweep axes.
+
+**Not yet hashed, and byte-affecting: `LosslessConfig::sectioned_trees`**
+(`SectionedTrees::{Auto, Off, On, Hybrid}`, jxl-encoder#96). Every
+`LosslessVariant` builds with the default `Auto`, and `Auto` is
+thread-dependent at effort ≤ 7 on a `parallel` build (upstream policy of
+2026-08-19: sectioned "at effort <= 7 with more than one worker") —
+measured 2026-08-27: `Auto@threads=1 ≡ Off`, `Auto@threads>1 ≡ On`
+(e7: 265,500 B vs 279,016 B on the test image), while `Off`/`On`/`Hybrid`
+are each byte-invariant across thread counts. So the fingerprint contract
+holds for lossless e≤7 **only at threads = 1** until one of: pin a
+thread-invariant mode in `LosslessVariant::build`, add `sectioned_trees`
+as an axis and hash it, or upstream drops the thread arm from `Auto`.
+Open decision on #8.
 
 Everything else output-plausible IS hashed, including every
 search-bound knob (`tree_learn_seeds`, `ans_histogram_strategy_vardct`,
@@ -363,6 +377,12 @@ Adopting the canonical playbook patterns 17–18 (see
 - **Alpha axes** (`alpha_distance`, `alpha_squeeze`,
   `simplify_invisible`) need an RGBA corpus and an alpha-aware metric
   before they can be swept honestly.
-- The harness pins threads=1 and runs the non-`parallel` build; a
-  `parallel`-build determinism pass (same fingerprint, threads 1 vs N,
-  byte-identical) is a cheap future hardening step.
+- The harness pins threads=1 and runs the non-`parallel` build. The
+  `parallel`-build determinism pass now exists
+  (`tests/parallel_determinism.rs`, run under `--features parallel` /
+  CI's all-features job): lossy e7/e9 and lossless e9 are byte-identical
+  at threads 1 vs 2/4/ambient, and so is every explicit
+  `SectionedTrees` mode at e5/e7/e9. The one divergence it found is the
+  default `SectionedTrees::Auto` at lossless e≤7 (see §4) — a policy
+  decision, not a race; that case is documented, not asserted, until the
+  decision is made.
