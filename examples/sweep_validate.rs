@@ -5,7 +5,9 @@
 //!
 //! Encodes the default stratum plus every single-deviation stratum of
 //! [`SweepAxes::modes_full`] on a small mixed corpus (CID22-512 photos,
-//! synthetic noise / complex / checkerboard, one 64×64 tiny) and checks:
+//! synthetic noise / complex / checkerboard, a confirmed screenshot-class
+//! synthetic — see [`generate_screenshot`] — and one 64×64 tiny) and
+//! checks:
 //!
 //! 1. **Fingerprint contract** — equal fingerprint ⇒ byte-identical
 //!    output, on real encodes of the documented alias pairs (the
@@ -26,10 +28,11 @@
 //!
 //! Build-config caveat: this harness runs without jxl-encoder's
 //! `parallel` or `butteraugli-loop` features, so the `tree_parallel_*`
-//! byte-pairs prove the sequential build only (the parallel-build
-//! bitstream-equivalence claim is upstream's, backed by its hash-lock
-//! suite), and `lossy_search_seeds` is structurally dead (and therefore
-//! not a curated probe).
+//! byte-pairs prove the sequential build only (the `parallel`-build
+//! thread-invariance is checked by `tests/parallel_determinism.rs`,
+//! which also documents the one known thread-DEPENDENT default —
+//! `SectionedTrees::Auto` at lossless e≤7), and `lossy_search_seeds` is
+//! structurally dead (and therefore not a curated probe).
 //!
 //! Run (the corpus env var is required when the repo layout doesn't put
 //! `codec-eval/codec-corpus` next to the workspace root — no silent
@@ -48,7 +51,8 @@
 use std::collections::HashMap;
 use std::io::Write as _;
 
-use rgb::ComponentBytes;
+use imgref::ImgVec;
+use rgb::{ComponentBytes, RGB8};
 use zenjpeg_bench_utils::{
     RgbImage, codec_corpus_dir, generate_checkerboard, generate_complex, generate_noise,
     generate_photo_like, load_png,
@@ -78,6 +82,93 @@ fn fnv64(bytes: &[u8]) -> u64 {
 fn image_bytes(img: &RgbImage) -> &[u8] {
     assert_eq!(img.stride(), img.width(), "harness expects tight buffers");
     img.buf().as_bytes()
+}
+
+/// Deterministic synthetic screenshot (512×512 in the harness): flat UI
+/// chrome (title bar, sidebar, content background), text-like glyph runs
+/// on a 24-px line pitch, bordered flat buttons, and one embedded
+/// photo-like thumbnail. It is screenshot-class by jxl-encoder's own
+/// W44-164 discriminator (`flat_color_block_ratio >= 0.35`), which is
+/// what trips Zenjxl's per-image content gates — so the `lean`
+/// (LeanFaster-vs-Zenjxl) stratum is hard-checked for inertness like
+/// every other step, instead of soft-exempted. The byte-for-byte
+/// twin of this generator lives in `tests/lean_strategy_diverges.rs`,
+/// which asserts the class membership and the divergence at every
+/// `Q_GRID` point; keep the two in sync.
+fn generate_screenshot(width: u32, height: u32) -> RgbImage {
+    let (w, h) = (width as usize, height as usize);
+    let mut px = vec![RGB8::new(0, 0, 0); w * h];
+    let mut put = |x: usize, y: usize, c: [u8; 3]| {
+        px[y * w + x] = RGB8::new(c[0], c[1], c[2]);
+    };
+    let bg = [240, 240, 240];
+    let bar = [40, 44, 52];
+    let side = [250, 250, 250];
+    let ink = [20, 20, 20];
+    let accent = [30, 110, 220];
+    for y in 0..h {
+        for x in 0..w {
+            let c = if y < 40 {
+                bar
+            } else if x < 128 {
+                side
+            } else {
+                bg
+            };
+            put(x, y, c);
+        }
+    }
+    for item in 0..6 {
+        let y0 = 64 + item * 48;
+        for y in y0..y0 + 28 {
+            for x in 12..116 {
+                let edge = y == y0 || y == y0 + 27 || x == 12 || x == 115;
+                put(x, y, if edge { ink } else { accent });
+            }
+        }
+    }
+    let mut state: u32 = 0x5EED_1234;
+    let mut next = || {
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        state >> 16
+    };
+    let mut line = 0;
+    while 56 + line * 24 + 16 <= h - 8 {
+        let y0 = 56 + line * 24 + 8;
+        let x_end = 144 + (next() as usize % 300) + 40;
+        let mut x = 144;
+        while x < x_end.min(w - 8) {
+            let run = 1 + (next() as usize % 3);
+            let gap = 1 + (next() as usize % 4);
+            let colour = if next() % 7 == 0 { accent } else { ink };
+            for dx in 0..run {
+                for dy in 0..8 {
+                    if (next() % 5) != 0 {
+                        put(x + dx, y0 + dy, colour);
+                    }
+                }
+            }
+            x += run + gap;
+        }
+        line += 1;
+    }
+    for y in 300..460 {
+        for x in 320..480 {
+            let gx = ((x - 320) * 255 / 159) as u8;
+            let gy = ((y - 300) * 255 / 159) as u8;
+            let n = (next() & 0x1F) as u8;
+            put(
+                x,
+                y,
+                [
+                    gx.wrapping_add(n),
+                    gy.wrapping_add(n / 2),
+                    (255 - gx / 2).wrapping_sub(n),
+                ],
+            );
+        }
+    }
+    ImgVec::new(px, w, h)
 }
 
 /// Encode through the built config, threads pinned to 1 (byte
@@ -114,7 +205,9 @@ fn ssim2(orig: &RgbImage, jxl: &[u8]) -> f64 {
     }
     let to_linear = |bytes: &[u8]| {
         let px: Vec<[f32; 3]> = bytes
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|c| {
                 [
                     srgb_u8_to_linear(c[0]),
@@ -211,6 +304,7 @@ fn main() {
     images.push(("noise512".into(), generate_noise(512, 512, 42)));
     images.push(("complex512".into(), generate_complex(512, 512)));
     images.push(("checker512".into(), generate_checkerboard(512, 512, 8)));
+    images.push(("screenshot512".into(), generate_screenshot(512, 512)));
     images.push(("tiny64".into(), generate_photo_like(64, 64)));
 
     // ------------------------------------------------------------------
@@ -483,24 +577,18 @@ fn main() {
     }
 
     // Hard inert check: every curated axis step must change bytes
-    // somewhere. "lean" is soft: the LeanFaster bundle only diverges
-    // from Zenjxl on content that trips the per-image gates
-    // (screenshot-/smooth-photo-class), which this small corpus may not
-    // contain — byte-identity there is gate-dependent, not inertness.
-    let soft_labels = ["lean"];
+    // somewhere. "lean" used to be soft-exempted (the LeanFaster bundle
+    // only diverges from Zenjxl on content that trips the per-image
+    // gates); `screenshot512` is a confirmed gate-tripping image
+    // (`tests/lean_strategy_diverges.rs` proves class membership by
+    // upstream's discriminator and divergence at every Q_GRID point), so
+    // byte-identity everywhere is now inertness for `lean` too.
     for a in &aggs {
         if a.differing == 0 {
-            if soft_labels.contains(&a.label.as_str()) {
-                warnings.push(format!(
-                    "{} byte-identical to default everywhere (content-gated bundle; corpus may not trip its gates)",
-                    a.label
-                ));
-            } else {
-                hard_failures.push(format!(
-                    "INERT STEP: {} never changed output bytes across {} (image,q) pairs",
-                    a.label, a.n
-                ));
-            }
+            hard_failures.push(format!(
+                "INERT STEP: {} never changed output bytes across {} (image,q) pairs",
+                a.label, a.n
+            ));
         }
     }
 

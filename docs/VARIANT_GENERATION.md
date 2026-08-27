@@ -201,9 +201,17 @@ controls), **lossless roundtrip mismatches** (decoded pixels must equal
 input exactly — the zero-tolerance rule applied as a harness gate),
 ordering breakage, and ssim2 sanity-floor violations at q85. Soft
 checks: bytes monotone in quality, e9 ≤ e5 mean bytes, faster-decoding
-and LZ77-off cost bytes. `lean` (LeanFaster vs Zenjxl) is the one
-soft-exempted label: that bundle only diverges on content that trips
-its per-image gates, which this corpus may not contain.
+and LZ77-off cost bytes. `lean` (LeanFaster vs Zenjxl) WAS the one
+soft-exempted label (that bundle only diverges on content that trips
+Zenjxl's per-image gates); since 2026-08-27 the corpus carries
+`screenshot512`, a synthetic that is screenshot-class by upstream's own
+W44-164 discriminator (`flat_color_block_ratio` = 0.756, inside the
+calibrated 0.360–0.907 band), and `tests/lean_strategy_diverges.rs` asserts
+both the class membership and `zen`≠`lean` bytes at every `Q_GRID`
+point on it (measured: differs at all six, e.g. q10 24,052 B vs
+14,282 B) — so `lean` is hard-checked like every other step. (The
+2026-06-12 run had in fact already seen `lean` differ on `complex512`
+q30 and `tiny64` q10/30/50, so the exemption never fired.)
 
 Results land in `benchmarks/sweep_validate_jxl_<date>.tsv` with the
 git commit in the header. Re-run the harness whenever the axes, the
@@ -371,9 +379,11 @@ Adopting the canonical playbook patterns 17–18 (see
   helpers ("chunk 3"); the VarDCT pipeline wiring ("chunk 4") is still
   queued upstream with no open tracking issue (#47 is a closed PR). It
   becomes a lossy axis the day it lands.
-- **LeanFaster soft-exemption** should be retired by adding a
-  confirmed gate-tripping image (screenshot-class) to the harness
-  corpus.
+- **LeanFaster soft-exemption — retired 2026-08-27** (see §6:
+  `screenshot512` + `tests/lean_strategy_diverges.rs`). The harness
+  itself has not been re-run since (no codec corpus on the machine that
+  made the change); the next `just sweep-validate` run is what confirms
+  the whole-corpus `lean` row and lands the dated TSV.
 - **Alpha axes** (`alpha_distance`, `alpha_squeeze`,
   `simplify_invisible`) need an RGBA corpus and an alpha-aware metric
   before they can be swept honestly.

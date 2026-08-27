@@ -70,6 +70,14 @@ prior to 0.1.26, so adopting the reshape was not a break of released API.
   (63339aa)
 
 ### Fixed (build)
+- **CI Clippy/Format jobs green again on stable 1.98**: clippy 1.98's new
+  `chunks_exact_to_as_chunks` lint (23 sites across `src/decode.rs`,
+  `src/codec.rs`, `src/jpeg_lossy.rs`, two tests and the sweep harness —
+  `chunks_exact(N)` → `as_chunks::<N>().0.iter()`, identical remainder
+  semantics, MSRV 1.93 ≥ 1.88), `manual_is_multiple_of` in
+  `examples/fleetbench_repro.rs`, six `collapsible_if` + a doc-list
+  indentation in `examples/mem_probe_encode.rs` (which was also the file
+  failing `cargo fmt --check`). No behaviour change. (#8, unblocking)
 - **The lib did not compile with `decode` enabled** (CI red 2026-08-14..27:
   `cannot find ErrorClass in api`). `src/error.rs` had been written against
   zenjxl-decoder's unreleased 0.4.0 (`jxl::api::ErrorClass`), but the `jxl`
@@ -91,6 +99,15 @@ prior to 0.1.26, so adopting the reshape was not a break of released API.
   279,016 B on the test image) and `sectioned_trees` is not in the sweep
   fingerprint — documented in `docs/VARIANT_GENERATION.md` §4 as an open
   policy decision; that case is not asserted. (#8 item 4)
+- `examples/sweep_validate.rs` corpus gains `screenshot512`, a synthetic
+  screenshot that is screenshot-class by jxl-encoder's own W44-164
+  discriminator, and the `lean` (LeanFaster-vs-Zenjxl) stratum is now
+  hard-checked for inertness like every other axis step — the soft-exemption
+  is retired. `tests/lean_strategy_diverges.rs` (`__expert`) pins both facts:
+  class membership (`flat_color_block_ratio` inside the calibrated
+  0.36–0.907 band) and `vd-e7_zen_def_q*` ≠ `vd-e7_lean_def_q*` bytes at
+  every harness quality point (measured: all six differ). The harness
+  itself still needs a corpus-backed re-run to land a dated TSV. (#8 item 3)
 
 ### Documentation
 - `src/sweep.rs` module docs + `docs/VARIANT_GENERATION.md` brought back in
