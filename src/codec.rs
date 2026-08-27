@@ -1061,12 +1061,12 @@ mod encoding {
                     let mut rgb =
                         alloc::vec::Vec::with_capacity((width as usize) * (height as usize) * 3);
                     if matches!(pf, PixelFormat::Rgbx8) {
-                        for px in raw.chunks_exact(4) {
+                        for px in raw.as_chunks::<4>().0.iter() {
                             rgb.extend_from_slice(&[px[0], px[1], px[2]]);
                         }
                     } else {
                         // Bgrx8: swap B↔R while stripping.
-                        for px in raw.chunks_exact(4) {
+                        for px in raw.as_chunks::<4>().0.iter() {
                             rgb.extend_from_slice(&[px[2], px[1], px[0]]);
                         }
                     }
@@ -1125,7 +1125,7 @@ mod encoding {
                     for y in 0..h {
                         let row_start = y * stride * 4;
                         let row = &data[row_start..row_start + w * 4];
-                        for px in row.chunks_exact(4) {
+                        for px in row.as_chunks::<4>().0.iter() {
                             rgb.push(px[0]);
                             rgb.push(px[1]);
                             rgb.push(px[2]);
@@ -1181,11 +1181,11 @@ mod encoding {
                             (width as usize) * (num_rows as usize) * 3,
                         );
                         if matches!(pf, PixelFormat::Rgbx8) {
-                            for px in raw.chunks_exact(4) {
+                            for px in raw.as_chunks::<4>().0.iter() {
                                 rgb.extend_from_slice(&[px[0], px[1], px[2]]);
                             }
                         } else {
-                            for px in raw.chunks_exact(4) {
+                            for px in raw.as_chunks::<4>().0.iter() {
                                 rgb.extend_from_slice(&[px[2], px[1], px[0]]);
                             }
                         }
@@ -1434,11 +1434,11 @@ mod encoding {
                     let raw = pixels.contiguous_bytes();
                     let mut rgb = Vec::with_capacity((w as usize) * (h as usize) * 3);
                     if matches!(pf, PixelFormat::Rgbx8) {
-                        for px in raw.chunks_exact(4) {
+                        for px in raw.as_chunks::<4>().0.iter() {
                             rgb.extend_from_slice(&[px[0], px[1], px[2]]);
                         }
                     } else {
-                        for px in raw.chunks_exact(4) {
+                        for px in raw.as_chunks::<4>().0.iter() {
                             rgb.extend_from_slice(&[px[2], px[1], px[0]]);
                         }
                     }

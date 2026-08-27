@@ -355,7 +355,7 @@ pub(crate) fn is_hdr_or_wide_gamut(cicp: Option<(u8, u8, u8, bool)>) -> bool {
 
 /// Clamp all f32 values in a byte buffer to [0.0, 1.0].
 pub(crate) fn clamp_f32_buf(buf: &mut [u8]) {
-    for chunk in buf.chunks_exact_mut(4) {
+    for chunk in buf.as_chunks_mut::<4>().0.iter_mut() {
         let v = f32::from_ne_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         let clamped = v.clamp(0.0, 1.0);
         if v != clamped {
@@ -1000,7 +1000,9 @@ pub(crate) fn build_pixel_data(
         // ── u8 variants ──────────────────────────────────────────────
         (ChannelType::U8, JxlColorType::Rgb) => {
             let pixels: Vec<Rgb<u8>> = buf
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .map(|c| Rgb {
                     r: c[0],
                     g: c[1],
@@ -1011,7 +1013,9 @@ pub(crate) fn build_pixel_data(
         }
         (ChannelType::U8, JxlColorType::Rgba) => {
             let pixels: Vec<Rgba<u8>> = buf
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .map(|c| Rgba {
                     r: c[0],
                     g: c[1],
@@ -1031,7 +1035,9 @@ pub(crate) fn build_pixel_data(
         }
         (ChannelType::U8, JxlColorType::Bgra) => {
             let pixels: Vec<rgb::alt::BGRA<u8>> = buf
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .map(|c| rgb::alt::BGRA {
                     b: c[0],
                     g: c[1],
@@ -1044,7 +1050,9 @@ pub(crate) fn build_pixel_data(
         (ChannelType::U8, JxlColorType::Bgr) => {
             // No Bgr pixel type, convert to Rgb
             let pixels: Vec<Rgb<u8>> = buf
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .map(|c| Rgb {
                     r: c[2],
                     g: c[1],
@@ -1057,7 +1065,9 @@ pub(crate) fn build_pixel_data(
         // ── u16 variants ─────────────────────────────────────────────
         (ChannelType::U16, JxlColorType::Rgb) => {
             let pixels: Vec<Rgb<u16>> = buf
-                .chunks_exact(6)
+                .as_chunks::<6>()
+                .0
+                .iter()
                 .map(|c| Rgb {
                     r: u16::from_ne_bytes([c[0], c[1]]),
                     g: u16::from_ne_bytes([c[2], c[3]]),
@@ -1068,7 +1078,9 @@ pub(crate) fn build_pixel_data(
         }
         (ChannelType::U16, JxlColorType::Rgba) => {
             let pixels: Vec<Rgba<u16>> = buf
-                .chunks_exact(8)
+                .as_chunks::<8>()
+                .0
+                .iter()
                 .map(|c| Rgba {
                     r: u16::from_ne_bytes([c[0], c[1]]),
                     g: u16::from_ne_bytes([c[2], c[3]]),
@@ -1080,7 +1092,9 @@ pub(crate) fn build_pixel_data(
         }
         (ChannelType::U16, JxlColorType::Grayscale) => {
             let pixels: Vec<Gray<u16>> = buf
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|c| Gray::new(u16::from_ne_bytes([c[0], c[1]])))
                 .collect();
             PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
@@ -1093,7 +1107,9 @@ pub(crate) fn build_pixel_data(
         // ── f32 variants ─────────────────────────────────────────────
         (ChannelType::F32, JxlColorType::Rgb) => {
             let pixels: Vec<Rgb<f32>> = buf
-                .chunks_exact(12)
+                .as_chunks::<12>()
+                .0
+                .iter()
                 .map(|c| Rgb {
                     r: f32::from_ne_bytes([c[0], c[1], c[2], c[3]]),
                     g: f32::from_ne_bytes([c[4], c[5], c[6], c[7]]),
@@ -1104,7 +1120,9 @@ pub(crate) fn build_pixel_data(
         }
         (ChannelType::F32, JxlColorType::Rgba) => {
             let pixels: Vec<Rgba<f32>> = buf
-                .chunks_exact(16)
+                .as_chunks::<16>()
+                .0
+                .iter()
                 .map(|c| Rgba {
                     r: f32::from_ne_bytes([c[0], c[1], c[2], c[3]]),
                     g: f32::from_ne_bytes([c[4], c[5], c[6], c[7]]),
@@ -1116,7 +1134,9 @@ pub(crate) fn build_pixel_data(
         }
         (ChannelType::F32, JxlColorType::Grayscale) => {
             let pixels: Vec<Gray<f32>> = buf
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .map(|c| Gray::new(f32::from_ne_bytes([c[0], c[1], c[2], c[3]])))
                 .collect();
             PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
@@ -1130,7 +1150,9 @@ pub(crate) fn build_pixel_data(
         // but decode as RGBA8 to be safe
         _ => {
             let pixels: Vec<Rgba<u8>> = buf
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .map(|c| Rgba {
                     r: c[0],
                     g: c[1],

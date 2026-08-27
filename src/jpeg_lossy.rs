@@ -461,7 +461,9 @@ fn encode_pixel(
     let Some(icc) = src_icc else {
         // No source profile: bare sRGB-assumed codestream (the prior behavior).
         let pixels: Vec<rgb::Rgb<u8>> = ref_px
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|c| rgb::Rgb {
                 r: c[0],
                 g: c[1],

@@ -132,7 +132,7 @@ fn run_one(path: &PathBuf, cell_id: &str, idx: usize) {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     assert!(
-        !args.is_empty() && args.len() % 2 == 0,
+        !args.is_empty() && args.len().is_multiple_of(2),
         "usage: <png-path> <cell-id> [<png-path> <cell-id> ...]"
     );
     print_rss("start");

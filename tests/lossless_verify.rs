@@ -19,7 +19,9 @@ fn decode_rgb8(cs: &[u8]) -> (Vec<Rgb<u8>>, u32, u32) {
         .expect("decode verified-lossless output");
     let raw = out.pixels.into_vec();
     let pixels: Vec<Rgb<u8>> = raw
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|c| Rgb {
             r: c[0],
             g: c[1],

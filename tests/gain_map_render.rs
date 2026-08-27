@@ -139,7 +139,9 @@ fn reconstruct_downgrades_to_components() {
 fn max_linear_f32(out: &zencodec::decode::DecodeOutput) -> f32 {
     out.pixels()
         .contiguous_bytes()
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|c| f32::from_ne_bytes([c[0], c[1], c[2], c[3]]))
         .fold(0.0f32, f32::max)
 }

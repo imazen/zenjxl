@@ -50,6 +50,7 @@
 //!     move with the allocator; `peak_live_kb` does not.
 //!   * `alloc_count` guards the Windows path, where allocation is slow enough
 //!     that trading bytes for many more small allocations regresses overall.
+//!
 //! On non-Linux hosts `pre_rss_kb`/`vmhwm_kb` read 0 (they use /proc); wrap the
 //! binary in `/usr/bin/time -l` for peak RSS there.
 //!
@@ -323,10 +324,10 @@ mod alloc_sites {
             }
             g.set(true);
             with_prof(|p| {
-                if let Some((key, sz)) = p.ptrs.remove(&(ptr as usize)) {
-                    if let Some(s) = p.sites.get_mut(&key) {
-                        s.live -= sz as i64;
-                    }
+                if let Some((key, sz)) = p.ptrs.remove(&(ptr as usize))
+                    && let Some(s) = p.sites.get_mut(&key)
+                {
+                    s.live -= sz as i64;
                 }
             });
             g.set(false);
@@ -350,12 +351,11 @@ mod alloc_sites {
             g.set(true);
             let key = (new_size >= min).then(capture);
             with_prof(|p| {
-                if old_size >= min {
-                    if let Some((k, sz)) = p.ptrs.remove(&(old_ptr as usize)) {
-                        if let Some(s) = p.sites.get_mut(&k) {
-                            s.live -= sz as i64;
-                        }
-                    }
+                if old_size >= min
+                    && let Some((k, sz)) = p.ptrs.remove(&(old_ptr as usize))
+                    && let Some(s) = p.sites.get_mut(&k)
+                {
+                    s.live -= sz as i64;
                 }
                 if let Some(key) = key {
                     let s = p.sites.entry(key).or_default();
@@ -440,24 +440,23 @@ mod alloc_sites {
         let b = s.as_bytes();
         let mut i = 0;
         while i < b.len() {
-            if b[i] == b'[' {
-                if let Some(j) = s[i + 1..].find(']') {
-                    let inner = &s[i + 1..i + 1 + j];
-                    if (8..=17).contains(&inner.len())
-                        && inner.chars().all(|c| c.is_ascii_hexdigit())
-                    {
-                        i += j + 2;
-                        continue;
-                    }
+            if b[i] == b'['
+                && let Some(j) = s[i + 1..].find(']')
+            {
+                let inner = &s[i + 1..i + 1 + j];
+                if (8..=17).contains(&inner.len()) && inner.chars().all(|c| c.is_ascii_hexdigit()) {
+                    i += j + 2;
+                    continue;
                 }
             }
             out.push(b[i] as char);
             i += 1;
         }
-        if let Some(i) = out.rfind("::h") {
-            if out.len() - i == 19 && out[i + 3..].chars().all(|c| c.is_ascii_hexdigit()) {
-                out.truncate(i);
-            }
+        if let Some(i) = out.rfind("::h")
+            && out.len() - i == 19
+            && out[i + 3..].chars().all(|c| c.is_ascii_hexdigit())
+        {
+            out.truncate(i);
         }
         out
     }
@@ -505,11 +504,7 @@ mod alloc_sites {
         // inline-expanded symbols dodge the prefix list (thread-local
         // closures, RawVec internals) — without these the full-stack dump's
         // frame budget is spent before any encoder frame appears.
-        const NOISE_FILE: &[&str] = &[
-            "/rustlib/",
-            "backtrace-0.",
-            "examples/mem_probe_encode",
-        ];
+        const NOISE_FILE: &[&str] = &["/rustlib/", "backtrace-0.", "examples/mem_probe_encode"];
         let s = fr.sym.trim_start_matches('<');
         s.is_empty()
             || NOISE_PREFIX.iter().any(|n| s.starts_with(n))
@@ -571,8 +566,8 @@ mod alloc_sites {
 
         // by-line aggregation of the snapshot (live at peak) and of totals.
         let line_of = |key: &SiteKey,
-                           cache: &mut HashMap<usize, Vec<RFrame>>,
-                           resolved: &mut HashMap<SiteKey, Vec<RFrame>>| {
+                       cache: &mut HashMap<usize, Vec<RFrame>>,
+                       resolved: &mut HashMap<SiteKey, Vec<RFrame>>| {
             let frames = resolved
                 .entry(*key)
                 .or_insert_with(|| resolve_key(key, cache))
@@ -605,7 +600,11 @@ mod alloc_sites {
             let mut ss = snap_sites.clone();
             ss.sort_by_key(|(_, l)| -*l);
             for (key, live) in ss.iter().take(3) {
-                eprintln!("[sites-debug] site live={:.1} MiB len={} frames:", mb(*live), key.len);
+                eprintln!(
+                    "[sites-debug] site live={:.1} MiB len={} frames:",
+                    mb(*live),
+                    key.len
+                );
                 for &ip in &key.frames[..key.len as usize] {
                     let fr = resolve_ip(&mut cache, ip);
                     if fr.is_empty() {
@@ -635,7 +634,13 @@ mod alloc_sites {
         peak_rows.sort_by_key(|(_, (l, _))| -*l);
         eprintln!("[sites] live at peak snapshot, by attributed line:");
         for (i, (line, (live, n))) in peak_rows.iter().take(30).enumerate() {
-            eprintln!("  {:>2}  {:>9.1} MiB  n={:<5} {}", i + 1, mb(*live), n, line);
+            eprintln!(
+                "  {:>2}  {:>9.1} MiB  n={:<5} {}",
+                i + 1,
+                mb(*live),
+                n,
+                line
+            );
         }
 
         let mut churn_rows: Vec<(&String, &(u64, u64))> = churn.iter().collect();
@@ -839,10 +844,10 @@ fn main() {
     // it is taken as an absolute (it can only have been set during the encode
     // if the encode exceeded the pre-encode high-water).
     use core::sync::atomic::Ordering;
-    if let Ok(v) = std::env::var("JXL_PEAK_TRACE_AT") {
-        if let Ok(n) = v.parse::<usize>() {
-            counting_alloc::TRACE_AT.store(n, Ordering::Relaxed);
-        }
+    if let Ok(v) = std::env::var("JXL_PEAK_TRACE_AT")
+        && let Ok(n) = v.parse::<usize>()
+    {
+        counting_alloc::TRACE_AT.store(n, Ordering::Relaxed);
     }
     // Per-site allocation profiler (see `alloc_sites`). Enabled here, right
     // before the encode, so startup/file-read allocations stay out of the maps.
