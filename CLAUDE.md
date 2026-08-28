@@ -13,7 +13,10 @@ lives in `zenjpeg/docs/VARIANT_GENERATION.md`.
   `LossyVariant`/`LosslessVariant`, `SweepAxes × QualityGrid` planner with
   budget ladder, FNV byte-identity `fingerprint` over resolved state
   (generic-q calibration plateau q≤20 dedupes), curated axes with
-  provenance table in the module docs.
+  provenance table in the module docs. Class-conditional alpha axes
+  (`AlphaCoding`, `keep_invisible`, lossless `zero_invisible`) live in the
+  separate `SweepAxes::modes_full_alpha` preset — sweep them on RGBA input
+  only; `tests/alpha_axes_class_conditional.rs` is the two-sided gate.
 - `JxlEncoderConfig::resolve_plan()` (`zencodec`+`encode`+`__expert`):
   reads the same stored upstream config the encode consumes; lossless
   plans report dead knobs. `validate()` rejects noise×lossless.

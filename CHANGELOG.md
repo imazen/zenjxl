@@ -89,6 +89,31 @@ prior to 0.1.26, so adopting the reshape was not a break of released API.
   is clean against the sibling. (#8)
 
 ### Added
+- **Alpha axes** (`__expert` sweep surface, #8 item 5): `sweep::AlphaCoding`
+  `{Lossless, Quantized(d), Squeezed(d)}` + `LossyVariant::{alpha,
+  keep_invisible}` + `LosslessVariant::zero_invisible`, the class-conditional
+  preset `SweepAxes::modes_full_alpha()` (`LossyAxes`/`LosslessAxes` too),
+  id tokens `-ad<d>` / `-asq<d>` / `-keepinv` / `-zeroinv`, hashed in both
+  fingerprints. Curated steps `ad2`/`ad10`/`asq2`/`asq10`/`keepinv`/`zeroinv`;
+  `alpha_distance ≤ 1.0` is the neutral (q = 1 ≡ lossless) spelling and is
+  kept out of every preset by test. Measured on a 512² sprite (lossy e7 vs
+  default): `ad2` −25 %, `ad10` −43 %, `asq2` −66 %, `asq10` −77 %, `keepinv`
+  +100..476 %; lossless e7 `zeroinv` −93 % — and byte-identical to the
+  default on the same pixels as `Rgb8`. `tests/alpha_axes_class_conditional.rs`
+  is the two-sided CI gate (live on-class, inert off-class, alpha-aware
+  lossless exactness, neutral spelling pinned); `examples/sweep_validate.rs`
+  gains the RGBA leg (sprite + CID22 photo under a soft alpha mask, composite
+  ssim2 + alpha MAE, `<out>_alpha.tsv`). The alpha axes are NOT in
+  `modes_full` (RGB corpora would report them inert — correctly). Public
+  fields added to the `__expert`-gated sweep structs (unstable surface).
+- `frac025` lossless probe (`tree_sample_fraction = Some(0.25)` — the e5
+  schedule value, stride 4 vs the e7 default's 2 — with
+  `tree_max_samples_fixed = Some(0)`), the #8 item 1 re-add, harness-verified
+  live on 2026-08-28: bytes differ on 7/8 corpus images at e7 (+2.57 % mean,
+  +11.08 % max). `lossless_internal_probes` is 10 entries. (#8 item 1)
+- `benchmarks/sweep_validate_jxl_2026-08-28.tsv` (+ `_alpha.tsv`, `.meta`):
+  the first corpus-backed harness run since the 2026-08-27 `screenshot512`
+  / `lean` change — `lean` differs on 10/48 (image, q) pairs. (#8 item 3)
 - `tests/parallel_determinism.rs` (`--features parallel`): threads 1 vs
   2/4/ambient must be byte-identical — lossy e7/e9, lossless e9 (default),
   and every explicit `SectionedTrees` mode (`Off`/`On`/`Hybrid`) at

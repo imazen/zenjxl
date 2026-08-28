@@ -25,6 +25,16 @@
 //!    non-fatal).
 //! 5. **Queue ordering invariants** on the emitted plan.
 //! 6. **ssim2 sanity floor** at q85 (catches corrupt pixel paths).
+//! 7. **Alpha leg** (class-conditional axes, playbook pattern 10): the
+//!    dev≤1 subset of [`SweepAxes::modes_full_alpha`] on an RGBA corpus
+//!    (a sprite with a noisy transparent background + soft alpha edges,
+//!    and a CID22 photo under a soft radial alpha mask) with the
+//!    two-sided check — every alpha step must change bytes ON the alpha
+//!    class AND leave every RGB corpus image (fed as `Rgb8`) byte-
+//!    identical to the default — plus alpha-aware lossless exactness
+//!    (alpha exact everywhere; RGB exact where alpha > 0 for `zeroinv`,
+//!    everywhere otherwise) and a composite-over-grey ssim2 floor.
+//!    Results land in `<out>_alpha.tsv`.
 //!
 //! Build-config caveat: this harness runs without jxl-encoder's
 //! `parallel` or `butteraugli-loop` features, so the `tree_parallel_*`
@@ -58,8 +68,8 @@ use zenjpeg_bench_utils::{
     generate_photo_like, load_png,
 };
 use zenjxl::sweep::{
-    BuiltConfig, LosslessVariant, LossyVariant, NamedLosslessParams, NamedLossyParams, QualityGrid,
-    SweepAxes, SweepBuilder, SweepVariant, fingerprint, resolve_distance_for_quality,
+    AlphaCoding, BuiltConfig, LosslessVariant, LossyVariant, NamedLosslessParams, NamedLossyParams,
+    QualityGrid, SweepAxes, SweepBuilder, SweepVariant, fingerprint, resolve_distance_for_quality,
 };
 use zenjxl::{
     EncoderMode, EncoderStrategy, LosslessConfig, LosslessInternalParams, PixelLayout,
@@ -171,23 +181,481 @@ fn generate_screenshot(width: u32, height: u32) -> RgbImage {
     ImgVec::new(px, w, h)
 }
 
+/// Deterministic RGBA sprite (512×512 in the harness): fully transparent
+/// background whose RGB samples are LCG noise (so `keepinv` / `zeroinv`
+/// have something to preserve or discard), three shaded discs with 24-px
+/// soft alpha edges (a non-constant alpha plane, so upstream's squeeze
+/// path engages), and fully-opaque interiors. Byte-for-byte twin of
+/// `sprite_rgba8` in `tests/alpha_axes_class_conditional.rs`; keep the two
+/// in sync.
+fn generate_sprite_rgba(width: u32, height: u32) -> Vec<u8> {
+    let (w, h) = (width as usize, height as usize);
+    let mut px = vec![0u8; w * h * 4];
+    let mut state: u32 = 0xA1FA_5EED;
+    let mut next = || {
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        state >> 16
+    };
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y * w + x) * 4;
+            let mut rgb = [
+                (next() & 0xFF) as u8,
+                (next() & 0xFF) as u8,
+                (next() & 0xFF) as u8,
+            ];
+            let mut a = 0u8;
+            for (cx, cy, r, col) in [
+                (160.0f32, 160.0f32, 110.0f32, [220u8, 60, 40]),
+                (350.0, 200.0, 90.0, [40, 180, 90]),
+                (260.0, 380.0, 120.0, [50, 90, 230]),
+            ] {
+                let d = ((x as f32 - cx).powi(2) + (y as f32 - cy).powi(2)).sqrt();
+                if d < r + 12.0 {
+                    let cov = ((r + 12.0 - d) / 24.0).clamp(0.0, 1.0);
+                    let shade = (255.0 - d / r * 90.0).clamp(0.0, 255.0) as u8;
+                    rgb = [
+                        (u16::from(col[0]) * u16::from(shade) / 255) as u8,
+                        (u16::from(col[1]) * u16::from(shade) / 255) as u8,
+                        (u16::from(col[2]) * u16::from(shade) / 255) as u8,
+                    ];
+                    a = a.max((cov * 255.0) as u8);
+                }
+            }
+            px[i..i + 3].copy_from_slice(&rgb);
+            px[i + 3] = a;
+        }
+    }
+    px
+}
+
+/// A real photo under a soft radial alpha mask: opaque inside 35 % of
+/// the short side, a 40-px linear fade, transparent outside. The RGB is
+/// the untouched photo everywhere, so the invisible-pixel knobs act on
+/// real content, not synthetic noise.
+fn photo_with_alpha_mask(img: &RgbImage) -> Vec<u8> {
+    let (w, h) = (img.width(), img.height());
+    let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
+    let r_in = 0.35 * w.min(h) as f32;
+    let mut px = Vec::with_capacity(w * h * 4);
+    for (i, p) in img.buf().iter().enumerate() {
+        let (x, y) = ((i % w) as f32, (i / w) as f32);
+        let d = ((x - cx).powi(2) + (y - cy).powi(2)).sqrt();
+        let a = ((r_in + 40.0 - d) / 40.0).clamp(0.0, 1.0);
+        px.extend_from_slice(&[p.r, p.g, p.b, (a * 255.0).round() as u8]);
+    }
+    px
+}
+
 /// Encode through the built config, threads pinned to 1 (byte
 /// determinism is the whole point here).
 fn encode(cfg: &BuiltConfig, img: &RgbImage) -> Vec<u8> {
     let (w, h) = (img.width() as u32, img.height() as u32);
-    let px = image_bytes(img);
+    encode_layout(cfg, image_bytes(img), w, h, PixelLayout::Rgb8)
+}
+
+fn encode_layout(cfg: &BuiltConfig, px: &[u8], w: u32, h: u32, layout: PixelLayout) -> Vec<u8> {
     match cfg {
-        BuiltConfig::Lossy(c) => c
-            .clone()
-            .with_threads(1)
-            .encode(px, w, h, PixelLayout::Rgb8),
-        BuiltConfig::Lossless(c) => c
-            .clone()
-            .with_threads(1)
-            .encode(px, w, h, PixelLayout::Rgb8),
+        BuiltConfig::Lossy(c) => c.clone().with_threads(1).encode(px, w, h, layout),
+        BuiltConfig::Lossless(c) => c.clone().with_threads(1).encode(px, w, h, layout),
     }
     .unwrap_or_else(|e| panic!("encode failed: {e:?}"))
 }
+
+fn decode_rgba8(jxl: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+    let out = zenjxl::decode(jxl, None, &[zenpixels::PixelDescriptor::RGBA8]).ok()?;
+    let (w, h) = (out.info.width, out.info.height);
+    let px = out.pixels.into_vec();
+    (px.len() == (w as usize) * (h as usize) * 4).then_some((px, w, h))
+}
+
+/// Composite packed RGBA8 over mid-grey (128) — the alpha-aware form of
+/// the pixel comparison: what a viewer shows, with alpha folded in.
+fn composite_over_grey(rgba: &[u8]) -> Vec<u8> {
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| {
+            let a = u32::from(p[3]);
+            let mix = |c: u8| ((u32::from(c) * a + 128 * (255 - a) + 127) / 255) as u8;
+            [mix(p[0]), mix(p[1]), mix(p[2])]
+        })
+        .collect()
+}
+
+/// ssim2 of the grey-composited decode vs the grey-composited source,
+/// plus the alpha-plane mean absolute error. NaN / None on decode failure.
+fn score_rgba(src: &[u8], w: usize, h: usize, jxl: &[u8]) -> (f64, Option<f64>) {
+    use fast_ssim2::{LinearRgbImage, compute_ssimulacra2, srgb_u8_to_linear};
+    let Some((dec, dw, dh)) = decode_rgba8(jxl) else {
+        return (f64::NAN, None);
+    };
+    if (dw as usize, dh as usize) != (w, h) {
+        return (f64::NAN, None);
+    }
+    let to_linear = |bytes: &[u8]| {
+        let px: Vec<[f32; 3]> = bytes
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|c| {
+                [
+                    srgb_u8_to_linear(c[0]),
+                    srgb_u8_to_linear(c[1]),
+                    srgb_u8_to_linear(c[2]),
+                ]
+            })
+            .collect();
+        LinearRgbImage::new(px, w, h)
+    };
+    let s = compute_ssimulacra2(
+        to_linear(&composite_over_grey(src)),
+        to_linear(&composite_over_grey(&dec)),
+    )
+    .unwrap_or(f64::NAN);
+    let mae = src
+        .iter()
+        .skip(3)
+        .step_by(4)
+        .zip(dec.iter().skip(3).step_by(4))
+        .map(|(a, b)| f64::from(a.abs_diff(*b)))
+        .sum::<f64>()
+        / (w * h) as f64;
+    (s, Some(mae))
+}
+
+/// The class-conditional alpha leg (module docs item 7). Pushes hard
+/// failures / warnings into the caller's lists; writes `<out>_alpha.tsv`.
+fn alpha_leg(
+    rgb_images: &[(String, RgbImage)],
+    out_path: &str,
+    hard_failures: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) {
+    println!("\n=== alpha leg (modes_full_alpha, dev<=1) ===");
+    // On-class corpus: (name, packed RGBA8, w, h).
+    let mut alpha_images: Vec<(String, Vec<u8>, u32, u32)> = Vec::new();
+    alpha_images.push(("sprite512".into(), generate_sprite_rgba(512, 512), 512, 512));
+    if let Some((name, photo)) = rgb_images.iter().find(|(n, _)| n.starts_with("cid_")) {
+        alpha_images.push((
+            format!("{name}_amask"),
+            photo_with_alpha_mask(photo),
+            photo.width() as u32,
+            photo.height() as u32,
+        ));
+    }
+
+    let plan = SweepBuilder::new(
+        SweepAxes::modes_full_alpha(),
+        QualityGrid::ExplicitQuality(Q_GRID.to_vec()),
+    )
+    .plan();
+    let subset: Vec<usize> = plan
+        .cells
+        .iter()
+        .enumerate()
+        .take_while(|(_, c)| c.deviations <= 1)
+        .map(|(i, _)| i)
+        .collect();
+    let mut resolve: HashMap<String, usize> = HashMap::new();
+    for (i, c) in plan.cells.iter().enumerate() {
+        resolve.insert(c.id.clone(), i);
+        for a in &c.aliases {
+            resolve.insert(a.clone(), i);
+        }
+    }
+    let is_alpha_step = |base: &str| {
+        let (_, label) = parse_label(base);
+        ALPHA_LABELS.contains(&label.as_str())
+    };
+    // Cells to run off-class: the defaults plus every alpha-step cell.
+    let off_cells: Vec<usize> = subset
+        .iter()
+        .copied()
+        .filter(|&ci| {
+            let (base, _) = split_q(&plan.cells[ci].id);
+            plan.cells[ci].deviations == 0 || is_alpha_step(base)
+        })
+        .collect();
+    println!(
+        "alpha plan: {} cells, {} in the dev<=1 subset, {} run off-class x {} RGB images",
+        plan.cells.len(),
+        subset.len(),
+        off_cells.len(),
+        rgb_images.len()
+    );
+
+    struct AMeasure {
+        bytes: usize,
+        hash: u64,
+        ssim2: f64,
+        alpha_mae: Option<f64>,
+    }
+    let t0 = std::time::Instant::now();
+    let mut on: HashMap<(usize, usize), AMeasure> = HashMap::new();
+    for (ii, (iname, px, w, h)) in alpha_images.iter().enumerate() {
+        for &ci in &subset {
+            let cell = &plan.cells[ci];
+            let jxl = encode_layout(&cell.build(), px, *w, *h, PixelLayout::Rgba8);
+            let (ssim2, alpha_mae) = score_rgba(px, *w as usize, *h as usize, &jxl);
+            if let SweepVariant::Lossless(v) = &cell.variant {
+                let zero_invisible = v.zero_invisible;
+                match decode_rgba8(&jxl) {
+                    Some((dec, dw, dh)) => {
+                        let mut bad = (dw, dh) != (*w, *h);
+                        if !bad {
+                            for (s, d) in px.as_chunks::<4>().0.iter().zip(dec.as_chunks::<4>().0) {
+                                if s[3] != d[3]
+                                    || ((s[3] != 0 || !zero_invisible) && s[..3] != d[..3])
+                                {
+                                    bad = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if bad {
+                            hard_failures.push(format!(
+                                "LOSSLESS RGBA ROUNDTRIP MISMATCH: {} on {iname}{}",
+                                cell.id,
+                                if zero_invisible {
+                                    " (alpha plane / visible RGB)"
+                                } else {
+                                    ""
+                                }
+                            ));
+                        }
+                    }
+                    None => hard_failures.push(format!(
+                        "lossless RGBA decode failed: {} on {iname}",
+                        cell.id
+                    )),
+                }
+            }
+            on.insert(
+                (ci, ii),
+                AMeasure {
+                    bytes: jxl.len(),
+                    hash: fnv64(&jxl),
+                    ssim2,
+                    alpha_mae,
+                },
+            );
+        }
+        println!("  encoded {} alpha cells on {iname}", subset.len());
+    }
+    // Off-class: every alpha-step cell must be byte-identical to its
+    // default on Rgb8 input (no coupling into the colour path).
+    let mut off_checked = 0usize;
+    for (iname, img) in rgb_images {
+        let mut def: HashMap<String, u64> = HashMap::new();
+        for &ci in &off_cells {
+            let cell = &plan.cells[ci];
+            let jxl = encode(&cell.build(), img);
+            let (base, q) = split_q(&cell.id);
+            let key = if base.starts_with("vd-") {
+                format!("vd_{q}")
+            } else {
+                "mod".to_string()
+            };
+            let h = fnv64(&jxl);
+            if cell.deviations == 0 {
+                def.insert(key, h);
+            } else {
+                off_checked += 1;
+                match def.get(&key) {
+                    Some(&d) if d == h => {}
+                    Some(_) => hard_failures.push(format!(
+                        "CLASS COUPLING: {} changed Rgb8 (no-alpha) output on {iname}",
+                        cell.id
+                    )),
+                    None => hard_failures.push(format!(
+                        "alpha leg: default cell for {} not encoded before it on {iname}",
+                        cell.id
+                    )),
+                }
+            }
+        }
+    }
+    println!(
+        "alpha encode+score: {:.1}s ({off_checked} off-class identity checks)",
+        t0.elapsed().as_secs_f64()
+    );
+
+    // TSV.
+    let alpha_out = match out_path.strip_suffix(".tsv") {
+        Some(stem) => format!("{stem}_alpha.tsv"),
+        None => format!("{out_path}_alpha.tsv"),
+    };
+    let mut tsv = std::fs::File::create(&alpha_out).expect("alpha tsv create");
+    writeln!(
+        tsv,
+        "# sweep_validate (zenjxl) alpha leg: modes_full_alpha dev<=1 subset, q={Q_GRID:?}\n# git_commit: {}\n# images: {}\n# ssim2 is on the mid-grey composite; alpha_mae is the alpha-plane MAE (8-bit)",
+        std::env::var("GIT_COMMIT").unwrap_or_else(|_| "unknown".into()),
+        alpha_images
+            .iter()
+            .map(|(n, _, w, h)| format!("{n}({w}x{h})"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+    .unwrap();
+    writeln!(
+        tsv,
+        "image\tbase_id\tlabel\tdeviations\tq\tbytes\tssim2\talpha_mae\tfingerprint\tbytes_fnv"
+    )
+    .unwrap();
+    for (ii, (iname, _, _, _)) in alpha_images.iter().enumerate() {
+        for &ci in &subset {
+            let c = &plan.cells[ci];
+            let m = &on[&(ci, ii)];
+            let (base, q) = split_q(&c.id);
+            let (_, label) = parse_label(base);
+            writeln!(
+                tsv,
+                "{iname}\t{base}\t{label}\t{}\t{q}\t{}\t{:.3}\t{}\t{:016x}\t{:016x}",
+                c.deviations,
+                m.bytes,
+                m.ssim2,
+                m.alpha_mae
+                    .map_or_else(|| "nan".to_string(), |v| format!("{v:.4}")),
+                c.fingerprint,
+                m.hash
+            )
+            .unwrap();
+        }
+    }
+    println!("wrote {alpha_out}");
+
+    // On-class liveness per alpha label, plus the per-label table.
+    println!(
+        "\n{:<12} {:>5} {:>6} {:>9} {:>9} {:>9} {:>8} {:>9}",
+        "alpha label", "n", "diff%", "dsize%", "min", "max", "dssim2", "alpha_mae"
+    );
+    for label in ALPHA_LABELS {
+        let lossy = !label.starts_with("zeroinv");
+        let base = if lossy {
+            format!("{DEFAULT_LOSSY_BASE}-{label}")
+        } else {
+            format!("{DEFAULT_LOSSLESS_BASE}-{label}")
+        };
+        let (mut n, mut differing) = (0usize, 0usize);
+        let (mut dsum, mut dmin, mut dmax) = (0f64, f64::INFINITY, f64::NEG_INFINITY);
+        let (mut ssum, mut sn) = (0f64, 0usize);
+        let (mut msum, mut mn) = (0f64, 0usize);
+        for (ii, _) in alpha_images.iter().enumerate() {
+            let pairs: Vec<(String, String)> = if lossy {
+                Q_GRID
+                    .iter()
+                    .map(|q| (format!("{base}_q{q}"), format!("{DEFAULT_LOSSY_BASE}_q{q}")))
+                    .collect()
+            } else {
+                vec![(base.clone(), DEFAULT_LOSSLESS_BASE.to_string())]
+            };
+            for (id, def_id) in pairs {
+                let (Some(&ci), Some(&di)) = (resolve.get(&id), resolve.get(&def_id)) else {
+                    hard_failures.push(format!("alpha leg: {id} / {def_id} missing from plan"));
+                    continue;
+                };
+                let (m, b) = (&on[&(ci, ii)], &on[&(di, ii)]);
+                n += 1;
+                if m.hash != b.hash {
+                    differing += 1;
+                }
+                let d = (m.bytes as f64 - b.bytes as f64) / b.bytes as f64 * 100.0;
+                dsum += d;
+                dmin = dmin.min(d);
+                dmax = dmax.max(d);
+                if m.ssim2.is_finite() && b.ssim2.is_finite() {
+                    ssum += m.ssim2 - b.ssim2;
+                    sn += 1;
+                }
+                if let Some(mae) = m.alpha_mae {
+                    msum += mae;
+                    mn += 1;
+                }
+            }
+        }
+        println!(
+            "{:<12} {:>5} {:>5.0}% {:>8.2}% {:>8.2}% {:>8.2}% {:>+8.2} {:>9.4}",
+            label,
+            n,
+            differing as f64 / n.max(1) as f64 * 100.0,
+            dsum / n.max(1) as f64,
+            dmin,
+            dmax,
+            ssum / sn.max(1) as f64,
+            msum / mn.max(1) as f64
+        );
+        if n == 0 {
+            hard_failures.push(format!("alpha leg: no cells for alpha label {label}"));
+        } else if differing == 0 {
+            hard_failures.push(format!(
+                "INERT ALPHA STEP: {label} never changed output bytes across {n} on-class (image,q) pairs"
+            ));
+        }
+    }
+    // Documented directions (soft): squeeze beats no-squeeze at the same
+    // distance on non-constant alpha (upstream: −30..−56 %); keep_invisible
+    // costs bytes (noise under transparent pixels is coded).
+    let mean_on = |base: &str| -> f64 {
+        let mut sum = 0f64;
+        let mut n = 0usize;
+        for (ii, _) in alpha_images.iter().enumerate() {
+            for &q in &Q_GRID {
+                if let Some(&ci) = resolve.get(&format!("{base}_q{q}")) {
+                    sum += on[&(ci, ii)].bytes as f64;
+                    n += 1;
+                }
+            }
+        }
+        sum / n.max(1) as f64
+    };
+    for (what, a, b) in [
+        (
+            "alpha squeeze d2 beats no-squeeze d2 (mean bytes)",
+            mean_on(&format!("{DEFAULT_LOSSY_BASE}-asq2")),
+            mean_on(&format!("{DEFAULT_LOSSY_BASE}-ad2")),
+        ),
+        (
+            "alpha d10 beats d2 (mean bytes)",
+            mean_on(&format!("{DEFAULT_LOSSY_BASE}-ad10")),
+            mean_on(&format!("{DEFAULT_LOSSY_BASE}-ad2")),
+        ),
+        (
+            "keep_invisible costs bytes vs default (mean)",
+            mean_on(DEFAULT_LOSSY_BASE),
+            mean_on(&format!("{DEFAULT_LOSSY_BASE}-keepinv")),
+        ),
+    ] {
+        if a < b {
+            println!("PASS direction: {what} ({a:.0} < {b:.0})");
+        } else {
+            warnings.push(format!("alpha direction: {what} FAILED ({a:.0} >= {b:.0})"));
+        }
+    }
+    // Composite ssim2 floor at q85 on the on-class default stratum: the
+    // decode→composite path must not be corrupt.
+    for (ii, (iname, _, _, _)) in alpha_images.iter().enumerate() {
+        for &ci in &subset {
+            let c = &plan.cells[ci];
+            if c.quality != Some(85.0) {
+                continue;
+            }
+            let s = on[&(ci, ii)].ssim2;
+            if !s.is_finite() || s < 30.0 {
+                hard_failures.push(format!(
+                    "alpha ssim2 sanity: {} on {iname} scored {s:.1} at q85 (composite floor 30)",
+                    c.id
+                ));
+            }
+        }
+    }
+}
+
+/// The alpha-class step labels the leg gates (lossy `ad2`/`ad10`/`asq2`/
+/// `asq10`/`keepinv`, lossless `zeroinv`) — must match
+/// `SweepAxes::modes_full_alpha`'s dev-1 alpha strata (the test
+/// `alpha_axes_carry_no_neutral_spelling` pins the preset side).
+const ALPHA_LABELS: [&str; 6] = ["ad2", "ad10", "asq2", "asq10", "keepinv", "zeroinv"];
 
 fn decode_rgb8(jxl: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     let out = zenjxl::decode(jxl, None, &[zenpixels::PixelDescriptor::RGB8]).ok()?;
@@ -671,6 +1139,8 @@ fn main() {
         noise: false,
         faster_decoding: 0,
         ans: None,
+        alpha: AlphaCoding::Lossless,
+        keep_invisible: false,
     };
     let lossless_variant = |params: LosslessInternalParams| LosslessVariant {
         effort: 7,
@@ -680,6 +1150,7 @@ fn main() {
         group_size_shift: None,
         faster_decoding: 0,
         palette_colors: None,
+        zero_invisible: false,
     };
     let byte_pair = |what: &str,
                      a: &SweepVariant,
@@ -937,6 +1408,11 @@ fn main() {
             }
         }
     }
+
+    // ------------------------------------------------------------------
+    // Alpha leg (class-conditional axes).
+    // ------------------------------------------------------------------
+    alpha_leg(&images, &out_path, &mut hard_failures, &mut warnings);
 
     // ------------------------------------------------------------------
     // Verdict.

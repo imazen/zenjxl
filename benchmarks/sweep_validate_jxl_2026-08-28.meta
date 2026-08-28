@@ -1,0 +1,65 @@
+# sweep_validate_jxl_2026-08-28.tsv + sweep_validate_jxl_2026-08-28_alpha.tsv
+
+Harness: `examples/sweep_validate.rs` (release, `--features __expert`, threads pinned to 1,
+non-`parallel` build). Host: aarch64 macOS laptop (12-core), other build agents running —
+wall-clock numbers are not comparable across runs; bytes/hashes/ssim2 are.
+
+Command:
+```
+CODEC_CORPUS_DIR=$HOME/tmp/codec-corpus GIT_COMMIT=<sha> cargo run --release \
+  --example sweep_validate --features __expert -- --out benchmarks/sweep_validate_jxl_2026-08-28.tsv
+```
+The TSV header says `9226d3a+wip`: the run was made on the working tree that became
+the two 2026-08-28 commits (alpha axes + frac025 probe; the only later edits were docs
+and this meta). Corpus: `~/tmp/codec-corpus/CID22/CID22-512/validation` (first 3 PNGs
+sorted) + the synthetic set (noise512, complex512, checker512, screenshot512, tiny64).
+
+## What this run adds vs 2026-06-12
+
+- `screenshot512` corpus image + hard-checked `lean` (2026-08-27 change, first corpus run).
+- `frac025` lossless probe (`tree_sample_fraction = Some(0.25)`, `tree_max_samples_fixed = Some(0)`)
+  — #8 item 1 liveness run. VERDICT: **LIVE, and a size cost — keep it as a probe, not a
+  win candidate.** 7 of 8 images encode to different bytes (harness `diff% = 88%`); the one
+  tie is `tiny64`, byte-identical at 192 B (hash `9a7c02de93ed7808`) because a 64×64 image
+  has too few MA-tree sample rows for a stride-4 subsample to change the tree at all.
+  Mean size vs `mod-e7_def` **+2.57 %**, min +0.00 % (tiny64), max **+11.08 %**; `dssim2 +0.00`
+  (lossless everywhere, roundtrip-exact). Per image, bytes `mod-e7_def -> mod-e7_def-frac025`:
+  checker512 406 -> 451 (+11.08 %), screenshot512 48,305 -> 50,509 (+4.56 %),
+  noise512 684,059 -> 706,438 (+3.27 %), complex512 54,516 -> 54,998 (+0.88 %),
+  cid_1189261 305,108 -> 306,226 (+0.37 %), cid_1279330 212,163 -> 212,880 (+0.34 %),
+  cid_1025469 235,164 -> 235,287 (+0.05 %), tiny64 192 -> 192 (+0.00 %).
+  So `tree_sample_fraction` **is** consumed at e7 (the item-1 question), and cheaper tree
+  sampling buys encode time at a monotone byte cost on every image where it engages —
+  never a byte win on this corpus. It stays a `lossless_internal_probes` entry (a
+  speed/size tradeoff axis), and does not belong in a bytes-minimising preset.
+- Alpha leg (`modes_full_alpha` dev<=1 on sprite512 + cid_1025469_amask; off-class identity
+  on all 8 RGB images) — #8 item 5. VERDICT: **LIVE on-class, provably inert off-class.**
+  58 of 366 alpha cells are in the dev<=1 subset; all 58 encoded on each of the two RGBA
+  images, and the 38 alpha-step cells were re-run off-class for 248 identity checks across
+  the 8 RGB corpus images — every one byte-identical to its non-alpha spelling, which is
+  what earns the separate preset (these steps would trip the inert-step gate on `modes_full`).
+  On-class, all six labels differ on 100 % of their cells (mean size vs the same-q default,
+  n cells): ad2 -22.14 % (n=12, alpha_mae 0.1172), ad10 -34.04 % (n=12, 0.6615),
+  asq2 -55.40 % (n=12, 0.1257), asq10 -63.36 % (n=12, 0.2880),
+  keepinv +158.72 % (n=12, alpha_mae 0.0000 — it *adds* the invisible-pixel colour it
+  would otherwise discard), zeroinv -66.57 % (n=2 lossless, alpha_mae 0.0000, min -93.16 %).
+  Composite-ssim2 cost is small for the distance steps (dssim2 -0.02 / -0.32 / -0.06 / -0.71)
+  and the three documented directions hold as hard checks: squeeze-d2 < no-squeeze-d2
+  (13,082 < 22,054), d10 < d2 (18,872 < 22,054), keepinv costs bytes (28,047 < 72,118).
+
+## Verdict
+
+**ALL HARD CHECKS PASSED (2 warnings).** Both warnings are the harness's two documented
+*soft* checks (`examples/sweep_validate.rs` module docs) and are pre-existing, not new here:
+`lossy e9 compresses better than e5 (mean)` FAILED (35,639 >= 34,975) and
+`faster_decoding 4 costs bytes vs default (mean)` FAILED (38,944 >= 37,040) — both are
+mean-over-corpus tendencies that content can legitimately invert, which is exactly why they
+are soft. Every hard gate passed: inert-step detection over the full plan (including the
+now-hard-checked `lean`, first corpus run since the 2026-08-27 soft-exemption retirement),
+fingerprint alias contracts (7 alias-bytes pairs), distinctness controls (5 distinct + 2
+negative controls), lossless roundtrip exactness, q-monotonicity of the default stratum,
+and lossless e9 < e5 (202,158 < 247,161).
+
+Both #8 items answered: item 1 `frac025` is live (a byte cost, kept as a probe), item 5's
+alpha axes are live on-class and inert off-class, so `modes_full_alpha` is correctly a
+separate class-conditional preset rather than an addition to `modes_full`.

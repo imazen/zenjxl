@@ -57,6 +57,9 @@
 //! | progressive | enum | Single, QuantizedAcFullAc, DcVlfLfAc | `ProgressiveMode` variants |
 //! | faster_decoding | 0–4 | lossy: 0, 4; lossless: 0, 2 | libjxl tiers. Lossy tier 2 = patches-off only, which never fires on photo content (validated inert); lossless tier 2 forces small groups (live; byte-aliases `group_size_shift = 0`) |
 //! | noise | bool | off, on | `with_noise` synthesis |
+//! | alpha (lossy, CLASS-CONDITIONAL) | [`AlphaCoding`] | `modes_full_alpha` only: Lossless, Quantized(2), Quantized(10), Squeezed(2), Squeezed(10) | `with_alpha_distance` + `with_alpha_squeeze`. The alpha quantizer is `q = floor(0.025·d·bitdepth_correction·0.35·1.1·163.84)` (jxl-encoder `compute_extra_pixel_quantizer`, libjxl `enc_modular.cc:973-1027`), so at 8-bit alpha `d = 2 → q = 3`, `d = 10 → q = 15`, and **`d ≤ 1.0 → q = 1 ≡ Lossless`** (the neutral-value no-op spelling — measured byte-identical 2026-08-28; never curate it). Squeezed = the responsive=1 Haar path (upstream chunk 2/2.b/3 — engaged only with `d > 0` AND a non-constant alpha plane). Byte-inert without an alpha plane — see the class-conditional note below |
+//! | keep_invisible (lossy, CLASS-CONDITIONAL) | bool | `modes_full_alpha` only: false, true | `with_keep_invisible(true)` = skip the `SimplifyInvisible` pre-pass (libjxl `cparams.keep_invisible`). Live only with alpha = 0 pixels present; measured 2026-08-28: +50..+100 % bytes on a sprite with noisy RGB under its transparent background |
+//! | zero_invisible (lossless, CLASS-CONDITIONAL) | bool | `modes_full_alpha` only: false, true | `LosslessConfig::with_keep_invisible(false)` = zero RGB under alpha = 0 before the modular coder (decoded VISIBLE pixels stay exact — the harness's lossless gate compares alpha exactly and RGB only where alpha > 0 for this step). Measured 2026-08-28: −92..−94 % bytes on the noisy-under-transparent sprite, e5/e7/e9 |
 //! | k_info_loss_mul_base | > 0 | 1.3 probe | libjxl PR #4506 experimental value (reference = 1.2) |
 //! | k_ac_quant (SCALAR) | > 0, finite | 0.575, 0.65, 0.88, 1.0 | default 0.765 = libjxl `kAcQuant` (`enc_adaptive_quantization.cc`); 0.65 = the measured jxl-encoder#25 flip value (RULED OUT as a default, sanctioned as the learned-dispatch axis — follow-on C); the rest extend log-≈symmetrically (×0.75, ×1.15, ×1.31) so the aggressive (coarser-field) end is as dense as the refine end |
 //! | fine_grained_step (SCALAR) | 1–8 (`validation.rs` `FINE_GRAINED_STEP_RANGE`) | 1, 3 | per-effort default 2 (e1–9), 1 at e10 (`effort.rs`); jxl-encoder#43 chunk 2d sweep axis. **4 and 8 are structurally dead**: the only consumer is the non-aligned 32×32-class pass (`ac_strategy.rs` `step_by(step)` + `(cy\|cx) % 4 == 0` skip), so any multiple-of-4 step skips every position ≡ `non_aligned_eval=false`. 3 is the smallest live coarser-than-default value |
@@ -66,7 +69,7 @@
 //! | wp_num_param_sets | 0–5 | 5 probe | effort schedule (0 at e<8, 2 at e8, 5 at e9+) |
 //! | tree_max_buckets | ≥ 1 | 256 probe | effort schedule (32/48/64/96/128/256) |
 //! | tree_num_properties | 1–16 | 16 probe | effort schedule (3/4/5/7/10/16) |
-//! | tree_sample_fraction | 0–1 | (none as a fraction probe; `Some(0.0)` rides `maxsamples8192`) | effort schedule (0.15 at e≤4 → 0.65 at e9+). The override IS consumed upstream now (`LosslessConfig::effective_profile` applies it; jxl-encoder's `lossless_override_tree_sample_fraction` test proves 0.05 vs the e7 0.5 default changes bytes when `tree_max_samples_fixed = Some(0)` disables the fixed cap). A fraction probe at a value ≤ 0.5 is owed a `sweep_validate` liveness run on the corpus before it takes an axis slot (#8) |
+//! | tree_sample_fraction | 0–1 | 0.25 probe (`frac025`, with `tree_max_samples_fixed = Some(0)`); `Some(0.0)` also rides `maxsamples8192` | effort schedule (0.15 at e≤4, 0.25 at e5, 0.35 at e6, 0.5 at e7, 0.55 at e8, 0.65 at e9+; `effort.rs`). Consumed via `LosslessConfig::effective_profile`, but **stride-quantized** (`ceil(1/f)`): values in (0.5, 1.0) alias the e7 default, so a probe must sit at a distinct stride — 0.25 → 4 vs 2. Liveness run 2026-08-28 (`benchmarks/sweep_validate_jxl_2026-08-28.tsv`): bytes differ on 7/8 corpus images at e7, +2.57 % mean, +11.08 % max (fewer tree samples → weaker tree), byte-identical only on `tiny64` (below the 64K-px stride gate) |
 //! | tree_learn_seeds | ≥ 1 | 2 probe | RFC#45 chunk 5 (1 at e≤9, 2 at e10) |
 //! | lloyd_max_buckets | bool | on probe | EX-J5 Lloyd-Max bucket boundaries |
 //! | gather_dedup | bool | (none) | issue #41 Phase 2. Validated byte-identical to the sort-only path on the whole 2026-06-10 corpus (the post-sort dedup converges); stays in the fingerprint, not worth an axis slot |
@@ -80,8 +83,7 @@
 //! are rejected by the encoder today — jxl-encoder's
 //! `vardct/chroma_subsampling.rs` ships the conversion helpers, the
 //! pipeline wiring is still queued upstream; #47 itself is a closed PR),
-//! `alpha_distance` / `alpha_squeeze` / `simplify_invisible` (alpha
-//! axes need an alpha corpus), `photon_noise_iso` / `manual_noise_lut`
+//! `photon_noise_iso` / `manual_noise_lut`
 //! (parameterized noise needs its own grid), lossless `lz77` /
 //! `lz77_method` / `patches` (setters accepted but not consumed by the
 //! lossless multi-group path — jxl-encoder#69 item 1; `lz77` measured
@@ -98,6 +100,20 @@
 //! thread count at lossless e≤7 on `parallel` builds, and
 //! `sectioned_trees` is not hashed here; see `docs/VARIANT_GENERATION.md`
 //! §4 and `tests/parallel_determinism.rs`, open decision on #8).
+//!
+//! **Class-conditional axes** (playbook pattern 10, third lie): the
+//! alpha knobs — lossy [`LossyVariant::alpha`] / [`LossyVariant::
+//! keep_invisible`], lossless [`LosslessVariant::zero_invisible`] — are
+//! byte-inert on content without an alpha plane, so they are NOT in
+//! `modes_full` (an RGB corpus would trip the inert-step gate
+//! *correctly*). They live in the per-class preset
+//! [`SweepAxes::modes_full_alpha`], and the harness runs them on an
+//! RGBA leg with the two-sided check: every step must change bytes ON
+//! the alpha class AND leave Rgb8-layout output byte-identical
+//! (`tests/alpha_axes_class_conditional.rs` is the CI-sized gate;
+//! `examples/sweep_validate.rs` the corpus one). Every variant carries
+//! the fields (the fingerprint hashes them); only the curated axis
+//! membership is class-scoped.
 //!
 //! The plan is **per config-cell**; multiply by corpus images and size
 //! buckets with [`SweepPlan::encodes`] to get the real encode count.
@@ -202,6 +218,46 @@ impl NamedLosslessParams {
     }
 }
 
+/// How a lossy cell codes its alpha extra channel (class-conditional:
+/// every arm is byte-inert on input without an alpha plane, so these
+/// are axes of [`SweepAxes::modes_full_alpha`] only).
+///
+/// One enum rather than `alpha_distance: Option<f32>` + `alpha_squeeze:
+/// bool` so the planner cannot spell squeeze-without-a-distance (which
+/// upstream treats as not engaged — a guaranteed inert step). The
+/// distance is the libjxl `--alpha_distance` value; the effective
+/// integer quantizer at 8-bit alpha is `floor(1.577·d)` (module-docs
+/// table), so `Quantized(d ≤ 1.0)` is byte-identical to `Lossless` —
+/// a neutral-value no-op spelling that must never be curated
+/// (`alpha_axes_carry_no_neutral_spelling` pins the presets).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AlphaCoding {
+    /// Upstream default: lossless alpha (gradient predictor + LZ77 RLE;
+    /// `alpha_distance = None`, no squeeze).
+    Lossless,
+    /// `with_alpha_distance(Some(d))` on the no-squeeze (responsive=0)
+    /// integer pixel quantizer.
+    Quantized(f32),
+    /// `with_alpha_distance(Some(d)).with_alpha_squeeze(true)`: the
+    /// responsive=1 Haar-squeeze path with per-band quantizers. Upstream
+    /// skips the squeeze (falls back to [`Self::Quantized`] behaviour)
+    /// when the alpha plane is a single constant.
+    Squeezed(f32),
+}
+
+impl AlphaCoding {
+    /// `(alpha_distance, alpha_squeeze)` as the two upstream setters see
+    /// them.
+    #[must_use]
+    pub fn setters(self) -> (Option<f32>, bool) {
+        match self {
+            Self::Lossless => (None, false),
+            Self::Quantized(d) => (Some(d), false),
+            Self::Squeezed(d) => (Some(d), true),
+        }
+    }
+}
+
 /// One lossy (VarDCT) encode variant with its resolved distance.
 ///
 /// Only knobs that are live on the lossy path exist here; modular tree
@@ -233,6 +289,14 @@ pub struct LossyVariant {
     pub faster_decoding: u8,
     /// `None` = effort-profile default; `Some(false)` = prefix coding.
     pub ans: Option<bool>,
+    /// Alpha extra-channel coding (class-conditional — see
+    /// [`AlphaCoding`]). `Lossless` is the upstream default.
+    pub alpha: AlphaCoding,
+    /// `true` = `with_keep_invisible(true)`: skip the `SimplifyInvisible`
+    /// pre-pass that smears RGB under alpha = 0 pixels before XYB.
+    /// `false` (upstream default) runs it. Class-conditional: byte-inert
+    /// unless the input has an alpha plane with alpha = 0 pixels.
+    pub keep_invisible: bool,
 }
 
 impl LossyVariant {
@@ -241,6 +305,7 @@ impl LossyVariant {
     /// pinned knobs are applied after so they survive.
     #[must_use]
     pub fn build(&self) -> LossyConfig {
+        let (alpha_distance, alpha_squeeze) = self.alpha.setters();
         let mut c = LossyConfig::new(self.distance)
             .with_effort(self.effort)
             .with_mode(self.encoder_mode)
@@ -249,7 +314,10 @@ impl LossyVariant {
             .with_progressive(self.progressive)
             .with_noise(self.noise)
             .with_faster_decoding(self.faster_decoding)
-            .with_internal_params(self.internal.params.clone());
+            .with_internal_params(self.internal.params.clone())
+            .with_alpha_distance(alpha_distance)
+            .with_alpha_squeeze(alpha_squeeze)
+            .with_keep_invisible(self.keep_invisible);
         if let Some(g) = self.gaborish {
             c = c.with_gaborish(g);
         }
@@ -316,6 +384,16 @@ pub struct LosslessVariant {
     /// `dd6b393f`/screenshot-verified; only item 1, lz77, remained
     /// genuinely inert at the sweep level).
     pub palette_colors: Option<i64>,
+    /// `true` = `LosslessConfig::with_keep_invisible(false)`: zero the
+    /// RGB samples under alpha = 0 pixels before the modular coder.
+    /// Decoded VISIBLE pixels stay bit-exact; the invisible RGB is not
+    /// preserved (so a whole-buffer exactness check must mask to the
+    /// visible, alpha-nonzero pixels for this step). `false` (upstream
+    /// default) keeps every byte.
+    /// Class-conditional: byte-inert without alpha = 0 pixels; measured
+    /// 2026-08-28 at −92..−94 % bytes on a sprite with noisy RGB under
+    /// its transparent background (e5/e7/e9).
+    pub zero_invisible: bool,
 }
 
 impl LosslessVariant {
@@ -331,6 +409,7 @@ impl LosslessVariant {
             .with_faster_decoding(self.faster_decoding)
             .with_internal_params(self.internal.params.clone())
             .with_modular_palette_colors(self.palette_colors)
+            .with_keep_invisible(!self.zero_invisible)
     }
 }
 
@@ -403,6 +482,12 @@ pub struct LossyAxes {
     pub faster_decoding: Vec<u8>,
     /// ANS pin (None = effort default; Some(false) = prefix coding).
     pub ans: Vec<Option<bool>>,
+    /// Alpha coding (class-conditional; `vec![AlphaCoding::Lossless]`
+    /// everywhere except [`modes_full_alpha`](Self::modes_full_alpha)).
+    pub alpha: Vec<AlphaCoding>,
+    /// keep_invisible pin (class-conditional; `vec![false]` everywhere
+    /// except [`modes_full_alpha`](Self::modes_full_alpha)).
+    pub keep_invisible: Vec<bool>,
 }
 
 /// Concrete values per lossless categorical axis, most-important first.
@@ -431,6 +516,9 @@ pub struct LosslessAxes {
     /// `vec![None, Some(0)]` lets the picker choose per-image — see
     /// [`LosslessVariant::palette_colors`] for why this is a real axis.
     pub palette_colors: Vec<Option<i64>>,
+    /// zero_invisible pin (class-conditional; `vec![false]` everywhere
+    /// except [`modes_full_alpha`](Self::modes_full_alpha)).
+    pub zero_invisible: Vec<bool>,
 }
 
 /// The full axis bundle: either or both modes. `None` = that mode is
@@ -460,13 +548,44 @@ impl LossyAxes {
             noise: vec![false],
             faster_decoding: vec![0],
             ans: vec![None],
+            alpha: vec![AlphaCoding::Lossless],
+            keep_invisible: vec![false],
         }
+    }
+
+    /// The alpha-class preset (playbook pattern 10, class-conditional
+    /// knobs): [`rd_core`](Self::rd_core) plus the lossy alpha axes —
+    /// [`AlphaCoding`] `{Lossless, Quantized(2), Quantized(10),
+    /// Squeezed(2), Squeezed(10)}` and `keep_invisible {false, true}`.
+    /// Every other mode axis stays at its default: the alpha knobs act on
+    /// the modular alpha extra channel, orthogonal to the VarDCT colour
+    /// knobs `modes_full` sweeps, so the two presets compose by
+    /// intersection at the default stratum rather than by cross product.
+    ///
+    /// Curated distances: 2 → q = 3 and 10 → q = 15 at 8-bit alpha (the
+    /// sample yields in upstream's `with_alpha_distance` docs); 1.0 is
+    /// NOT here because it resolves to q = 1 ≡ lossless. Sweep this on an
+    /// RGBA corpus only — on Rgb8 input every step is byte-identical to
+    /// the default (that IS the off-class half of the two-sided check).
+    #[must_use]
+    pub fn modes_full_alpha() -> Self {
+        let mut axes = Self::rd_core();
+        axes.alpha.extend([
+            AlphaCoding::Quantized(2.0),
+            AlphaCoding::Quantized(10.0),
+            AlphaCoding::Squeezed(2.0),
+            AlphaCoding::Squeezed(10.0),
+        ]);
+        axes.keep_invisible.push(true);
+        axes
     }
 
     /// Every user-disableable lossy mode axis on top of
     /// [`rd_core`](Self::rd_core), plus the expert internal-params
     /// probes from the provenance table. Large — pair with
-    /// [`SweepBuilder::with_budget`].
+    /// [`SweepBuilder::with_budget`]. The class-conditional alpha axes
+    /// are NOT here (RGB corpora would report them inert, correctly) —
+    /// see [`modes_full_alpha`](Self::modes_full_alpha).
     #[must_use]
     pub fn modes_full() -> Self {
         let mut axes = Self::rd_core();
@@ -541,6 +660,8 @@ impl LossyAxes {
             noise: vec![false],
             faster_decoding: vec![0],
             ans: vec![None],
+            alpha: vec![AlphaCoding::Lossless],
+            keep_invisible: vec![false],
         }
     }
 
@@ -728,7 +849,18 @@ impl LosslessAxes {
             group_size_shifts: vec![None],
             faster_decoding: vec![0],
             palette_colors: vec![None],
+            zero_invisible: vec![false],
         }
+    }
+
+    /// The alpha-class preset: [`rd_core`](Self::rd_core) plus
+    /// `zero_invisible {false, true}` (see
+    /// [`LosslessVariant::zero_invisible`]). RGBA corpus only.
+    #[must_use]
+    pub fn modes_full_alpha() -> Self {
+        let mut axes = Self::rd_core();
+        axes.zero_invisible.push(true);
+        axes
     }
 
     /// Every *live* user-disableable lossless mode axis on top of
@@ -773,13 +905,14 @@ impl LosslessAxes {
             group_size_shifts: vec![None],
             faster_decoding: vec![0],
             palette_colors: vec![None],
+            zero_invisible: vec![false],
         }
     }
 
     /// Modular picker sweep: the FULL effort ladder `e1..=10` (as
     /// [`scalar_dense`](Self::scalar_dense) — `modes_full` only samples
     /// {1,3,5,7,9}) crossed with EVERY curated internal-params probe
-    /// (all 9 from [`lossless_internal_probes`] as of 2026-07-03 — see
+    /// (all 10 from [`lossless_internal_probes`] as of 2026-08-28 — see
     /// that function's doc comment for what's covered and, just as
     /// importantly, what's deliberately excluded and why), the
     /// predictor axis, AND the palette on/off toggle (added 2026-07-02
@@ -816,6 +949,7 @@ impl LosslessAxes {
             group_size_shifts: vec![None],
             faster_decoding: vec![0],
             palette_colors: vec![None, Some(0)],
+            zero_invisible: vec![false],
         }
     }
 }
@@ -834,8 +968,8 @@ impl LosslessAxes {
 ///   not consumed upstream (jxl-encoder#69) — a structurally-dead probe.
 ///   Upstream consumes it now (`effective_profile`), and 0.65 would
 ///   still alias the e7 default (values in (0.5, 1.0) stride-quantize to
-///   0.5); a re-added probe must sit at ≤ 0.5 with the fixed cap
-///   disabled and pass a harness liveness run first (#8).
+///   0.5); re-added 2026-08-28 as `frac025` (below) at a distinct
+///   stride, harness-verified live (7/8 images differ, +2.6 % mean bytes).
 /// - `gatherdedup`: byte-identical to the sort-only path on the whole
 ///   corpus (the post-`pre_quantize` sort dedup converges to the same
 ///   surviving set). It REMAINS in the fingerprint (upstream documents
@@ -909,6 +1043,17 @@ pub fn lossless_internal_probes() -> Vec<NamedLosslessParams> {
     p.forced_rct = Some(RctType::YCOCG);
     probes.push(NamedLosslessParams::new("ycocg", p));
 
+    // #8 item 1: the tree_sample_fraction probe re-added at a value on a
+    // DISTINCT stride (stride = ceil(1/f): 0.25 → 4 vs the e7 default
+    // 0.5 → 2) with the fixed sample cap disabled so the fraction is what
+    // governs the gather (the `maxsamples8192` probe covers the other
+    // arm, fraction 0 + fixed cap). 0.25 is the e5 schedule value
+    // (jxl-encoder `effort.rs`), not an invented step.
+    let mut p = LosslessInternalParams::default();
+    p.tree_sample_fraction = Some(0.25);
+    p.tree_max_samples_fixed = Some(0);
+    probes.push(NamedLosslessParams::new("frac025", p));
+
     probes
 }
 
@@ -930,6 +1075,19 @@ impl SweepAxes {
         Self {
             lossy: Some(LossyAxes::modes_full()),
             lossless: Some(LosslessAxes::modes_full()),
+        }
+    }
+
+    /// The alpha-class preset (both modes): the class-conditional alpha
+    /// axes over the RD core, everything else at production defaults.
+    /// Sweep on an RGBA corpus; on Rgb8 input every non-default cell is
+    /// byte-identical to the default stratum by construction (the
+    /// off-class half of the two-sided class check).
+    #[must_use]
+    pub fn modes_full_alpha() -> Self {
+        Self {
+            lossy: Some(LossyAxes::modes_full_alpha()),
+            lossless: Some(LosslessAxes::modes_full_alpha()),
         }
     }
 
@@ -1375,6 +1533,11 @@ fn collapse_one_axis(axes: &mut SweepAxes) -> Option<DroppedAxis> {
             .or_else(|| collapse("lossy.epf_levels", &mut lossy.epf_levels, 1))
             .or_else(|| collapse("lossy.gaborish", &mut lossy.gaborish, 1))
             .or_else(|| collapse("lossy.encoder_modes", &mut lossy.encoder_modes, 1))
+            // Alpha axes shed after the colour-side mode axes: in the
+            // alpha-class preset they are the point of the sweep, and in
+            // every other preset they are already single-valued.
+            .or_else(|| collapse("lossy.keep_invisible", &mut lossy.keep_invisible, 1))
+            .or_else(|| collapse("lossy.alpha", &mut lossy.alpha, 1))
             .or_else(|| {
                 collapse_named("lossy.internal", &mut lossy.internal, 1, |p| {
                     p.label.clone()
@@ -1401,6 +1564,7 @@ fn collapse_one_axis(axes: &mut SweepAxes) -> Option<DroppedAxis> {
             // on blocky/polygon content) — protect it ahead of predictors/
             // group_size/faster_decoding under budget pressure.
             .or_else(|| collapse("lossless.palette_colors", &mut ll.palette_colors, 1))
+            .or_else(|| collapse("lossless.zero_invisible", &mut ll.zero_invisible, 1))
             .or_else(|| collapse("lossless.efforts", &mut ll.efforts, 3));
         if d.is_some() {
             return d;
@@ -1478,6 +1642,14 @@ impl LossyVariant {
             Some(true) => s.push_str("-ans1"),
             Some(false) => s.push_str("-ans0"),
         }
+        match self.alpha {
+            AlphaCoding::Lossless => {}
+            AlphaCoding::Quantized(d) => s.push_str(&format!("-ad{d}")),
+            AlphaCoding::Squeezed(d) => s.push_str(&format!("-asq{d}")),
+        }
+        if self.keep_invisible {
+            s.push_str("-keepinv");
+        }
         s
     }
 }
@@ -1500,6 +1672,9 @@ impl LosslessVariant {
         }
         if let Some(pc) = self.palette_colors {
             s.push_str(&format!("-pal{pc}"));
+        }
+        if self.zero_invisible {
+            s.push_str("-zeroinv");
         }
         s
     }
@@ -1542,38 +1717,49 @@ fn cross(
                                             lossy.faster_decoding.iter().enumerate()
                                         {
                                             for (ai, &ans) in lossy.ans.iter().enumerate() {
-                                                let idxs = [ei, si, mi, ii, gi, pi, ri, ni, fi, ai];
-                                                let v = LossyVariant {
-                                                    distance: 1.0, // probe; per-cell below
-                                                    effort,
-                                                    strategy: strategy.clone(),
-                                                    encoder_mode,
-                                                    internal: internal.clone(),
-                                                    gaborish,
-                                                    epf_level,
-                                                    progressive,
-                                                    noise,
-                                                    faster_decoding,
-                                                    ans,
-                                                };
-                                                let base_id = v.base_id();
-                                                if v.build().validate().is_err() {
-                                                    invalid.push(base_id);
-                                                    continue;
+                                                for (li, &alpha) in lossy.alpha.iter().enumerate() {
+                                                    for (ki, &keep_invisible) in
+                                                        lossy.keep_invisible.iter().enumerate()
+                                                    {
+                                                        let idxs = [
+                                                            ei, si, mi, ii, gi, pi, ri, ni, fi, ai,
+                                                            li, ki,
+                                                        ];
+                                                        let v = LossyVariant {
+                                                            distance: 1.0, // probe; per-cell below
+                                                            effort,
+                                                            strategy: strategy.clone(),
+                                                            encoder_mode,
+                                                            internal: internal.clone(),
+                                                            gaborish,
+                                                            epf_level,
+                                                            progressive,
+                                                            noise,
+                                                            faster_decoding,
+                                                            ans,
+                                                            alpha,
+                                                            keep_invisible,
+                                                        };
+                                                        let base_id = v.base_id();
+                                                        if v.build().validate().is_err() {
+                                                            invalid.push(base_id);
+                                                            continue;
+                                                        }
+                                                        entries.push(Entry {
+                                                            variant: SweepVariant::Lossy(v),
+                                                            base_id,
+                                                            deviations: idxs
+                                                                .iter()
+                                                                .filter(|&&x| x != 0)
+                                                                .count()
+                                                                as u8,
+                                                            mode_rank: 0,
+                                                            idx_sum: idxs.iter().sum(),
+                                                            seq,
+                                                        });
+                                                        seq += 1;
+                                                    }
                                                 }
-                                                entries.push(Entry {
-                                                    variant: SweepVariant::Lossy(v),
-                                                    base_id,
-                                                    deviations: idxs
-                                                        .iter()
-                                                        .filter(|&&x| x != 0)
-                                                        .count()
-                                                        as u8,
-                                                    mode_rank: 0,
-                                                    idx_sum: idxs.iter().sum(),
-                                                    seq,
-                                                });
-                                                seq += 1;
                                             }
                                         }
                                     }
@@ -1594,30 +1780,36 @@ fn cross(
                         for (gi, &group_size_shift) in ll.group_size_shifts.iter().enumerate() {
                             for (fi, &faster_decoding) in ll.faster_decoding.iter().enumerate() {
                                 for (pci, &palette_colors) in ll.palette_colors.iter().enumerate() {
-                                    let idxs = [ei, mi, ii, pi, gi, fi, pci];
-                                    let v = LosslessVariant {
-                                        effort,
-                                        encoder_mode,
-                                        internal: internal.clone(),
-                                        predictor,
-                                        group_size_shift,
-                                        faster_decoding,
-                                        palette_colors,
-                                    };
-                                    let base_id = v.base_id();
-                                    if v.build().validate().is_err() {
-                                        invalid.push(base_id);
-                                        continue;
+                                    for (zi, &zero_invisible) in
+                                        ll.zero_invisible.iter().enumerate()
+                                    {
+                                        let idxs = [ei, mi, ii, pi, gi, fi, pci, zi];
+                                        let v = LosslessVariant {
+                                            effort,
+                                            encoder_mode,
+                                            internal: internal.clone(),
+                                            predictor,
+                                            group_size_shift,
+                                            faster_decoding,
+                                            palette_colors,
+                                            zero_invisible,
+                                        };
+                                        let base_id = v.base_id();
+                                        if v.build().validate().is_err() {
+                                            invalid.push(base_id);
+                                            continue;
+                                        }
+                                        entries.push(Entry {
+                                            variant: SweepVariant::Lossless(v),
+                                            base_id,
+                                            deviations: idxs.iter().filter(|&&x| x != 0).count()
+                                                as u8,
+                                            mode_rank: 1,
+                                            idx_sum: idxs.iter().sum(),
+                                            seq,
+                                        });
+                                        seq += 1;
                                     }
-                                    entries.push(Entry {
-                                        variant: SweepVariant::Lossless(v),
-                                        base_id,
-                                        deviations: idxs.iter().filter(|&&x| x != 0).count() as u8,
-                                        mode_rank: 1,
-                                        idx_sum: idxs.iter().sum(),
-                                        seq,
-                                    });
-                                    seq += 1;
                                 }
                             }
                         }
@@ -1726,7 +1918,9 @@ fn cross(
 /// strategy = libjxl | lean | zen | aggr        (custom#… errors)
 /// lossy flags    = exp | gab0 | gab1 | epf<i8> | prog1 | prog2
 ///                | noise | fd<u8> | ans0 | ans1
-/// lossless flags = exp | pred<u8> | gss<u8> | fd<u8>
+///                | ad<f32> | asq<f32> | keepinv          (alpha class)
+/// lossless flags = exp | pred<u8> | gss<u8> | fd<u8> | pal<i64>
+///                | zeroinv                               (alpha class)
 /// ```
 ///
 /// Internal-params labels resolve through the curated probe registries
@@ -1793,6 +1987,8 @@ pub fn variant_from_cell_id(id: &str) -> Result<SweepVariant, String> {
             noise: false,
             faster_decoding: 0,
             ans: None,
+            alpha: AlphaCoding::Lossless,
+            keep_invisible: false,
         };
         for f in parts {
             match f {
@@ -1804,6 +2000,21 @@ pub fn variant_from_cell_id(id: &str) -> Result<SweepVariant, String> {
                 "noise" => v.noise = true,
                 "ans1" => v.ans = Some(true),
                 "ans0" => v.ans = Some(false),
+                "keepinv" => v.keep_invisible = true,
+                f if f.starts_with("asq") => {
+                    v.alpha = AlphaCoding::Squeezed(
+                        f[3..]
+                            .parse()
+                            .map_err(|e| format!("bad asq in {id:?}: {e}"))?,
+                    );
+                }
+                f if f.starts_with("ad") => {
+                    v.alpha = AlphaCoding::Quantized(
+                        f[2..]
+                            .parse()
+                            .map_err(|e| format!("bad ad in {id:?}: {e}"))?,
+                    );
+                }
                 f if f.starts_with("epf") => {
                     v.epf_level = f[3..]
                         .parse()
@@ -1838,10 +2049,12 @@ pub fn variant_from_cell_id(id: &str) -> Result<SweepVariant, String> {
             group_size_shift: None,
             faster_decoding: 0,
             palette_colors: None,
+            zero_invisible: false,
         };
         for f in parts {
             match f {
                 "exp" => v.encoder_mode = EncoderMode::Experimental,
+                "zeroinv" => v.zero_invisible = true,
                 f if f.starts_with("pred") => {
                     v.predictor = Some(
                         f[4..]
@@ -2032,6 +2245,8 @@ pub fn fingerprint(variant: &SweepVariant) -> u64 {
             h.u8(u8::from(v.noise));
             h.u8(v.faster_decoding);
             h.opt_bool(v.ans);
+            hash_alpha(&mut h, v.alpha);
+            h.u8(u8::from(v.keep_invisible));
 
             let p = &v.internal.params;
             h.opt_bool(p.try_dct16);
@@ -2113,9 +2328,30 @@ pub fn fingerprint(variant: &SweepVariant) -> u64 {
             h.opt_u8(p.tree_learn_seeds);
             h.opt_bool(p.lloyd_max_buckets);
             h.opt_i64(v.palette_colors);
+            h.u8(u8::from(v.zero_invisible));
         }
     }
     h.0
+}
+
+/// Hash the alpha-coding spelling (tag + distance). The spelling, not a
+/// canonicalised "active form": the neutral band of `Quantized(d)` is
+/// `floor(1.577·d·bitdepth_correction) ≤ 1`, which depends on the alpha
+/// bit depth — image-side state a config-level fingerprint cannot see
+/// (8-bit: `d ≤ 1.0`; 16-bit: only `d < 0.0025`). Curation keeps the
+/// neutral spellings out instead (`alpha_axes_carry_no_neutral_spelling`).
+fn hash_alpha(h: &mut Fnv, alpha: AlphaCoding) {
+    match alpha {
+        AlphaCoding::Lossless => h.u8(0),
+        AlphaCoding::Quantized(d) => {
+            h.u8(1);
+            h.f32(d);
+        }
+        AlphaCoding::Squeezed(d) => {
+            h.u8(2);
+            h.f32(d);
+        }
+    }
 }
 
 /// ENCODE-dedup fingerprint: the BYTE-AFFECTING resolved encoder state, with
@@ -2214,6 +2450,11 @@ pub fn encode_fingerprint(variant: &SweepVariant) -> u64 {
             });
             h.u8(u8::from(v.noise));
             h.u8(v.faster_decoding);
+            // Alpha extra-channel coding: not in EffortProfile, byte-
+            // affecting on alpha input (measured 2026-08-28), hashed as
+            // spelled (see `hash_alpha`).
+            hash_alpha(&mut h, v.alpha);
+            h.u8(u8::from(v.keep_invisible));
         }
         SweepVariant::Lossless(v) => {
             h.u8(2);
@@ -2267,6 +2508,8 @@ pub fn encode_fingerprint(variant: &SweepVariant) -> u64 {
             // would wrongly treat a palette-off cell as byte-identical to
             // its palette-on counterpart and skip encoding it.
             h.opt_i64(v.palette_colors);
+            // −92..−94 % bytes on alpha-class input (2026-08-28) — hashed.
+            h.u8(u8::from(v.zero_invisible));
         }
     }
     h.0
@@ -2428,6 +2671,7 @@ mod tests {
                 group_size_shift: None,
                 faster_decoding: 0,
                 palette_colors: None,
+                zero_invisible: false,
             })
         };
         assert_eq!(compute_tier(&mk(3)), 3);
@@ -2477,6 +2721,8 @@ mod tests {
             noise: vec![false],
             faster_decoding: vec![0],
             ans: vec![None],
+            alpha: vec![AlphaCoding::Lossless],
+            keep_invisible: vec![false],
         }
     }
 
@@ -2704,6 +2950,8 @@ mod tests {
             noise: false,
             faster_decoding: 0,
             ans: None,
+            alpha: AlphaCoding::Lossless,
+            keep_invisible: false,
         };
         let mut fps = alloc::collections::BTreeMap::new();
         let mut ids = alloc::collections::BTreeSet::new();
@@ -2752,6 +3000,7 @@ mod tests {
             group_size_shift: None,
             faster_decoding: 0,
             palette_colors: None,
+            zero_invisible: false,
         };
         let mut b = a.clone();
         a.internal.params.gather_dedup = Some(true);
@@ -2783,12 +3032,164 @@ mod tests {
             group_size_shift: None,
             faster_decoding: 0,
             palette_colors: None,
+            zero_invisible: false,
         };
         let mut seeded = base.clone();
         seeded.internal.params.tree_learn_seeds = Some(1);
         assert_ne!(
             fingerprint(&SweepVariant::Lossless(base)),
             fingerprint(&SweepVariant::Lossless(seeded))
+        );
+    }
+
+    #[test]
+    fn alpha_axes_are_hashed_spelled_and_parsed() {
+        // Class-conditional axes (pattern 10): every arm must be a
+        // distinct identity AND compute fingerprint (they change bytes
+        // on alpha input — measured 2026-08-28), round-trip through the
+        // id grammar, and build the upstream setters they claim.
+        let base = |alpha: AlphaCoding, keep_invisible: bool| LossyVariant {
+            distance: 1.0,
+            effort: 7,
+            strategy: EncoderStrategy::Zenjxl,
+            encoder_mode: EncoderMode::Reference,
+            internal: NamedLossyParams::default_probe(),
+            gaborish: None,
+            epf_level: -1,
+            progressive: ProgressiveMode::Single,
+            noise: false,
+            faster_decoding: 0,
+            ans: None,
+            alpha,
+            keep_invisible,
+        };
+        let arms = [
+            (AlphaCoding::Lossless, false, "vd-e7_zen_def"),
+            (AlphaCoding::Quantized(2.0), false, "vd-e7_zen_def-ad2"),
+            (AlphaCoding::Quantized(10.0), false, "vd-e7_zen_def-ad10"),
+            (AlphaCoding::Squeezed(2.0), false, "vd-e7_zen_def-asq2"),
+            (AlphaCoding::Squeezed(10.0), false, "vd-e7_zen_def-asq10"),
+            (AlphaCoding::Lossless, true, "vd-e7_zen_def-keepinv"),
+            (
+                AlphaCoding::Squeezed(2.0),
+                true,
+                "vd-e7_zen_def-asq2-keepinv",
+            ),
+        ];
+        let mut fps = alloc::collections::BTreeSet::new();
+        let mut efps = alloc::collections::BTreeSet::new();
+        for (alpha, keep, id) in arms {
+            let v = base(alpha, keep);
+            assert_eq!(v.base_id(), id);
+            let cfg = v.build();
+            let (d, sq) = alpha.setters();
+            assert_eq!(cfg.alpha_distance(), d);
+            assert_eq!(cfg.alpha_squeeze(), sq);
+            assert!(fps.insert(fingerprint(&SweepVariant::Lossy(v.clone()))));
+            assert!(efps.insert(encode_fingerprint(&SweepVariant::Lossy(v.clone()))));
+            let parsed = match variant_from_cell_id(&format!("{id}_d1")).unwrap() {
+                SweepVariant::Lossy(p) => p,
+                SweepVariant::Lossless(_) => unreachable!(),
+            };
+            assert_eq!(parsed.alpha, alpha, "{id}");
+            assert_eq!(parsed.keep_invisible, keep, "{id}");
+            assert_eq!(
+                fingerprint(&SweepVariant::Lossy(parsed)),
+                fingerprint(&SweepVariant::Lossy(v)),
+                "parser/renderer drift for {id}"
+            );
+        }
+        // Lossless zero_invisible: same three properties.
+        let ll = |zero_invisible: bool| LosslessVariant {
+            effort: 7,
+            encoder_mode: EncoderMode::Reference,
+            internal: NamedLosslessParams::default_probe(),
+            predictor: None,
+            group_size_shift: None,
+            faster_decoding: 0,
+            palette_colors: None,
+            zero_invisible,
+        };
+        assert_eq!(ll(true).base_id(), "mod-e7_def-zeroinv");
+        assert_ne!(
+            fingerprint(&SweepVariant::Lossless(ll(false))),
+            fingerprint(&SweepVariant::Lossless(ll(true)))
+        );
+        assert_ne!(
+            encode_fingerprint(&SweepVariant::Lossless(ll(false))),
+            encode_fingerprint(&SweepVariant::Lossless(ll(true)))
+        );
+        match variant_from_cell_id("mod-e7_def-zeroinv").unwrap() {
+            SweepVariant::Lossless(p) => assert!(p.zero_invisible),
+            SweepVariant::Lossy(_) => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn alpha_axes_carry_no_neutral_spelling() {
+        // Pattern 10, first lie: `Quantized(d ≤ 1.0)` is q = 1 at 8-bit
+        // alpha — byte-identical to Lossless (measured 2026-08-28). No
+        // preset may curate it, and the alpha axes must be confined to
+        // the alpha-class preset (an RGB corpus would report them inert).
+        let quantizer_8bit = |d: f32| (0.025f32 * d * 0.35 * 1.1 * 163.84).floor() as u32;
+        assert_eq!(quantizer_8bit(1.0), 1, "d=1 is the neutral spelling");
+        assert_eq!(quantizer_8bit(2.0), 3);
+        assert_eq!(quantizer_8bit(10.0), 15);
+        let alpha = SweepAxes::modes_full_alpha();
+        let lossy = alpha.lossy.as_ref().unwrap();
+        assert_eq!(lossy.alpha[0], AlphaCoding::Lossless, "default first");
+        assert!(lossy.alpha.len() >= 5 && lossy.keep_invisible == vec![false, true]);
+        for a in &lossy.alpha {
+            if let AlphaCoding::Quantized(d) | AlphaCoding::Squeezed(d) = *a {
+                assert!(quantizer_8bit(d) > 1, "{a:?} is a neutral no-op spelling");
+            }
+        }
+        assert_eq!(
+            alpha.lossless.as_ref().unwrap().zero_invisible,
+            vec![false, true]
+        );
+        for preset in [
+            SweepAxes::rd_core(),
+            SweepAxes::modes_full(),
+            SweepAxes::scalar_dense(),
+            SweepAxes::lossy_dense(),
+            SweepAxes::modular_dense(),
+        ] {
+            if let Some(l) = &preset.lossy {
+                assert_eq!(l.alpha, vec![AlphaCoding::Lossless]);
+                assert_eq!(l.keep_invisible, vec![false]);
+            }
+            if let Some(ll) = &preset.lossless {
+                assert_eq!(ll.zero_invisible, vec![false]);
+            }
+        }
+        // The alpha preset's dev≤1 strata are exactly the alpha steps
+        // over the RD core, and every id is grammar-total.
+        let plan = SweepBuilder::new(alpha, QualityGrid::ExplicitQuality(vec![85.0])).plan();
+        let dev1: Vec<&str> = plan
+            .cells
+            .iter()
+            .filter(|c| c.deviations == 1)
+            .map(|c| c.id.as_str())
+            .collect();
+        for want in [
+            "vd-e7_zen_def-ad2_q85",
+            "vd-e7_zen_def-ad10_q85",
+            "vd-e7_zen_def-asq2_q85",
+            "vd-e7_zen_def-asq10_q85",
+            "vd-e7_zen_def-keepinv_q85",
+            "mod-e7_def-zeroinv",
+        ] {
+            assert!(dev1.contains(&want), "{want} missing from {dev1:?}");
+        }
+        for c in &plan.cells {
+            let v = variant_from_cell_id(&c.id).unwrap();
+            assert_eq!(fingerprint(&v), c.fingerprint, "{}", c.id);
+        }
+        assert!(
+            plan.invalid_skipped.is_empty(),
+            "{:?}",
+            plan.invalid_skipped
         );
     }
 

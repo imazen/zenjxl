@@ -157,7 +157,13 @@ Open decision on #8.
 
 Everything else output-plausible IS hashed, including every
 search-bound knob (`tree_learn_seeds`, `ans_histogram_strategy_vardct`,
-`gather_dedup`, `use_streaming_dedup`, `lloyd_max_buckets`).
+`gather_dedup`, `use_streaming_dedup`, `lloyd_max_buckets`) and, since
+2026-08-28, the class-conditional alpha knobs (`LossyVariant::alpha` /
+`keep_invisible`, `LosslessVariant::zero_invisible`) — hashed as
+spelled, in both `fingerprint` and `encode_fingerprint`. They are
+byte-inert on input without an alpha plane, which is a property of the
+*image*, not the config; a config-level fingerprint must not merge them
+(the compute-dedup would otherwise skip a real encode on RGBA input).
 
 Under-merge, and how it is handled today: an override equal to its
 effort-derived default (`nb_rcts_to_try: Some(7)` at e7) does not merge
@@ -213,8 +219,8 @@ point on it (measured: differs at all six, e.g. q10 24,052 B vs
 2026-06-12 run had in fact already seen `lean` differ on `complex512`
 q30 and `tiny64` q10/30/50, so the exemption never fired.)
 
-Results land in `benchmarks/sweep_validate_jxl_<date>.tsv` with the
-git commit in the header. Re-run the harness whenever the axes, the
+Results land in `benchmarks/sweep_validate_jxl_<date>.tsv` (and the
+alpha leg's `…_alpha.tsv`) with the git commit in the header. Re-run the harness whenever the axes, the
 fingerprint, or jxl-encoder's internal-params surface changes — the
 `*InternalParams` structs are `#[non_exhaustive]`, so new upstream
 knobs do NOT automatically enter the fingerprint; the harness re-run
@@ -343,6 +349,58 @@ Adopting the canonical playbook patterns 17–18 (see
   silent caps); it composes with the budget ladder. This is the lever
   for "go dense on e4/e5 while staying off the minutes-per-MP e10 tier."
 
+### Alpha axes — the class-conditional preset (2026-08-28)
+
+Playbook pattern 10's third lie, adopted: the alpha knobs are byte-inert
+without an alpha plane, so they get a per-class preset and a per-class
+harness leg with the two-sided check, instead of a slot in `modes_full`.
+
+- **Type first** (`sweep::AlphaCoding`): `Lossless` (upstream default)
+  / `Quantized(d)` (`with_alpha_distance(Some(d))`, the responsive=0
+  integer quantizer) / `Squeezed(d)` (`+ with_alpha_squeeze(true)`, the
+  responsive=1 Haar path). One enum so the planner cannot spell
+  squeeze-without-a-distance, which upstream treats as not engaged.
+  Plus `LossyVariant::keep_invisible` (skip the `SimplifyInvisible`
+  smear under alpha = 0) and `LosslessVariant::zero_invisible`
+  (`LosslessConfig::with_keep_invisible(false)`: zero RGB under
+  alpha = 0 before the modular coder). Id tokens `-ad<d>`, `-asq<d>`,
+  `-keepinv`, `-zeroinv`.
+- **Curated steps** (`modes_full_alpha`): `ad2`, `ad10`, `asq2`,
+  `asq10`, `keepinv`; lossless `zeroinv`. The quantizer is
+  `floor(0.025·d·bitdepth_correction·0.35·1.1·163.84)` (jxl-encoder
+  `compute_extra_pixel_quantizer`), so at 8-bit alpha 2 → q 3, 10 → q 15,
+  and **`d ≤ 1.0 → q 1 ≡ lossless`** — the neutral-value no-op spelling
+  (pattern 10, first lie), measured byte-identical and pinned by encode
+  in the gate test; `alpha_axes_carry_no_neutral_spelling` keeps it out
+  of every preset. Note the neutral band is bit-depth dependent (16-bit
+  alpha: `d < 0.0025`), so the fingerprint hashes the spelling rather
+  than a canonical "active form".
+- **Measured liveness** (512² sprite: noisy RGB under a transparent
+  background, three discs with 24-px soft alpha edges; lossy e7, vs the
+  default at the same q): `ad2` −25 %, `ad10` −43 %, `asq2` −66 %,
+  `asq10` −77 %, `keepinv` +100 % (q10) / +476 % (q85 — the smeared
+  noise is what the default was saving); lossless e7 `zeroinv` −93 %
+  (400,605 → 27,397 B; e5/e9 −91/−94 %). Every one of those steps is
+  byte-identical to the default when the same pixels are fed as `Rgb8`
+  — the off-class half. Upstream's `with_alpha_squeeze` rustdoc still
+  says "chunk-1 framework … `Error::NotImplemented`"; the code has
+  shipped the single-alpha squeeze pipeline (chunk 2/2.b/3 in
+  `vardct/encoder.rs`), which is what the −66/−77 % measures. That doc
+  is stale upstream (jxl-encoder), not fixed from here.
+- **Alpha-aware metric + exactness**: the harness scores ssim2 on the
+  mid-grey composite of source and decode (what a viewer shows) and
+  reports the alpha-plane MAE; the lossless gate compares alpha exactly
+  everywhere and RGB exactly where alpha > 0 for `zeroinv` (it
+  deliberately discards RGB no decoder displays), everywhere otherwise.
+  The default lossless RGBA cell round-trips bit-exact.
+- **Gates**: `tests/alpha_axes_class_conditional.rs` (CI, `encode` +
+  `decode` + `__expert`) is the two-sided check on the sprite; the
+  harness's alpha leg (`examples/sweep_validate.rs`, results in
+  `benchmarks/sweep_validate_jxl_<date>_alpha.tsv`) runs the dev≤1
+  subset of `modes_full_alpha` on the sprite + a CID22 photo under a
+  soft radial alpha mask, and the off-class identity check on every RGB
+  corpus image.
+
 ## Known limits / open items
 
 - **jxl-encoder#68 is fully fixed upstream** (`5eefe5f7` + `329f207d`,
@@ -358,9 +416,12 @@ Adopting the canonical playbook patterns 17–18 (see
   (byte-changing, hash-lock-rebake work) and `patches` is still not
   consumed on the lossless path; those two rejoin the axes when wired.
   `tree_sample_fraction` is consumed upstream but stride-quantized —
-  a probe must sit at a value ≤ 0.5 (distinct strides) with
-  `tree_max_samples_fixed = Some(0)`, and is owed a harness liveness
-  run before it takes an axis slot.
+  the `frac025` probe (0.25 = the e5 schedule value, stride 4 vs the
+  e7 default's 2, with `tree_max_samples_fixed = Some(0)`) took its
+  axis slot on 2026-08-28 after the harness liveness run: bytes differ
+  on 7/8 corpus images (+2.57 % mean, +11.08 % max; `tiny64` is below
+  the stride gate). Item 1 of #8 is therefore closed except for
+  lz77/patches, which stay upstream-blocked.
 - **No exact trials shipped.** The audit above identifies the
   candidates (entropy-stage knobs, lossless candidate sets); the
   adoption order in the zenjpeg doc puts trials last for exactly the
@@ -384,9 +445,11 @@ Adopting the canonical playbook patterns 17–18 (see
   itself has not been re-run since (no codec corpus on the machine that
   made the change); the next `just sweep-validate` run is what confirms
   the whole-corpus `lean` row and lands the dated TSV.
-- **Alpha axes** (`alpha_distance`, `alpha_squeeze`,
-  `simplify_invisible`) need an RGBA corpus and an alpha-aware metric
-  before they can be swept honestly.
+- **Alpha axes — shipped 2026-08-28** as the class-conditional preset
+  `SweepAxes::modes_full_alpha` with the harness's RGBA leg and
+  `tests/alpha_axes_class_conditional.rs` (see "Alpha axes" below). Not
+  in `modes_full`, by design: on an RGB corpus they are inert, and the
+  inert-step gate would be right to say so.
 - The harness pins threads=1 and runs the non-`parallel` build. The
   `parallel`-build determinism pass now exists
   (`tests/parallel_determinism.rs`, run under `--features parallel` /
