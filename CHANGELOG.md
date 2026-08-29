@@ -35,6 +35,39 @@ patch and the `zencodec-testkit` dev-dep are tag-pinned (not a bare rev) to
 `v0.1.26` so they can't drift apart. `ErrorCategory` was never published
 prior to 0.1.26, so adopting the reshape was not a break of released API.
 
+### Notes (unreleased)
+- **2026-08-29 — third-party dependency pass: nothing to change here, and that
+  is the finding.** Recorded because a "no diff" result is indistinguishable
+  from "never audited" when someone sweeps the workspace later — a coverage
+  audit did in fact flag this crate as having had no dependency pass.
+  (The predecessor commit `682b266` carries this message but landed **empty**;
+  this commit is the content it should have had.)
+  - **The lockfile step is a structural no-op.** `Cargo.lock` is gitignored
+    here, so there is no committed lock to refresh — CI resolves fresh on every
+    run and is therefore *already* continuously on the newest versions the
+    manifests allow. Locally, 20 third-party packages moved under the existing
+    requirements (`thiserror` 2.0.19 → 2.0.20, `imgref` 1.12.2 → 1.12.3,
+    `zerocopy` 0.8.55 → 0.8.56, `wide` 1.6.0 → 1.7.0, `flate2` 1.1.9 → 1.1.10
+    plus `zlib-rs` 0.6.7, `safe_arch` 1.1.0 → 1.2.0, `wasm-bindgen` 0.2.126 →
+    0.2.127, `zune-core` 0.5.1 → 0.5.3, and the `bytemuck_derive` / `crc32fast` /
+    `either` / `log` / `num-integer` / `syn` set). The `zenanalyze` git rev was
+    deliberately held — a third-party pass does not move the zen-family graph.
+  - **No third-party requirement is blocking anything.** The only dependency
+    behind its latest release is `ultrahdr-core` 0.5.0 → 0.6.0, which is
+    zen-family and therefore out of scope here.
+  - **Verified at those versions** on aarch64-apple-darwin: `cargo test`
+    (default features) green; `cargo test --all-features` **155 passed /
+    0 failed**, including all four `parallel_determinism` byte-identity gates —
+    `lossy_e7`, `lossy_e9`, `lossless_e9_default` and
+    `lossless_explicit_sectioned_modes` (3 sectioned modes × efforts 5/7/9 ×
+    thread counts 1/2/4/ambient; 18.5 min in a debug build);
+    `clippy --all-features --all-targets -D warnings` clean; `cargo fmt --all
+    --check` clean.
+  - `[patch.crates-io]` redirects `jxl-encoder`, `zenjxl-decoder` and `zenjpeg`
+    to the sibling checkouts, so those gates exercised the **local** sibling
+    sources rather than the registry releases — which is also what CI does, as
+    it clones the patched siblings.
+
 ### Changed (unreleased)
 - **`zencodec` / `zenpixels` / `zenpixels-convert` requirements now span the
   published minor and the next one**: `zencodec >=0.1.26, <0.3.0`, `zenpixels
