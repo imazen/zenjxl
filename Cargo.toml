@@ -31,13 +31,13 @@ enough = "0.4.3"
 # with zencodec-testkit's internal (path-based) zencodec dependency -- see
 # that patch entry's comment for why the patch remains despite 0.1.26 being
 # published.
-zencodec = { version = "0.1.26" }
-zenpixels = { version = "0.2.11", default-features = false, features = ["rgb"] }
+zencodec = { version = ">=0.1.26, <0.3.0" }
+zenpixels = { version = ">=0.2.11, <0.4.0", default-features = false, features = ["rgb"] }
 # Pixel-exact orientation baking (`orient::apply_orientation`) for the zencodec
 # decode adapter's OrientationHint handling. Only the `orient` module is used
 # (no CMS / ICC db); `rgb` matches the zenpixels feature already enabled above.
 # Pulled in by the `zencodec` feature (the adapter is gated there), like zenwebp.
-zenpixels-convert = { version = "0.2.13", default-features = false, features = ["rgb"], optional = true }
+zenpixels-convert = { version = ">=0.2.13, <0.4.0", default-features = false, features = ["rgb"], optional = true }
 linear-srgb = { version = "0.6.7"}
 jxl = { version = "0.4.0", package = "zenjxl-decoder", optional = true }
 jxl-encoder = { version = "0.3.2", optional = true, default-features = false, features = ["std", "convenience"] }

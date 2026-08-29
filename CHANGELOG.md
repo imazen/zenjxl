@@ -35,6 +35,25 @@ patch and the `zencodec-testkit` dev-dep are tag-pinned (not a bare rev) to
 `v0.1.26` so they can't drift apart. `ErrorCategory` was never published
 prior to 0.1.26, so adopting the reshape was not a break of released API.
 
+### Changed (unreleased)
+- **`zencodec` / `zenpixels` / `zenpixels-convert` requirements now span the
+  published minor and the next one**: `zencodec >=0.1.26, <0.3.0`, `zenpixels
+  >=0.2.11, <0.4.0`, `zenpixels-convert >=0.2.13, <0.4.0`. For a `0.x` crate
+  Cargo treats the minor as the major, so the plain `"0.1.26"` meant `^0.1.26` =
+  `>=0.1.26, <0.2.0` and a `zencodec 0.2.0` release would have been invisible
+  until this manifest was hand-edited. Floors are unchanged and nothing newer is
+  published, so resolution is identical (`cargo metadata --all-features`: one
+  `zencodec 0.1.26`, one `zenpixels`, one `zenpixels-convert`). The two
+  `imazen/zencodec` **git** entries (the `[patch.crates-io]` tag pin and the
+  `zencodec-testkit` dev-dep) are deliberately untouched — a patch replaces the
+  source regardless of the requirement, and a git dep carries no registry
+  requirement to widen. **Note for whoever retires them:** their comments still
+  say `zencodec-testkit` is unpublished; it published as `0.1.0`, so both the
+  git dev-dep and the tag pin that exists to unify with it can become plain
+  registry deps (`zencodec-testkit >=0.1.0, <0.3.0`) whenever someone verifies
+  the swap. The standing current-plus-next rule is documented in the zencodec
+  repo's `CLAUDE.md`.
+
 ### Fixed (unreleased)
 - **Pushes to `main` now cancel their superseded CI runs.** `ci.yml` keyed its
   concurrency group on `${{ github.head_ref || github.run_id }}`.
