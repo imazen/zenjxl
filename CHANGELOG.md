@@ -36,6 +36,26 @@ patch and the `zencodec-testkit` dev-dep are tag-pinned (not a bare rev) to
 prior to 0.1.26, so adopting the reshape was not a break of released API.
 
 ### Fixed (unreleased)
+- **Dev builds resolve again: carry the sibling's `zenanalyze` patch.** zenjpeg
+  `147444fe` (2026-08-29) moved its `zenanalyze` dep from a git rev pin to a
+  crates.io VERSION (`0.2.0`) resolved through a `[patch.crates-io]` at the
+  *zenjpeg* workspace root, so one patch unifies the `zenanalyze_api::Offer`
+  contract type across every codec instead of a dozen rev pins. A dependency's
+  patch table is invisible when that dependency is consumed as a path dep, so
+  zenjxl's path-patched `zenjpeg` started asking crates.io for
+  `zenanalyze ^0.2.0` — which does not and will not exist there (registry
+  latest is `0.1.0`; the crate's 0.1.x API freeze means the `hdr` shape only
+  ever lives on git). Every zenjxl build, and every CI job, failed at
+  resolution with *"candidate versions found which didn't match: 0.1.0"*.
+  Fixed by carrying the same patch here —
+  `zenanalyze = { git = "https://github.com/imazen/zenanalyze" }` — the exact
+  shape and reason as the existing `butteraugli` patch entry. Git rather than
+  a path because CI clones jxl-encoder / butteraugli / zenjpeg /
+  zenjxl-decoder but not zenanalyze, and a git source needs no checkout.
+  `zenanalyze-api` is deliberately left unpatched: it is optional in zenjpeg
+  (reached only via `target-zq` / `__picker-research`, neither enabled here)
+  and absent from this graph, so patching it would emit a
+  "patch was not used in the crate graph" warning on every build.
 - **Encode memory limits now flow into jxl-encoder's honest pre-flight**
   (codec memory plan wave 4). The zencodec adapter previously (a) checked
   `ResourceLimits::max_memory_bytes` against the `w*h*bpp` INPUT buffer — a

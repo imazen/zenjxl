@@ -86,6 +86,34 @@ zenjxl-decoder = { path = "../zenjxl-decoder/zenjxl-decoder" }
 # patch. Drop this once butteraugli 0.9.4 publishes. Note the extra `../`:
 # the butteraugli repo lives beside `~/work/zen`, not inside it.
 butteraugli = { path = "../../butteraugli/butteraugli" }
+# zenanalyze 0.2.0 / zenanalyze-api 0.1.1 are on imazen/zenanalyze's main but
+# NOT on crates.io (registry latest: zenanalyze 0.1.0), and zenanalyze 0.2.x is
+# not planned for the registry — the crate's 0.1.x API freeze means the `hdr` +
+# retired-`composites` shape only ever exists on git. zenjpeg 147444fe
+# (2026-08-29) moved its own `zenanalyze`/`zenanalyze-api` deps to registry
+# VERSIONS resolved through a [patch.crates-io] at the zenjpeg workspace root —
+# deliberately, so one patch unifies the contract types instead of a dozen rev
+# pins. That root patch is invisible from here (a dependency's [patch] table is
+# ignored when the dependency is consumed as a path dep), so the path-patched
+# `zenjpeg` above arrived asking the registry for `zenanalyze ^0.2.0` and every
+# zenjxl build failed at resolution with "candidate versions found which didn't
+# match: 0.1.0". Same shape, same reason, as the butteraugli patch above: carry
+# the sibling's patch ourselves. Git (not path) deliberately — CI clones
+# jxl-encoder / butteraugli / zenjpeg / zenjxl-decoder but NOT zenanalyze, and a
+# git source needs no checkout. Drop this if zenanalyze ever publishes 0.2.x.
+#
+# zenanalyze-api is deliberately NOT patched here: it is optional in zenjpeg
+# (`dep:zenanalyze-api`, reached only through `target-zq`/`__picker-research`,
+# neither of which zenjxl enables) and absent from this graph — patching it
+# lands a `[[patch.unused]]` entry in Cargo.lock and a "patch was not used in
+# the crate graph" warning on every single build, including CI. If a future
+# zenjxl feature ever pulls the contract crate in, add the matching
+# `zenanalyze-api = { git = "https://github.com/imazen/zenanalyze" }` line in
+# the same commit: Cargo unifies by source, so a git `zenanalyze` beside a
+# registry `zenanalyze-api` would put two incompatible `zenanalyze_api::Offer`
+# types in one graph — the exact breakage zenjpeg 147444fe went registry+patch
+# to end.
+zenanalyze = { git = "https://github.com/imazen/zenanalyze" }
 
 [dev-dependencies]
 # Raw-frame capture + lazy symbolization for the per-site allocation profiler
