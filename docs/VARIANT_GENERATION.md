@@ -419,9 +419,19 @@ harness leg with the two-sided check, instead of a slot in `modes_full`.
   the `frac025` probe (0.25 = the e5 schedule value, stride 4 vs the
   e7 default's 2, with `tree_max_samples_fixed = Some(0)`) took its
   axis slot on 2026-08-28 after the harness liveness run: bytes differ
-  on 7/8 corpus images (+2.57 % mean, +11.08 % max; `tiny64` is below
-  the stride gate). Item 1 of #8 is therefore closed except for
-  lz77/patches, which stay upstream-blocked.
+  on 7/8 corpus images (+2.57 % mean, +11.08 % max). The one tie,
+  `tiny64`, is a sample-budget floor rather than a dead knob:
+  `max_tree_samples_from_profile` (upstream
+  `modular/tree_learn.rs:2955`) is `((pixels * f) as usize).max(65_536)`,
+  so at 4,096 px both 0.5 and 0.25 clamp to the same 65,536 samples and
+  learn the identical tree — no image under ~131 kpx (~262 kpx at 0.25)
+  can register this axis at all, which is worth knowing before reading a
+  small-image null result as evidence a fraction knob is inert. Note the
+  sign: every image where it does engage gets BIGGER (fewer samples →
+  weaker tree), so `frac025` is a speed/size probe, not a byte-win
+  candidate, and stays out of any bytes-minimising preset. Item 1 of #8
+  is therefore closed except for lz77/patches, which stay
+  upstream-blocked.
 - **No exact trials shipped.** The audit above identifies the
   candidates (entropy-stage knobs, lossless candidate sets); the
   adoption order in the zenjpeg doc puts trials last for exactly the

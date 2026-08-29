@@ -7,12 +7,12 @@
 //! cells**:
 //!
 //! 1. **Mode discrimination** — lossy (VarDCT) and lossless (modular)
-//!    knobs live on separate variant types ([`LossyVariant`] /
-//!    [`LosslessVariant`]). A lossless cell cannot spell a butteraugli
+//!    knobs live on separate variant types ([`LossyVariant`](crate::sweep::LossyVariant) /
+//!    [`LosslessVariant`](crate::sweep::LosslessVariant)). A lossless cell cannot spell a butteraugli
 //!    distance or a noise flag; a lossy cell cannot spell an MA-tree
 //!    knob. Combinations rejected by jxl-encoder's `validate()` are
 //!    skipped and *reported*, never silently lost.
-//! 2. **Quality grid** — [`QualityGrid`] encodes the sweep discipline
+//! 2. **Quality grid** — [`QualityGrid`](crate::sweep::QualityGrid) encodes the sweep discipline
 //!    (step-5 floor for benchmarks, denser grids for training; low-q
 //!    coverage never thinned preferentially). The grid applies to lossy
 //!    cells only: lossless strata have no quality axis, which is the
@@ -24,18 +24,18 @@
 //!    step-5 grid points collapse into one encode with merged ids
 //!    recorded as aliases. Quality-vs-distance spellings of the same
 //!    resolved distance merge the same way.
-//! 4. **Budget ladder** — [`SweepBuilder::with_budget`] reduces
+//! 4. **Budget ladder** — [`SweepBuilder::with_budget`](crate::sweep::SweepBuilder::with_budget) reduces
 //!    deterministically: collapse low-tier mode axes one value at a
-//!    time (recorded in [`SweepPlan::dropped`]), then coarsen the
+//!    time (recorded in [`SweepPlan::dropped`](crate::sweep::SweepPlan::dropped)), then coarsen the
 //!    quality grid uniformly (endpoints kept, never below 11 points),
-//!    and finally set [`SweepPlan::over_budget`] rather than sample
+//!    and finally set [`SweepPlan::over_budget`](crate::sweep::SweepPlan::over_budget) rather than sample
 //!    silently. No silent caps.
 //! 5. **Queue ordering** — cells are emitted main-effects-first: the
 //!    all-defaults stratum of each mode, then every single-deviation
 //!    stratum, then interaction combos, milder deviations first.
 //!    Quality runs ascending *within* each lossy stratum so an RD curve
 //!    is never half-measured; a truncated queue is safe at any stratum
-//!    boundary. [`SweepCell::deviations`] exposes the priority class.
+//!    boundary. [`SweepCell::deviations`](crate::sweep::SweepCell::deviations) exposes the priority class.
 //!
 //! # Scalar bounds and step provenance
 //!
@@ -57,7 +57,7 @@
 //! | progressive | enum | Single, QuantizedAcFullAc, DcVlfLfAc | `ProgressiveMode` variants |
 //! | faster_decoding | 0–4 | lossy: 0, 4; lossless: 0, 2 | libjxl tiers. Lossy tier 2 = patches-off only, which never fires on photo content (validated inert); lossless tier 2 forces small groups (live; byte-aliases `group_size_shift = 0`) |
 //! | noise | bool | off, on | `with_noise` synthesis |
-//! | alpha (lossy, CLASS-CONDITIONAL) | [`AlphaCoding`] | `modes_full_alpha` only: Lossless, Quantized(2), Quantized(10), Squeezed(2), Squeezed(10) | `with_alpha_distance` + `with_alpha_squeeze`. The alpha quantizer is `q = floor(0.025·d·bitdepth_correction·0.35·1.1·163.84)` (jxl-encoder `compute_extra_pixel_quantizer`, libjxl `enc_modular.cc:973-1027`), so at 8-bit alpha `d = 2 → q = 3`, `d = 10 → q = 15`, and **`d ≤ 1.0 → q = 1 ≡ Lossless`** (the neutral-value no-op spelling — measured byte-identical 2026-08-28; never curate it). Squeezed = the responsive=1 Haar path (upstream chunk 2/2.b/3 — engaged only with `d > 0` AND a non-constant alpha plane). Byte-inert without an alpha plane — see the class-conditional note below |
+//! | alpha (lossy, CLASS-CONDITIONAL) | [`AlphaCoding`](crate::sweep::AlphaCoding) | `modes_full_alpha` only: Lossless, Quantized(2), Quantized(10), Squeezed(2), Squeezed(10) | `with_alpha_distance` + `with_alpha_squeeze`. The alpha quantizer is `q = floor(0.025·d·bitdepth_correction·0.35·1.1·163.84)` (jxl-encoder `compute_extra_pixel_quantizer`, libjxl `enc_modular.cc:973-1027`), so at 8-bit alpha `d = 2 → q = 3`, `d = 10 → q = 15`, and **`d ≤ 1.0 → q = 1 ≡ Lossless`** (the neutral-value no-op spelling — measured byte-identical 2026-08-28; never curate it). Squeezed = the responsive=1 Haar path (upstream chunk 2/2.b/3 — engaged only with `d > 0` AND a non-constant alpha plane). Byte-inert without an alpha plane — see the class-conditional note below |
 //! | keep_invisible (lossy, CLASS-CONDITIONAL) | bool | `modes_full_alpha` only: false, true | `with_keep_invisible(true)` = skip the `SimplifyInvisible` pre-pass (libjxl `cparams.keep_invisible`). Live only with alpha = 0 pixels present; measured 2026-08-28: +50..+100 % bytes on a sprite with noisy RGB under its transparent background |
 //! | zero_invisible (lossless, CLASS-CONDITIONAL) | bool | `modes_full_alpha` only: false, true | `LosslessConfig::with_keep_invisible(false)` = zero RGB under alpha = 0 before the modular coder (decoded VISIBLE pixels stay exact — the harness's lossless gate compares alpha exactly and RGB only where alpha > 0 for this step). Measured 2026-08-28: −92..−94 % bytes on the noisy-under-transparent sprite, e5/e7/e9 |
 //! | k_info_loss_mul_base | > 0 | 1.3 probe | libjxl PR #4506 experimental value (reference = 1.2) |
@@ -69,13 +69,13 @@
 //! | wp_num_param_sets | 0–5 | 5 probe | effort schedule (0 at e<8, 2 at e8, 5 at e9+) |
 //! | tree_max_buckets | ≥ 1 | 256 probe | effort schedule (32/48/64/96/128/256) |
 //! | tree_num_properties | 1–16 | 16 probe | effort schedule (3/4/5/7/10/16) |
-//! | tree_sample_fraction | 0–1 | 0.25 probe (`frac025`, with `tree_max_samples_fixed = Some(0)`); `Some(0.0)` also rides `maxsamples8192` | effort schedule (0.15 at e≤4, 0.25 at e5, 0.35 at e6, 0.5 at e7, 0.55 at e8, 0.65 at e9+; `effort.rs`). Consumed via `LosslessConfig::effective_profile`, but **stride-quantized** (`ceil(1/f)`): values in (0.5, 1.0) alias the e7 default, so a probe must sit at a distinct stride — 0.25 → 4 vs 2. Liveness run 2026-08-28 (`benchmarks/sweep_validate_jxl_2026-08-28.tsv`): bytes differ on 7/8 corpus images at e7, +2.57 % mean, +11.08 % max (fewer tree samples → weaker tree), byte-identical only on `tiny64` (below the 64K-px stride gate) |
+//! | tree_sample_fraction | 0–1 | 0.25 probe (`frac025`, with `tree_max_samples_fixed = Some(0)`); `Some(0.0)` also rides `maxsamples8192` | effort schedule (0.15 at e≤4, 0.25 at e5, 0.35 at e6, 0.5 at e7, 0.55 at e8, 0.65 at e9+; `effort.rs`). Consumed via `LosslessConfig::effective_profile`, but **stride-quantized** (`ceil(1/f)`): values in (0.5, 1.0) alias the e7 default, so a probe must sit at a distinct stride — 0.25 → 4 vs 2. Liveness run 2026-08-28 (`benchmarks/sweep_validate_jxl_2026-08-28.tsv`): bytes differ on 7/8 corpus images at e7, +2.57 % mean, +11.08 % max (fewer tree samples → weaker tree), byte-identical only on `tiny64`, because `max_tree_samples_from_profile` (upstream `modular/tree_learn.rs:2955`) is `((pixels * f) as usize).max(65_536)` — at 4,096 px both 0.5 and 0.25 clamp to the same 65,536-sample floor, so no image under ~131 kpx (~262 kpx at 0.25) can register this axis at all |
 //! | tree_learn_seeds | ≥ 1 | 2 probe | RFC#45 chunk 5 (1 at e≤9, 2 at e10) |
 //! | lloyd_max_buckets | bool | on probe | EX-J5 Lloyd-Max bucket boundaries |
 //! | gather_dedup | bool | (none) | issue #41 Phase 2. Validated byte-identical to the sort-only path on the whole 2026-06-10 corpus (the post-sort dedup converges); stays in the fingerprint, not worth an axis slot |
 //! | modular predictor | 0–15 | 6 (Weighted), 0 (Zero) | upstream predictor ids; None = per-effort selection. 5 (Gradient) and 15 byte-alias the e7 default (validated 2026-06-10) — the #67 trap |
 //! | group_size_shift | 0–3 | 0 (128), 3 (1024) | `128 << shift`; None = 256 default |
-//! | quality | 0–100 | grids in [`QualityGrid`] | step-5 floor / training-dense per the sweep discipline |
+//! | quality | 0–100 | grids in [`QualityGrid`](crate::sweep::QualityGrid) | step-5 floor / training-dense per the sweep discipline |
 //!
 //! **Deliberately excluded axes** (no silent caps — exclusions are
 //! documented): `resampling` (changes output geometry class; belongs in
@@ -89,7 +89,7 @@
 //! lossless multi-group path — jxl-encoder#69 item 1; `lz77` measured
 //! inert on the 2026-06-10 corpus; they return as axes when plumbed —
 //! NOTE `palette_colors` is NOT on this list any more: it became a real
-//! [`LosslessAxes::palette_colors`] axis on 2026-07-02), `splines` / `force_strategy`
+//! [`LosslessAxes::palette_colors`](crate::sweep::LosslessAxes::palette_colors) axis on 2026-07-02), `splines` / `force_strategy`
 //! / `max_strategy_size` (debug knobs), `lossy_palette` (changes pixels
 //! under a "lossless" config; needs metric-class treatment),
 //! `butteraugli_iters` and the perceptual-loop family (feature-gated,
@@ -102,12 +102,14 @@
 //! §4 and `tests/parallel_determinism.rs`, open decision on #8).
 //!
 //! **Class-conditional axes** (playbook pattern 10, third lie): the
-//! alpha knobs — lossy [`LossyVariant::alpha`] / [`LossyVariant::
-//! keep_invisible`], lossless [`LosslessVariant::zero_invisible`] — are
+//! alpha knobs — lossy [`LossyVariant::alpha`](crate::sweep::LossyVariant::alpha)
+//! / [`LossyVariant::keep_invisible`](crate::sweep::LossyVariant::keep_invisible),
+//! lossless
+//! [`LosslessVariant::zero_invisible`](crate::sweep::LosslessVariant::zero_invisible) — are
 //! byte-inert on content without an alpha plane, so they are NOT in
 //! `modes_full` (an RGB corpus would trip the inert-step gate
 //! *correctly*). They live in the per-class preset
-//! [`SweepAxes::modes_full_alpha`], and the harness runs them on an
+//! [`SweepAxes::modes_full_alpha`](crate::sweep::SweepAxes::modes_full_alpha), and the harness runs them on an
 //! RGBA leg with the two-sided check: every step must change bytes ON
 //! the alpha class AND leave Rgb8-layout output byte-identical
 //! (`tests/alpha_axes_class_conditional.rs` is the CI-sized gate;
@@ -116,7 +118,7 @@
 //! membership is class-scoped.
 //!
 //! The plan is **per config-cell**; multiply by corpus images and size
-//! buckets with [`SweepPlan::encodes`] to get the real encode count.
+//! buckets with [`SweepPlan::encodes`](crate::sweep::SweepPlan::encodes) to get the real encode count.
 //! Persistence of encoded bytes/diffmaps and metric scoring belong to
 //! the harness consuming this plan, not here.
 

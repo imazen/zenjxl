@@ -20,8 +20,14 @@ sorted) + the synthetic set (noise512, complex512, checker512, screenshot512, ti
 - `frac025` lossless probe (`tree_sample_fraction = Some(0.25)`, `tree_max_samples_fixed = Some(0)`)
   — #8 item 1 liveness run. VERDICT: **LIVE, and a size cost — keep it as a probe, not a
   win candidate.** 7 of 8 images encode to different bytes (harness `diff% = 88%`); the one
-  tie is `tiny64`, byte-identical at 192 B (hash `9a7c02de93ed7808`) because a 64×64 image
-  has too few MA-tree sample rows for a stride-4 subsample to change the tree at all.
+  tie is `tiny64`, byte-identical at 192 B (hash `9a7c02de93ed7808`), and the mechanism is
+  a hard floor upstream, not noise: `max_tree_samples_from_profile`
+  (jxl-encoder `src/modular/tree_learn.rs:2955`) computes
+  `((total_pixels as f32 * tree_sample_fraction) as usize).max(65_536)`, so at 64×64 =
+  4,096 px both the e7 default (0.5 → 2,048) and the probe (0.25 → 1,024) clamp to the
+  same 65,536-sample budget and learn the identical tree. Any image below ~131 kpx at the
+  default (~262 kpx at 0.25) is inside that floor and cannot register this axis at all —
+  worth knowing before reading a "no effect" result on a small test image as a dead knob.
   Mean size vs `mod-e7_def` **+2.57 %**, min +0.00 % (tiny64), max **+11.08 %**; `dssim2 +0.00`
   (lossless everywhere, roundtrip-exact). Per image, bytes `mod-e7_def -> mod-e7_def-frac025`:
   checker512 406 -> 451 (+11.08 %), screenshot512 48,305 -> 50,509 (+4.56 %),
