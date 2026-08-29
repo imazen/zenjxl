@@ -14,6 +14,16 @@ the two 2026-08-28 commits (alpha axes + frac025 probe; the only later edits wer
 and this meta). Corpus: `~/tmp/codec-corpus/CID22/CID22-512/validation` (first 3 PNGs
 sorted) + the synthetic set (noise512, complex512, checker512, screenshot512, tiny64).
 
+**Reproduced 2026-08-29 on the landed tree** (`fa30fc20`), and the provenance claim above
+is therefore measured, not asserted: re-running the command against the pushed commits and
+diffing past the `git_commit` header line gives output IDENTICAL to both committed TSVs —
+all 1,752 main rows and 116 alpha rows, every `bytes`, `fingerprint`, `bytes_fnv`, `ssim2`
+and `alpha_mae` byte-for-byte, with the same `ALL HARD CHECKS PASSED (2 warnings)` verdict.
+That is a stronger statement than "the numbers are current": it means the encode path is
+deterministic across separate processes and across the debug/release profile split, so any
+future diff against this file is a real change in the encoder or the axes, never run-to-run
+noise. Re-run it the same way (any `--out` path) before trusting a differing result.
+
 ## What this run adds vs 2026-06-12
 
 - `screenshot512` corpus image + hard-checked `lean` (2026-08-27 change, first corpus run).
