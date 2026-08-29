@@ -36,6 +36,15 @@ patch and the `zencodec-testkit` dev-dep are tag-pinned (not a bare rev) to
 prior to 0.1.26, so adopting the reshape was not a break of released API.
 
 ### Fixed (unreleased)
+- **Pushes to `main` now cancel their superseded CI runs.** `ci.yml` keyed its
+  concurrency group on `${{ github.head_ref || github.run_id }}`.
+  `github.head_ref` is populated only for `pull_request` events, so on a push it
+  was empty and the group fell through to `github.run_id` — unique per run, so no
+  two pushes ever shared a group and `cancel-in-progress` could never fire. Every
+  push started a full matrix that ran to completion even when several commits
+  landed seconds apart. Now keyed on `${{ github.ref }}`, which is set for both
+  event types, so PR cancellation is unchanged and consecutive pushes supersede
+  each other.
 - **Dev builds resolve again: carry the sibling's `zenanalyze` patch.** zenjpeg
   `147444fe` (2026-08-29) moved its `zenanalyze` dep from a git rev pin to a
   crates.io VERSION (`0.2.0`) resolved through a `[patch.crates-io]` at the
