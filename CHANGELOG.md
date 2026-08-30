@@ -151,6 +151,19 @@ prior to 0.1.26, so adopting the reshape was not a break of released API.
   (63339aa)
 
 ### Fixed (build)
+- **`extract_features_multiaxis` builds on any checkout: absolute-path
+  `zenanalyze` dep replaced** (#19). The dev/sweep feature extractor pinned
+  `zenanalyze` by an absolute `/home/lilith/...` path — resolvable on exactly
+  one machine, unbuildable anywhere else (another user, another OS, CI). Now
+  a registry version (`0.2.0`) supplied through the tool's OWN
+  `[patch.crates-io]` git entry, the same shape and reason as the root
+  manifest's entry (1ae0da79): git rather than a sibling path so no checkout
+  is required. The tool is a standalone workspace — now explicit via an empty
+  `[workspace]` table, like `apidoc/` — so the root's patch table cannot serve
+  it; a patch table only applies at the workspace root of the resolving
+  workspace. Direct `zenanalyze` (vs the `-api` contract crate) stays:
+  legitimate for dev tooling outside the product graph under the 2026-08-28
+  sole-contract rule.
 - **CI Clippy/Format jobs green again on stable 1.98**: clippy 1.98's new
   `chunks_exact_to_as_chunks` lint (23 sites across `src/decode.rs`,
   `src/codec.rs`, `src/jpeg_lossy.rs`, two tests and the sweep harness —

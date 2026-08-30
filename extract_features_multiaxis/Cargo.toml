@@ -4,11 +4,32 @@ version = "0.0.0"
 edition = "2024"
 publish = false
 
+# Standalone workspace, like ../apidoc: the parent manifest is a single package
+# (not a workspace), so this tree inherits NOTHING from it — including its
+# [patch.crates-io] table. The empty table below makes that explicit (cargo can
+# never attach this package to an outer workspace, which would silently ignore
+# the patch entry this manifest carries).
+[workspace]
+
 [dependencies]
 # `api` enables zenanalyze's zenanalyze-api feature contract — the extractor emits
 # qualified `name@hex8` column headers via versioning::feature_qualified_names().
-zenanalyze = { path = "/home/lilith/work/zen/zenanalyze", features = ["experimental", "hdr", "api"] }
+# Direct zenanalyze (not just the contract crate) is legitimate here: this is a
+# dev/sweep feature extractor outside the product graph (2026-08-28 rule; see
+# imazen/zenanalyze docs/sole-contract.md and issue #19).
+zenanalyze = { version = "0.2.0", features = ["experimental", "hdr", "api"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+[patch.crates-io]
+# zenanalyze 0.2.0 is on imazen/zenanalyze's main but NOT on crates.io (registry
+# latest: 0.1.0); this patch is what supplies the 0.2.x line the version
+# requirement above asks for. Git rather than a ../../zenanalyze path so the
+# tool builds on any checkout without the sibling — same fix, same reason, as
+# the root manifest's entry (1ae0da79) and ultrahdr's. The root's patch cannot
+# serve this tree (separate workspace — see the [workspace] note above), so the
+# entry is duplicated here deliberately. Drop it if zenanalyze ever publishes
+# 0.2.x.
+zenanalyze = { git = "https://github.com/imazen/zenanalyze" }
 
 [profile.release]
 opt-level = 3
