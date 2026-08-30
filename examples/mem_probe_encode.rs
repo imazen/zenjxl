@@ -1,7 +1,7 @@
 //! Encode peak-memory probe — one JXL encode, report measured peak RSS (VmHWM).
 //!
 //! The ENCODE counterpart for the heaptrack / VmHWM sweep that calibrates the
-//! encode peak-memory model (`jxl_encoder::heuristics::estimate_encode`, which
+//! encode peak-memory model (`jxl_encoder::estimate_encode`, which
 //! zenjxl's `JxlEncoderConfig::estimate_encode_resources` delegates to —
 //! `src/codec.rs:581`) against measured reality, *per effort level*. JXL
 //! encode memory is EFFORT-dependent: lossy gains a buttloop band at e>=8,
@@ -797,15 +797,7 @@ fn main() {
         let pixels = (w as u64) * (h as u64);
         // estimate_encode_threaded folds in the per-thread term so the EST
         // line is comparable to the measured marginal at the same thread count.
-        match jxl_encoder::heuristics::estimate_encode_threaded(
-            w,
-            h,
-            3,
-            false,
-            is_lossless,
-            effort,
-            threads,
-        ) {
+        match jxl_encoder::estimate_encode_threaded(w, h, 3, false, is_lossless, effort, threads) {
             Some(e) => {
                 println!(
                     "{w}\t{h}\t{pixels}\t{mode}\t{effort}\t{quality}\t{threads}\tEST\tmin_kb={}\ttyp_kb={}\tmax_kb={}\ttyp_bpp={:.2}\tmax_bpp={:.2}\ttime_ms={:.1}",

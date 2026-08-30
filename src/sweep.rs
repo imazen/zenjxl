@@ -129,8 +129,8 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
+use jxl_encoder::ANSHistogramStrategy;
 use jxl_encoder::api::EncoderStrategy;
-use jxl_encoder::entropy_coding::ans::ANSHistogramStrategy;
 use jxl_encoder::{
     EncoderMode, EntropyMulTable, LosslessConfig, LosslessInternalParams, LossyConfig,
     LossyInternalParams, ProgressiveMode, RctType, calibrated_jxl_quality, quality_to_distance,

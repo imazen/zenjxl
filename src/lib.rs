@@ -92,9 +92,11 @@ pub use codec::{JxlAnimationFrameDecoder, JxlDecodeJob, JxlDecoder, JxlDecoderCo
 #[cfg(feature = "encode")]
 pub use jxl_encoder::{LosslessConfig, LossyConfig, PixelLayout};
 
-// Re-export container utilities and quality mapping.
+// Re-export container utilities and quality mapping. jxl-encoder 0.4.0 (#76)
+// privatized its `container` module; these three survive as crate-root
+// compat re-exports there (doc-hidden upstream, supported surface here).
 #[cfg(feature = "encode")]
-pub use jxl_encoder::container::{append_gain_map_box, is_bare_codestream, is_container};
+pub use jxl_encoder::{append_gain_map_box, is_bare_codestream, is_container};
 #[cfg(feature = "encode")]
 pub use jxl_encoder::{calibrated_jxl_quality, quality_to_distance};
 
@@ -131,6 +133,8 @@ pub use jxl_encoder::{calibrated_jxl_quality, quality_to_distance};
 #[cfg(feature = "__expert")]
 pub use jxl_encoder::{EncoderMode, EntropyMulTable, LosslessInternalParams, LossyInternalParams};
 
+#[cfg(all(feature = "encode", feature = "__expert"))]
+pub use jxl_encoder::ANSHistogramStrategy;
 /// Additional `__expert` re-exports used by [`sweep`]'s public axis
 /// types: the W44-128 improvements bundle ([`EncoderStrategy`]), the
 /// progressive-rendering selector ([`ProgressiveMode`]), the RCT
@@ -141,8 +145,6 @@ pub use jxl_encoder::{EncoderMode, EntropyMulTable, LosslessInternalParams, Loss
 /// behind `__expert`: no semver guarantees.
 #[cfg(all(feature = "encode", feature = "__expert"))]
 pub use jxl_encoder::api::EncoderStrategy;
-#[cfg(all(feature = "encode", feature = "__expert"))]
-pub use jxl_encoder::entropy_coding::ans::ANSHistogramStrategy;
 #[cfg(all(feature = "encode", feature = "__expert"))]
 pub use jxl_encoder::{ProgressiveMode, RctType};
 

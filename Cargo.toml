@@ -40,7 +40,7 @@ zenpixels = { version = ">=0.2.11, <0.4.0", default-features = false, features =
 zenpixels-convert = { version = ">=0.2.13, <0.4.0", default-features = false, features = ["rgb"], optional = true }
 linear-srgb = { version = "0.6.7"}
 jxl = { version = "0.4.0", package = "zenjxl-decoder", optional = true }
-jxl-encoder = { version = "0.3.2", optional = true, default-features = false, features = ["std", "convenience"] }
+jxl-encoder = { version = "0.4.0", optional = true, default-features = false, features = ["std", "convenience"] }
 # Source-quality detection (header-only) for the inferred-target floor predictor
 # (jpeg-lossy feature). detect is ungated in zenjpeg; default-features = false
 # keeps it light (no decoder pulled). 0.9.0 tracks the sibling's defensive
@@ -54,10 +54,15 @@ zenjpeg = { version = "0.9.0", optional = true, default-features = false }
 ultrahdr-core = { version = "0.5.0", optional = true, default-features = false, features = ["std"] }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 
-# jxl-encoder 0.3.2 (lossy-JPEG recompression API) + zenjpeg 0.8.7 (libjxl-parity
-# magetypes fix) are not yet on crates.io; path-patch to the local siblings, the
-# same pattern jxl-encoder itself uses for its unpublished zenjpeg dep. Remove
-# these once the chain is published (see docs/zenjxl_jpeg_lossy/README.md in the
+# jxl-encoder 0.4.0 (release-prepped on the sibling's main, 2026-08-30 — the
+# lossy-JPEG recompression API landed in the unpublished 0.3.2 line before it)
+# + zenjpeg 0.8.7 (libjxl-parity magetypes fix) are not yet on crates.io;
+# path-patch to the local siblings, the same pattern jxl-encoder itself uses
+# for its unpublished zenjpeg dep. The `jxl-encoder` requirement above MUST
+# track the sibling's version: when the sibling bumped 0.3.2 -> 0.4.0 the
+# patch stopped matching `^0.3.2` and every resolve (local + CI) failed —
+# the same trap the zenjxl-decoder comment below describes. Remove these once
+# the chain is published (see docs/zenjxl_jpeg_lossy/README.md in the
 # jxl-encoder repo). Builds require the sibling checkouts.
 # (zenjxl-decoder 0.3.10 — with the mode-aware orientation API the adapter
 # consumes — is now published, so its path-patch was dropped and the `jxl`
@@ -136,7 +141,7 @@ almost-enough = "0.4.4"
 archmage = { version = "0.9.19", features = ["std"] }
 # Builds the jhgm gain-map fixture for tests/gain_map_render.rs
 # (GainMapBundle + append_gain_map_bundle).
-jxl-encoder = { version = "0.3.2", default-features = false, features = [
+jxl-encoder = { version = "0.4.0", default-features = false, features = [
     "std",
     "convenience",
     "hdr-gainmap",

@@ -151,6 +151,36 @@ prior to 0.1.26, so adopting the reshape was not a break of released API.
   (63339aa)
 
 ### Fixed (build)
+- **Every resolve unbroken after the sibling's jxl-encoder 0.4.0 release-prep
+  bump.** jxl-encoder's main moved its workspace version 0.3.2 → 0.4.0
+  (0.4.0 is release-prepped there, not yet tagged or published), so zenjxl's
+  `[patch.crates-io]` path entry started supplying a 0.4.0 that no longer
+  matched the declared `^0.3.2` requirement — the patch went unused and every
+  `cargo metadata`/build, local and CI alike, failed with *"failed to select
+  a version for the requirement `jxl-encoder = ^0.3.2`"* (crates.io tops out
+  at 0.3.1; 0.3.2 never shipped). Requirement bumped to `0.4.0` in both
+  `[dependencies]` and `[dev-dependencies]`; the path patch stays until
+  0.4.0 actually publishes. Same requirement-must-track-the-patched-sibling
+  trap as the zenjxl-decoder `^0.3.10` → `0.4.0` entry below.
+
+  jxl-encoder 0.4.0's API restructure (its #76) also privatized the
+  `container`, `heuristics`, `headers`, and `entropy_coding::ans` module
+  paths this crate consumed; all uses now go through the crate-root
+  re-exports that replaced them (`append_gain_map_box` /
+  `is_bare_codestream` / `is_container`, `estimate_encode` /
+  `estimate_encode_threaded` / `encode_threading_info`, the color-encoding
+  enums, `ANSHistogramStrategy`) — same items, new paths, no behaviour
+  change. The one casualty with no surviving public path is
+  `container::wrap_in_container`, which the animation encode adapter used
+  to attach EXIF/XMP boxes (the still/streaming paths thread metadata
+  through `EncodeRequest`, but the upstream animation API has no metadata
+  support): its level-5/no-jbrd/no-jumbf arm is now ported locally as
+  `wrap_codestream_with_metadata` in `src/codec.rs` — the box sequence is
+  fixed by ISO/IEC 18181-2, pinned byte-for-byte by the new
+  `wrap_codestream_with_metadata_layout` test, and validated end-to-end by
+  the new `animation_exif_xmp_roundtrip` test (animation + EXIF/XMP →
+  container → real decode → metadata and both frames intact; that arm was
+  previously untested).
 - **`extract_features_multiaxis` builds on any checkout: absolute-path
   `zenanalyze` dep replaced** (#19). The dev/sweep feature extractor pinned
   `zenanalyze` by an absolute `/home/lilith/...` path — resolvable on exactly
