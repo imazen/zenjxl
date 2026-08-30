@@ -161,7 +161,7 @@ prior to 0.1.26, so adopting the reshape was not a break of released API.
   at 0.3.1; 0.3.2 never shipped). Requirement bumped to `0.4.0` in both
   `[dependencies]` and `[dev-dependencies]`; the path patch stays until
   0.4.0 actually publishes. Same requirement-must-track-the-patched-sibling
-  trap as the zenjxl-decoder `^0.3.10` → `0.4.0` entry below.
+  trap as the zenjxl-decoder `^0.3.10` → `0.4.0` entry below. (5e9b879)
 
   jxl-encoder 0.4.0's API restructure (its #76) also privatized the
   `container`, `heuristics`, `headers`, and `entropy_coding::ans` module
@@ -180,9 +180,9 @@ prior to 0.1.26, so adopting the reshape was not a break of released API.
   `wrap_codestream_with_metadata_layout` test, and validated end-to-end by
   the new `animation_exif_xmp_roundtrip` test (animation + EXIF/XMP →
   container → real decode → metadata and both frames intact; that arm was
-  previously untested).
+  previously untested). (5e9b879)
 - **`extract_features_multiaxis` builds on any checkout: absolute-path
-  `zenanalyze` dep replaced** (#19). The dev/sweep feature extractor pinned
+  `zenanalyze` dep replaced** (#19, e3a3d1d). The dev/sweep feature extractor pinned
   `zenanalyze` by an absolute `/home/lilith/...` path — resolvable on exactly
   one machine, unbuildable anywhere else (another user, another OS, CI). Now
   a registry version (`0.2.0`) supplied through the tool's OWN
