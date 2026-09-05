@@ -36,6 +36,20 @@ patch and the `zencodec-testkit` dev-dep are tag-pinned (not a bare rev) to
 prior to 0.1.26, so adopting the reshape was not a break of released API.
 
 ### Notes (unreleased)
+- **2026-09-05 — jxl-encoder 0.4.0 pin re-verified clean; the "still broken"
+  reports were a stale-checkout artifact, not a regression.** Two independent
+  zensim-side sessions today (re)reported `zensim-bench` failing to resolve
+  because `zenjxl` pins `jxl-encoder = "^0.3.2"` — the exact symptom `5e9b879`
+  fixed six days ago. Root cause: this repo's local working copy (the one
+  `zensim-bench`'s `[patch.crates-io]` path entry reads off disk) had not been
+  fetched past `f0efd6d` (2026-08-28), eight commits behind `5e9b879`, so the
+  fix existed on `main@origin` but was invisible to any sibling checkout that
+  hadn't advanced. `jj git fetch && jj new main@origin` picks it up; no zenjxl
+  code changed. Re-ran the full `just ci` matrix (fmt-check, all 5 clippy
+  feature variants, all 9 feature-check build/test variants including
+  `--all-features`) after the fetch — 0 failures, 0 warnings, rc=0 in 1189s.
+  Lesson for anyone hitting this again: a stale path-dependency checkout is
+  indistinguishable from a live defect until you fetch it.
 - **2026-08-29 — third-party dependency pass: nothing to change here, and that
   is the finding.** Recorded because a "no diff" result is indistinguishable
   from "never audited" when someone sweeps the workspace later — a coverage
