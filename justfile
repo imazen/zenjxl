@@ -61,3 +61,8 @@ clippy-all:
 
 # Full CI check
 ci: fmt-check clippy-all feature-check
+
+# Native ARM wrapper integration coverage; includes gated alpha/lossless tests.
+arm-wrapper-tests-macos:
+    mkdir -p "$HOME/tmp"
+    CARGO_BUILD_JOBS=4 RAYON_NUM_THREADS=4 OMP_NUM_THREADS=4 RUST_TEST_THREADS=4 TMPDIR="$HOME/tmp" nice -n 19 cargo test --locked -p zenjxl --features zencodec,__expert --lib --tests > "$HOME/tmp/zenjxl-wrapper-tests.log" 2>&1

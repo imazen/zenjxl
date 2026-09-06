@@ -1,0 +1,317 @@
+   Compiling jxl-encoder v0.4.0 (/Users/lilith/work/zen/jxl-encoder/jxl-encoder)
+warning: method `resolve_target_display` is never used
+    --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/api.rs:4892:19
+     |
+2691 | impl LossyConfig {
+     | ---------------- method in this implementation
+...
+4892 |     pub(crate) fn resolve_target_display(&self) -> DisplayConfig {
+     |                   ^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `vec_f32_zeroed_fallible` is never used
+   --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/budget.rs:400:15
+    |
+400 | pub(crate) fn vec_f32_zeroed_fallible(fallible: bool, len: usize) -> Result<Vec<f32>> {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `FEATURE_MEAN` is never used
+  --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/learned_admission.rs:48:7
+   |
+48 | const FEATURE_MEAN: [f64; 4] = [
+   |       ^^^^^^^^^^^^
+
+warning: constant `FEATURE_STD` is never used
+  --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/learned_admission.rs:54:7
+   |
+54 | const FEATURE_STD: [f64; 4] = [
+   |       ^^^^^^^^^^^
+
+warning: constant `COEF` is never used
+  --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/learned_admission.rs:60:7
+   |
+60 | const COEF: [f64; 4] = [
+   |       ^^^^
+
+warning: constant `INTERCEPT` is never used
+  --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/learned_admission.rs:66:7
+   |
+66 | const INTERCEPT: f64 = -1.081_110_722_773_767_3;
+   |       ^^^^^^^^^
+
+warning: constant `BLOCK_THRESHOLD_P_BAD` is never used
+  --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/learned_admission.rs:68:7
+   |
+68 | const BLOCK_THRESHOLD_P_BAD: f64 = 0.90;
+   |       ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `LiftAdmissionFeatures` is never constructed
+  --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/learned_admission.rs:73:19
+   |
+73 | pub(crate) struct LiftAdmissionFeatures(pub(crate) [f64; 4]);
+   |                   ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `p_bad` is never used
+  --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/learned_admission.rs:76:15
+   |
+76 | pub(crate) fn p_bad(f: &LiftAdmissionFeatures) -> f64 {
+   |               ^^^^^
+
+warning: function `confident_bad` is never used
+  --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/learned_admission.rs:86:15
+   |
+86 | pub(crate) fn confident_bad(f: &LiftAdmissionFeatures) -> bool {
+   |               ^^^^^^^^^^^^^
+
+warning: constant `W44_169_NARROW_MIN_DISTANCE` is never used
+   --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/encoder.rs:965:11
+    |
+965 | pub const W44_169_NARROW_MIN_DISTANCE: f32 = 4.0;
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `W44_169_NARROW_MAX_DISTANCE` is never used
+   --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/encoder.rs:973:11
+    |
+973 | pub const W44_169_NARROW_MAX_DISTANCE: f32 = 5.0;
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `w44_169_compute_iters_narrow` is never used
+   --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/encoder.rs:990:15
+    |
+990 | pub(crate) fn w44_169_compute_iters_narrow(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   Compiling zenjxl v0.3.0 (/Users/lilith/work/zen/zenjxl)
+warning: `jxl-encoder` (lib) generated 13 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.92s
+     Running unittests src/lib.rs (target/debug/deps/zenjxl-682fad79dee13661)
+
+running 92 tests
+test alloc_util::tests::explicit_infallible_overrides_any_site_default ... ok
+test alloc_util::tests::codec_default_keeps_site_default_false ... ok
+test alloc_util::tests::codec_default_keeps_site_default_true ... ok
+test alloc_util::tests::explicit_fallible_overrides_any_site_default ... ok
+test alloc_util::tests::vec_with_capacity_reserves_and_is_empty ... ok
+test codec::tests::capabilities_correct ... ok
+test codec::tests::decode_capabilities_correct ... ok
+test codec::tests::calibrated_quality_used_for_distance ... ok
+test codec::encoding::wrap_layout_tests::wrap_codestream_with_metadata_layout ... ok
+test codec::tests::decode_descriptors_cover_all_layouts ... ok
+test alloc_util::tests::vec_with_capacity_fallible_oom_returns_err ... ok
+test alloc_util::tests::alloc_zeroed_all_modes_equal_bytes ... ok
+test alloc_util::tests::alloc_zeroed_fallible_oom_returns_err ... ok
+test codec::tests::encode_limits_mapping_forwards_budget_and_alloc_preference ... ok
+test codec::tests::encode_descriptors_cover_all_layouts ... ok
+test codec::tests::encode_memory_cap_delegates_to_core_estimate ... ok
+test codec::tests::dyn_dispatch_preserves_category_and_codec_through_erasure ... ok
+test codec::tests::bare_codestream_no_metadata ... ok
+test codec::tests::animation_frame_decoder_info_before_render ... ok
+test codec::tests::encoder_config_defaults ... ok
+test codec::tests::encoder_config_lossless ... ok
+test codec::tests::encoder_config_quality_effort ... ok
+test codec::tests::estimate_decode_resources_is_sane ... ok
+test codec::tests::animation_encode_memory_cap_delegates_to_core ... ok
+test codec::tests::encode_rgbx8_roundtrip ... ok
+test codec::tests::animation_exif_xmp_roundtrip ... ok
+test codec::tests::fidelity_targets_roundtrip ... ok
+test codec::tests::gain_map_bundle_serialize_parse_roundtrip ... ok
+test codec::tests::encode_moderate_memory_budget_succeeds ... ok
+test codec::tests::encode_bgrx8_roundtrip ... ok
+test codec::tests::generic_quality_roundtrips ... ok
+test codec::tests::exif_xmp_in_image_info ... ok
+test codec::tests::exif_and_xmp_roundtrip ... ok
+test codec::tests::exif_roundtrip ... ok
+test codec::tests::icc_from_structured_color ... ok
+test codec::tests::quality_sets_correct_distance ... ok
+test codec::tests::animation_decode_respects_max_frames ... ok
+test codec::tests::gain_map_roundtrip_native ... ok
+test codec::tests::no_gain_map_stays_bare_codestream ... ok
+test codec::tests::streaming_decoder_unsupported ... ok
+test codec::tests::supported_descriptors_includes_rgbx_and_bgrx ... ok
+test codec::tests::probe_returns_info ... ok
+test decode::tests::channel_type_mapping_covers_known_types ... ok
+test decode::tests::checked_buf_size_happy_path ... ok
+test decode::tests::checked_buf_size_rejects_overflow ... ok
+test decode::tests::dim_to_u32_accepts_normal_dimensions ... ok
+test decode::tests::dim_to_u32_rejects_oversized_dimension ... ok
+test decode::tests::extra_channel_alpha_from_rgba_image ... ok
+test decode::tests::extra_channel_enumeration_multi_channel ... ok
+test decode::tests::extra_channels_survive_full_decode ... ok
+test codec::tests::gain_map_roundtrip_via_trait ... ok
+test decode::tests::generous_max_memory_bytes_decodes_ok ... ok
+test decode::tests::max_memory_bytes_propagates_to_decoder ... ok
+test decode::tests::no_extra_channels_for_rgb_image ... ok
+test decode::tests::no_preview_for_regular_image ... ok
+test decode::tests::preview_detected_when_present ... ok
+test error::categorized_error_tests::category_and_codec_name_mapping ... ok
+test sweep::tests::alpha_axes_are_hashed_spelled_and_parsed ... ok
+test sweep::tests::alpha_axes_carry_no_neutral_spelling ... ok
+test codec::tests::xmp_roundtrip ... ok
+test codec::tests::encode_single_thread ... ok
+test codec::tests::decode_descriptor_carries_cicp_pq_hdr ... ok
+test sweep::tests::compute_tier_equals_effort ... ok
+test sweep::tests::encodes_math ... ok
+test sweep::tests::gather_dedup_phase3_is_excluded_from_fingerprint ... ok
+test sweep::tests::invalid_internal_params_are_reported_not_lost ... ok
+test sweep::tests::lossless_cells_have_no_quality_axis ... ok
+test codec::tests::metadata_cicp_round_trips_via_enum_color ... ok
+test sweep::tests::low_q_calibration_plateau_dedupes ... ok
+test codec::tests::roundtrip_single_thread ... ok
+test sweep::tests::malformed_and_non_self_describing_ids_error ... ok
+test sweep::tests::modes_full_covers_the_scalar_axes ... ok
+test sweep::tests::non_positive_distance_is_reported_not_lost ... ok
+test codec::tests::animation_decode_respects_max_memory_bytes ... ok
+test sweep::tests::q_coarsening_keeps_endpoints_and_floor ... ok
+test sweep::tests::quality_and_distance_spellings_alias ... ok
+test sweep::tests::queue_is_main_effects_first ... ok
+test sweep::tests::plan_is_deterministic ... ok
+test sweep::tests::over_budget_reports_rather_than_samples ... ok
+test sweep::tests::search_bound_knobs_change_fingerprint ... ok
+test sweep::tests::scalar_ladder_values_have_distinct_fingerprints_and_ids ... ok
+test sweep::tests::scalar_dense_fills_effort_ladder_isolated ... ok
+test sweep::tests::budget_ladder_collapses_lossy_mode_axes_first_and_reports ... ok
+test decode::tests::preview_size_survives_full_decode ... ok
+test codec::tests::encode_rgbx8_smaller_than_rgba ... ok
+test codec::tests::roundtrip_rgba8 ... ok
+test codec::tests::roundtrip_rgb8 ... ok
+test codec::tests::fallible_alloc_decode_matches_default ... ok
+test sweep::tests::lossy_dense_is_lossy_only_main_effects_over_full_effort_ladder ... ok
+test sweep::tests::cell_ids_are_unique_across_modes_full ... ok
+test sweep::tests::with_compute_limit_caps_effort_and_reports ... ok
+test sweep::tests::cell_ids_roundtrip_to_their_variants ... ok
+
+test result: ok. 92 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.27s
+
+     Running tests/alpha_axes_class_conditional.rs (target/debug/deps/alpha_axes_class_conditional-cacb2369dfa49d1f)
+
+running 1 test
+test alpha_steps_are_live_on_class_and_inert_off_class has been running for over 60 seconds
+test alpha_steps_are_live_on_class_and_inert_off_class ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 199.99s
+
+     Running tests/expert_forwarding.rs (target/debug/deps/expert_forwarding-df1f8f651779e797)
+
+running 3 tests
+test jxl_validation_error_propagates ... ok
+test lossy_expert_override_propagates_through_zenjxl ... ok
+test lossless_expert_override_propagates_through_zenjxl ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.45s
+
+     Running tests/gain_map_render.rs (target/debug/deps/gain_map_render-32bf63137e066ee4)
+
+running 4 tests
+test components_on_plain_jxl_is_clean ... ok
+test base_only_attaches_nothing ... ok
+test components_surfaces_decoded_gain_map ... ok
+test reconstruct_downgrades_to_components ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/jpeg_lossy.rs (target/debug/deps/jpeg_lossy-e3dd6c23ea5003af)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/jxl_hdr_fixtures.rs (target/debug/deps/jxl_hdr_fixtures-e549a2e44aa07b62)
+
+running 2 tests
+test cjxl_hlg_fixture_intensity_target_and_cicp ... ok
+test cjxl_pq_fixture_intensity_target_and_cicp ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/lean_strategy_diverges.rs (target/debug/deps/lean_strategy_diverges-3b9ea25e3d5ff0bf)
+
+running 2 tests
+test synthetic_screenshot_is_screenshot_class_by_upstream_predicate ... ok
+test lean_diverges_from_zenjxl_default_on_screenshot_class ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 48.33s
+
+     Running tests/lossless_verify.rs (target/debug/deps/lossless_verify-966e62f83fd22935)
+
+running 4 tests
+test low_color_count_roundtrips_losslessly ... ok
+test typical_content_roundtrips_losslessly ... ok
+test gated_branch_never_worse_than_lean_member ... ok
+test near_gray_many_colors_roundtrips_losslessly ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.36s
+
+     Running tests/orientation.rs (target/debug/deps/orientation-81c049af3d8a2d55)
+
+running 11 tests
+test default_hint_is_preserve ... ok
+test preserve_reports_coded_dims_and_intrinsic_tag ... ok
+test preserve_output_info_matches ... ok
+test correct_output_info_reports_intrinsic_applied ... ok
+test correct_reports_display_dims_and_identity ... ok
+test exact_transform_output_info_matches_decode ... ok
+test correct_and_transform_output_info_reports_composed ... ok
+test exact_transform_identity_equals_preserve ... ok
+test exact_transform_intrinsic_equals_correct ... ok
+test correct_equals_preserve_under_exact_orientation_transform ... ok
+test correct_and_transform_composes_on_correct ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.81s
+
+     Running tests/parallel_determinism.rs (target/debug/deps/parallel_determinism-1809f44d6a09dbe0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/progressive_policy.rs (target/debug/deps/progressive_policy-e0a3605c4b792225)
+
+running 4 tests
+test progressive_rejected_when_policy_forbids ... ok
+test non_progressive_decodes_under_strict_policy ... ok
+test progressive_allowed_by_default ... ok
+test progressive_allowed_when_policy_permits ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/readme_examples.rs (target/debug/deps/readme_examples-d55ff34c12ddb1cc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/resolve_plan.rs (target/debug/deps/resolve_plan-a339bc26103eee74)
+
+running 7 tests
+test default_plan_is_lossy_distance_1_effort_7 ... ok
+test effort_resolves_off_the_stored_config ... ok
+test distance_override_bypasses_calibration ... ok
+test noise_in_lossy_mode_is_live_and_valid ... ok
+test lossless_plan_reports_dead_knobs_and_validate_rejects_noise ... ok
+test gain_map_forces_container_in_the_plan ... ok
+test quality_resolves_through_the_same_chain_as_the_sweep_module ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/truncation_series.rs (target/debug/deps/truncation_series-e6eb7ad43781991d)
+
+running 1 test
+test truncation_series_categorizes_as_incomplete_input ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/validate.rs (target/debug/deps/validate-43489aa7e03ef64b)
+
+running 8 tests
+test happy_path_default_encoder_validates ... ok
+test happy_path_decoder_validates ... ok
+test effort_setter_clamps_so_validate_passes ... ok
+test distance_setter_clamps_so_validate_passes ... ok
+test happy_path_in_range_quality_validates ... ok
+test nan_generic_quality_rejected ... ok
+test negative_generic_quality_rejected ... ok
+test out_of_range_generic_quality_rejected ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,0 +1,205 @@
+   Compiling jxl-encoder-simd v0.4.0 (/Users/lilith/work/zen/jxl-encoder/jxl-encoder-simd)
+   Compiling zenjpeg v0.9.0 (/Users/lilith/work/zen/zenjpeg/zenjpeg)
+   Compiling jxl-encoder v0.4.0 (/Users/lilith/work/zen/jxl-encoder/jxl-encoder)
+   Compiling zenjpeg-bench-utils v0.1.0 (/Users/lilith/work/zen/zenjpeg/zenjpeg-bench-utils)
+warning: method `resolve_target_display` is never used
+    --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/api.rs:4892:19
+     |
+2691 | impl LossyConfig {
+     | ---------------- method in this implementation
+...
+4892 |     pub(crate) fn resolve_target_display(&self) -> DisplayConfig {
+     |                   ^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `vec_f32_zeroed_fallible` is never used
+   --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/budget.rs:400:15
+    |
+400 | pub(crate) fn vec_f32_zeroed_fallible(fallible: bool, len: usize) -> Result<Vec<f32>> {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `FEATURE_MEAN` is never used
+  --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/learned_admission.rs:48:7
+   |
+48 | const FEATURE_MEAN: [f64; 4] = [
+   |       ^^^^^^^^^^^^
+
+warning: constant `FEATURE_STD` is never used
+  --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/learned_admission.rs:54:7
+   |
+54 | const FEATURE_STD: [f64; 4] = [
+   |       ^^^^^^^^^^^
+
+warning: constant `COEF` is never used
+  --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/learned_admission.rs:60:7
+   |
+60 | const COEF: [f64; 4] = [
+   |       ^^^^
+
+warning: constant `INTERCEPT` is never used
+  --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/learned_admission.rs:66:7
+   |
+66 | const INTERCEPT: f64 = -1.081_110_722_773_767_3;
+   |       ^^^^^^^^^
+
+warning: constant `BLOCK_THRESHOLD_P_BAD` is never used
+  --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/learned_admission.rs:68:7
+   |
+68 | const BLOCK_THRESHOLD_P_BAD: f64 = 0.90;
+   |       ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `LiftAdmissionFeatures` is never constructed
+  --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/learned_admission.rs:73:19
+   |
+73 | pub(crate) struct LiftAdmissionFeatures(pub(crate) [f64; 4]);
+   |                   ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `p_bad` is never used
+  --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/learned_admission.rs:76:15
+   |
+76 | pub(crate) fn p_bad(f: &LiftAdmissionFeatures) -> f64 {
+   |               ^^^^^
+
+warning: function `confident_bad` is never used
+  --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/learned_admission.rs:86:15
+   |
+86 | pub(crate) fn confident_bad(f: &LiftAdmissionFeatures) -> bool {
+   |               ^^^^^^^^^^^^^
+
+warning: constant `W44_169_NARROW_MIN_DISTANCE` is never used
+   --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/encoder.rs:965:11
+    |
+965 | pub const W44_169_NARROW_MIN_DISTANCE: f32 = 4.0;
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `W44_169_NARROW_MAX_DISTANCE` is never used
+   --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/encoder.rs:973:11
+    |
+973 | pub const W44_169_NARROW_MAX_DISTANCE: f32 = 5.0;
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `w44_169_compute_iters_narrow` is never used
+   --> /Users/lilith/work/zen/jxl-encoder/jxl-encoder/src/vardct/encoder.rs:990:15
+    |
+990 | pub(crate) fn w44_169_compute_iters_narrow(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   Compiling zenjxl v0.3.0 (/Users/lilith/work/zen/zenjxl)
+warning: `jxl-encoder` (lib) generated 13 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.71s
+     Running unittests src/lib.rs (target/debug/deps/zenjxl-5949e6123b080a53)
+
+running 23 tests
+test alloc_util::tests::codec_default_keeps_site_default_false ... ok
+test alloc_util::tests::codec_default_keeps_site_default_true ... ok
+test alloc_util::tests::explicit_fallible_overrides_any_site_default ... ok
+test alloc_util::tests::explicit_infallible_overrides_any_site_default ... ok
+test decode::tests::channel_type_mapping_covers_known_types ... ok
+test alloc_util::tests::vec_with_capacity_reserves_and_is_empty ... ok
+test decode::tests::checked_buf_size_rejects_overflow ... ok
+test decode::tests::checked_buf_size_happy_path ... ok
+test decode::tests::dim_to_u32_accepts_normal_dimensions ... ok
+test decode::tests::dim_to_u32_rejects_oversized_dimension ... ok
+test alloc_util::tests::alloc_zeroed_fallible_oom_returns_err ... ok
+test alloc_util::tests::vec_with_capacity_fallible_oom_returns_err ... ok
+test alloc_util::tests::alloc_zeroed_all_modes_equal_bytes ... ok
+test error::categorized_error_tests::category_and_codec_name_mapping ... ok
+test decode::tests::no_extra_channels_for_rgb_image ... ok
+test decode::tests::extra_channel_alpha_from_rgba_image ... ok
+test decode::tests::extra_channel_enumeration_multi_channel ... ok
+test decode::tests::no_preview_for_regular_image ... ok
+test decode::tests::max_memory_bytes_propagates_to_decoder ... ok
+test decode::tests::preview_detected_when_present ... ok
+test decode::tests::generous_max_memory_bytes_decodes_ok ... ok
+test decode::tests::extra_channels_survive_full_decode ... ok
+test decode::tests::preview_size_survives_full_decode ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/alpha_axes_class_conditional.rs (target/debug/deps/alpha_axes_class_conditional-b8d3ccb9da4d5500)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/expert_forwarding.rs (target/debug/deps/expert_forwarding-cc9065700c509007)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/gain_map_render.rs (target/debug/deps/gain_map_render-e0d36937f9de8f23)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/jpeg_lossy.rs (target/debug/deps/jpeg_lossy-45be57e712bf819b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/jxl_hdr_fixtures.rs (target/debug/deps/jxl_hdr_fixtures-97b2a0211720aa74)
+
+running 2 tests
+test cjxl_hlg_fixture_intensity_target_and_cicp ... ok
+test cjxl_pq_fixture_intensity_target_and_cicp ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/lean_strategy_diverges.rs (target/debug/deps/lean_strategy_diverges-ee7a1f76fbfd2da4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/lossless_verify.rs (target/debug/deps/lossless_verify-0cc98216e8860007)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/orientation.rs (target/debug/deps/orientation-c5aa0395fdc27d96)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/parallel_determinism.rs (target/debug/deps/parallel_determinism-422395c77481d7dc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/progressive_policy.rs (target/debug/deps/progressive_policy-69cc7f0f85381521)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/readme_examples.rs (target/debug/deps/readme_examples-82f0b28adec05228)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/resolve_plan.rs (target/debug/deps/resolve_plan-f602334ca6b086b5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/truncation_series.rs (target/debug/deps/truncation_series-9f69b089fdaf5cb0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/validate.rs (target/debug/deps/validate-fa382a7ba2c47520)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
