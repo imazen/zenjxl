@@ -24,13 +24,7 @@ whereat = { version = "0.1.5"}
 rgb = { version = "0.8.53", default-features = false, features = ["as-bytes"] }
 imgref = "1.12.0"
 enough = "0.4.3"
-# zencodec 0.1.26 (published) carries the CategorizedError taxonomy
-# (zencodec#103, reshaped into a two-level origin-first taxonomy by #116,
-# including the Lifecycle -> Stopped rename) that this crate's error.rs
-# already consumes. Still unified via the [patch.crates-io] tag pin below
-# with zencodec-testkit's internal (path-based) zencodec dependency -- see
-# that patch entry's comment for why the patch remains despite 0.1.26 being
-# published.
+# The root patches unify the exact-timing trait and conformance harness.
 zencodec = { version = ">=0.1.26, <0.3.0" }
 zenpixels = { version = ">=0.2.11, <0.4.0", default-features = false, features = ["rgb"] }
 # Pixel-exact orientation baking (`orient::apply_orientation`) for the zencodec
@@ -50,75 +44,28 @@ jxl-encoder = { version = "0.4.0", optional = true, default-features = false, fe
 zenjpeg = { version = "0.9.0", optional = true, default-features = false }
 # Gain-map application for GainMapRender::ReconstructHdr (reconstruct-hdr
 # feature). Pure gain-map math; jhgm ISO 21496-1 parameter parsing comes
-# from zencodec, so the registry release suffices.
-ultrahdr-core = { version = "0.5.0", optional = true, default-features = false, features = ["std"] }
+# from zencodec. The patch below supplies zenpixels 0.3-compatible ranges.
+ultrahdr-core = { version = "0.6.0", optional = true, default-features = false, features = ["std", "f16"] }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 
-# jxl-encoder 0.4.0 (release-prepped on the sibling's main, 2026-08-30 — the
-# lossy-JPEG recompression API landed in the unpublished 0.3.2 line before it)
-# + zenjpeg 0.8.7 (libjxl-parity magetypes fix) are not yet on crates.io;
-# path-patch to the local siblings, the same pattern jxl-encoder itself uses
-# for its unpublished zenjpeg dep. The `jxl-encoder` requirement above MUST
-# track the sibling's version: when the sibling bumped 0.3.2 -> 0.4.0 the
-# patch stopped matching `^0.3.2` and every resolve (local + CI) failed —
-# the same trap the zenjxl-decoder comment below describes. Remove these once
-# the chain is published (see docs/zenjxl_jpeg_lossy/README.md in the
-# jxl-encoder repo). Builds require the sibling checkouts.
-# (zenjxl-decoder 0.3.10 — with the mode-aware orientation API the adapter
-# consumes — is now published, so its path-patch was dropped and the `jxl`
-# dep above bumped to 0.3.10.)
+# Portable coordinated revisions; no sibling checkout paths are required.
+# Remove individual patches after compatible releases are published.
 [patch.crates-io]
-# zencodec-testkit is unpublished (path-deps zencodec internally); unify the
-# graph on the content-identical released tag until the testkit ships on
-# crates.io.
-zencodec = { git = "https://github.com/imazen/zencodec", tag = "v0.1.26" }
-jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }
-zenjpeg = { path = "../zenjpeg/zenjpeg" }
-# zenjxl-decoder 0.4.0 (the `reject_progressive` decode-time gate, the
-# `jxl::api::ErrorClass` taxonomy `src/error.rs` matches on, and the
-# `At<Error>`-wrapped public error) is on the sibling's main but unreleased
-# (crates.io latest: 0.3.10). The `jxl` dep above REQUIRES `0.4.0` so this
-# path patch actually applies — a `^0.3.x` requirement silently resolves to
-# the registry 0.3.10 and the lib fails to compile (`ErrorClass` missing;
-# that was CI's red state 2026-08-14..27). Drop this patch when
-# zenjxl-decoder 0.4.0 publishes.
-zenjxl-decoder = { path = "../zenjxl-decoder/zenjxl-decoder" }
-# jxl-encoder main needs butteraugli 0.9.4 (`ButteraugliReference::
-# estimated_reference_bytes`, the alloc-budget precompute API), which is not
-# on crates.io yet (latest published: 0.9.3). jxl-encoder's own workspace
-# patches butteraugli to the local path, but a dependency's [patch] table is
-# ignored when jxl-encoder is consumed here — so zenjxl must carry the same
-# patch. Drop this once butteraugli 0.9.4 publishes. Note the extra `../`:
-# the butteraugli repo lives beside `~/work/zen`, not inside it.
-butteraugli = { path = "../../butteraugli/butteraugli" }
-# zenanalyze 0.2.0 / zenanalyze-api 0.1.1 are on imazen/zenanalyze's main but
-# NOT on crates.io (registry latest: zenanalyze 0.1.0), and zenanalyze 0.2.x is
-# not planned for the registry — the crate's 0.1.x API freeze means the `hdr` +
-# retired-`composites` shape only ever exists on git. zenjpeg 147444fe
-# (2026-08-29) moved its own `zenanalyze`/`zenanalyze-api` deps to registry
-# VERSIONS resolved through a [patch.crates-io] at the zenjpeg workspace root —
-# deliberately, so one patch unifies the contract types instead of a dozen rev
-# pins. That root patch is invisible from here (a dependency's [patch] table is
-# ignored when the dependency is consumed as a path dep), so the path-patched
-# `zenjpeg` above arrived asking the registry for `zenanalyze ^0.2.0` and every
-# zenjxl build failed at resolution with "candidate versions found which didn't
-# match: 0.1.0". Same shape, same reason, as the butteraugli patch above: carry
-# the sibling's patch ourselves. Git (not path) deliberately — CI clones
-# jxl-encoder / butteraugli / zenjpeg / zenjxl-decoder but NOT zenanalyze, and a
-# git source needs no checkout. Drop this if zenanalyze ever publishes 0.2.x.
-#
-# zenanalyze-api is deliberately NOT patched here: it is optional in zenjpeg
-# (`dep:zenanalyze-api`, reached only through `target-zq`/`__picker-research`,
-# neither of which zenjxl enables) and absent from this graph — patching it
-# lands a `[[patch.unused]]` entry in Cargo.lock and a "patch was not used in
-# the crate graph" warning on every single build, including CI. If a future
-# zenjxl feature ever pulls the contract crate in, add the matching
-# `zenanalyze-api = { git = "https://github.com/imazen/zenanalyze" }` line in
-# the same commit: Cargo unifies by source, so a git `zenanalyze` beside a
-# registry `zenanalyze-api` would put two incompatible `zenanalyze_api::Offer`
-# types in one graph — the exact breakage zenjpeg 147444fe went registry+patch
-# to end.
-zenanalyze = { git = "https://github.com/imazen/zenanalyze" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "633f71e9d0c8fc82cc29b58ffaa92d367d82f9f9" }
+zenpng = { git = "https://github.com/imazen/zenpng", rev = "70d320e31c5c0f9d71a052c6ccb19616dfb302bb" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "cabe3d06e8d31911bed3964d836aefc170bff1e8" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "cabe3d06e8d31911bed3964d836aefc170bff1e8" }
+# Coordinated exact animation timing series.
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "2031094449ad1177ff96461d7c4d586c7ed384e6" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "2031094449ad1177ff96461d7c4d586c7ed384e6" }
+jxl-encoder = { git = "https://github.com/imazen/jxl-encoder", rev = "65cd22a13826cbf29e65127be511de520b0845ba" }
+zenjpeg = { git = "https://github.com/imazen/zenjpeg", rev = "afc2ccbb0857bc9736f07d1583e062a8a1fd09e3" }
+# Sendable typed decoder state used by incremental animation output.
+zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "21159c6ba149bc802f0d985851e568976a44da04" }
+# Native encoder allocation accounting requires this unreleased API.
+butteraugli = { git = "https://github.com/imazen/butteraugli", rev = "795aa3727252dc56840501864aefc4a8a537c8ea" }
+# Current analysis contract used transitively by zenjpeg.
+zenanalyze = { git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313923ded6e5eeebb725878c5736453" }
 
 [dev-dependencies]
 # Raw-frame capture + lazy symbolization for the per-site allocation profiler
@@ -134,7 +81,7 @@ backtrace = "0.3.76"
 # reintroduce "multiple different versions of crate zencodec"). Drop both the
 # patch and this tag pin for a plain crates.io version dep once zencodec-testkit
 # itself publishes.
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", tag = "v0.1.26" }
+zencodec-testkit = ">=0.1.0, <0.3.0"
 # Concrete `enough::Stop` token for the README cancellation example
 # (tests/readme_examples.rs compiles the documented snippets).
 almost-enough = "0.4.4"
@@ -157,7 +104,7 @@ fast-ssim2 = "0.8.2"
 # Path-only dev-dep (publish = false upstream): stripped on `cargo publish`,
 # so it only binds local builds — which already require the sibling checkouts
 # via [patch.crates-io].
-zenjpeg-bench-utils = { path = "../zenjpeg/zenjpeg-bench-utils", default-features = false }
+zenjpeg-bench-utils = { git = "https://github.com/imazen/zenjpeg", rev = "afc2ccbb0857bc9736f07d1583e062a8a1fd09e3", default-features = false }
 
 [features]
 default = ["encode", "decode"]

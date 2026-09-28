@@ -718,14 +718,10 @@ mod encoding {
         fn animation_frame_encoder(
             self,
         ) -> Result<JxlAnimationFrameEncoder, At<zencodec::CodecError>> {
-            let mode = apply_threads(&self.config.mode, &self.limits);
-            Ok(JxlAnimationFrameEncoder::from_job(
-                mode,
-                self.metadata.as_ref(),
-                &self.policy,
-                self.limits,
-                self.loop_count,
-                self.config.gain_map.clone(),
+            let loop_count = self.loop_count;
+            Ok(JxlAnimationFrameEncoder::from_encoder(
+                self.encoder()?,
+                loop_count,
             ))
         }
     }
@@ -779,11 +775,34 @@ mod encoding {
                 (ChannelLayout::Rgba, ChannelType::U16) => Ok(PixelLayout::Rgba16),
                 (ChannelLayout::Gray, ChannelType::U16) => Ok(PixelLayout::Gray16),
                 (ChannelLayout::GrayAlpha, ChannelType::U16) => Ok(PixelLayout::GrayAlpha16),
-                // F32 (jxl-encoder assumes linear-light for float)
-                (ChannelLayout::Rgb, ChannelType::F32) => Ok(PixelLayout::RgbLinearF32),
-                (ChannelLayout::Rgba, ChannelType::F32) => Ok(PixelLayout::RgbaLinearF32),
-                (ChannelLayout::Gray, ChannelType::F32) => Ok(PixelLayout::GrayLinearF32),
-                (ChannelLayout::GrayAlpha, ChannelType::F32) => Ok(PixelLayout::GrayAlphaLinearF32),
+                (ChannelLayout::Rgb, ChannelType::F32) => match desc.transfer() {
+                    zenpixels::TransferFunction::Linear => Ok(PixelLayout::RgbLinearF32),
+                    zenpixels::TransferFunction::Pq => Ok(PixelLayout::RgbPqF32),
+                    zenpixels::TransferFunction::Hlg => Ok(PixelLayout::RgbHlgF32),
+                    zenpixels::TransferFunction::Bt709 => Ok(PixelLayout::RgbBt709F32),
+                    _ => Err(whereat::at!(JxlError::UnsupportedOperation(
+                        UnsupportedOperation::PixelFormat
+                    ))),
+                },
+                (ChannelLayout::Rgba, ChannelType::F32) => match desc.transfer() {
+                    zenpixels::TransferFunction::Linear => Ok(PixelLayout::RgbaLinearF32),
+                    zenpixels::TransferFunction::Pq => Ok(PixelLayout::RgbaPqF32),
+                    zenpixels::TransferFunction::Hlg => Ok(PixelLayout::RgbaHlgF32),
+                    zenpixels::TransferFunction::Bt709 => Ok(PixelLayout::RgbaBt709F32),
+                    _ => Err(whereat::at!(JxlError::UnsupportedOperation(
+                        UnsupportedOperation::PixelFormat
+                    ))),
+                },
+                (ChannelLayout::Gray, ChannelType::F32)
+                    if desc.transfer() == zenpixels::TransferFunction::Linear =>
+                {
+                    Ok(PixelLayout::GrayLinearF32)
+                }
+                (ChannelLayout::GrayAlpha, ChannelType::F32)
+                    if desc.transfer() == zenpixels::TransferFunction::Linear =>
+                {
+                    Ok(PixelLayout::GrayAlphaLinearF32)
+                }
                 _ => Err(whereat::at!(JxlError::UnsupportedOperation(
                     UnsupportedOperation::PixelFormat,
                 ))),
@@ -851,8 +870,16 @@ mod encoding {
             &self,
             layout: PixelLayout,
         ) -> (Option<jxl_encoder::ColorEncoding>, bool) {
-            let policy_icc = self.policy.resolve_icc(true);
-            let Some(meta) = self.metadata.as_ref() else {
+            Self::resolve_color(self.metadata.as_ref(), &self.policy, layout)
+        }
+
+        fn resolve_color(
+            metadata: Option<&Metadata>,
+            policy: &EncodePolicy,
+            layout: PixelLayout,
+        ) -> (Option<jxl_encoder::ColorEncoding>, bool) {
+            let policy_icc = policy.resolve_icc(true);
+            let Some(meta) = metadata else {
                 return (None, policy_icc);
             };
             let channel_count = if Self::layout_is_gray(layout) { 1 } else { 3 };
@@ -866,8 +893,7 @@ mod encoding {
             let plan = zencodec::resolve_color_emit(
                 &src,
                 &JXL_ENCODE_CAPS,
-                self.policy
-                    .resolve_color(zencodec::ColorEmitPolicy::Balanced),
+                policy.resolve_color(zencodec::ColorEmitPolicy::Balanced),
             );
             let color_encoding = plan
                 .cicp
@@ -1263,187 +1289,112 @@ mod encoding {
 
     // ── JxlAnimationFrameEncoder ──────────────────────────────────────────────
 
-    /// Owned metadata for animation encoding (must be `'static` per trait bounds).
-    struct OwnedAnimMeta {
-        exif: Option<Vec<u8>>,
-        xmp: Option<Vec<u8>>,
-    }
-
-    /// Animation JPEG XL encoder.
-    ///
-    /// Collects frames, then encodes them all at once via
-    /// `jxl-encoder`'s `encode_animation`.
-    ///
-    /// # Limitations
-    ///
-    /// ICC profile embedding is not supported for animation encoding.
-    /// The jxl-encoder animation API (`encode_animation`) generates the
-    /// codestream internally and does not accept metadata parameters.
-    /// ICC profiles are embedded in the JXL codestream image header, not
-    /// in container boxes, so they cannot be wrapped via `wrap_in_container`.
-    /// Single-frame encoding supports ICC via `EncodeRequest::with_metadata`.
+    /// Animation JPEG XL encoder. Input frames are buffered, then passed to
+    /// the native request API with exact timing, color, metadata and limits.
     pub struct JxlAnimationFrameEncoder {
-        mode: JxlEncMode,
-        anim_meta: Option<OwnedAnimMeta>,
-        limits: Option<ResourceLimits>,
+        encoder: JxlEncoder,
         loop_count: Option<u32>,
-        /// Duration per frame in milliseconds.
         frames: Vec<u32>,
-        /// Raw pixel data for each frame (owned copies).
+        tps_numerator: u32,
+        tps_denominator: u32,
         pixel_data: Vec<Vec<u8>>,
-        /// Total accumulated pixel data in bytes (for memory limit checking).
         accumulated_bytes: u64,
         width: u32,
         height: u32,
         layout: Option<PixelLayout>,
-        gain_map: Option<Arc<GainMapData>>,
+        descriptor: Option<PixelDescriptor>,
+        color_context: Option<Arc<zenpixels::ColorContext>>,
     }
 
     impl JxlAnimationFrameEncoder {
-        /// Create from job state, copying metadata we need for container wrapping.
-        fn from_job(
-            mode: JxlEncMode,
-            metadata: Option<&Metadata>,
-            policy: &EncodePolicy,
-            limits: Option<ResourceLimits>,
-            loop_count: Option<u32>,
-            gain_map: Option<Arc<GainMapData>>,
-        ) -> Self {
-            // For animation, ICC is handled in the codestream by jxl-encoder.
-            // EXIF/XMP go in the container — copy them out now so we're 'static.
-            let anim_meta = metadata.and_then(|meta| {
-                let exif = if policy.resolve_exif(true) {
-                    meta.exif.as_deref().map(|b| b.to_vec())
-                } else {
-                    None
-                };
-                let xmp = if policy.resolve_xmp(true) {
-                    meta.xmp.as_deref().map(|b| b.to_vec())
-                } else {
-                    None
-                };
-                if exif.is_some() || xmp.is_some() {
-                    Some(OwnedAnimMeta { exif, xmp })
-                } else {
-                    None
+        /// Choose an exact clock fitting the bitstream: numerator <= 2^30,
+        /// denominator <= 1024, and frame duration <= u32::MAX. Plan all
+        /// rescaling before committing input. Zero denotes a helper frame.
+        fn plan_clock(
+            &self,
+            duration: zencodec::animation::FrameDuration,
+        ) -> Option<(u32, u32, u32, u32)> {
+            fn gcd(mut a: u128, mut b: u128) -> u128 {
+                while b != 0 {
+                    (a, b) = (b, a % b);
                 }
-            });
+                a
+            }
+            if duration.numerator() == 0 {
+                return None;
+            }
+            let incoming_den = u128::from(duration.denominator());
+            let (common_den, old_num, incoming_num, common_num) = if self.frames.is_empty() {
+                let numerator = u128::from(duration.numerator());
+                (incoming_den, numerator, numerator, numerator)
+            } else {
+                let old_den = u128::from(self.tps_numerator);
+                let common_den = old_den / gcd(old_den, incoming_den) * incoming_den;
+                let old_num = u128::from(self.tps_denominator) * (common_den / old_den);
+                let incoming_num = u128::from(duration.numerator()) * (common_den / incoming_den);
+                (
+                    common_den,
+                    old_num,
+                    incoming_num,
+                    gcd(old_num, incoming_num),
+                )
+            };
+            let reduce = gcd(common_num, common_den);
+            let clock_num = common_den / reduce;
+            if clock_num > 1 << 30 {
+                return None;
+            }
+            // Split a large tick period into a representable divisor and
+            // more ticks. This also admits durations longer than u32 seconds.
+            let period_num = common_num / reduce;
+            let clock_den = (1..=period_num.min(1024))
+                .rev()
+                .find(|d| period_num.is_multiple_of(*d))?;
+            let tick_units = clock_den * reduce;
+            let factor = u32::try_from(old_num / tick_units).ok()?;
+            for &ticks in &self.frames {
+                ticks.checked_mul(factor)?;
+            }
+            Some((
+                clock_num as u32,
+                clock_den as u32,
+                factor,
+                u32::try_from(incoming_num / tick_units).ok()?,
+            ))
+        }
 
+        fn from_encoder(encoder: JxlEncoder, loop_count: Option<u32>) -> Self {
             Self {
-                mode,
-                anim_meta,
-                limits,
+                encoder,
                 loop_count,
                 frames: Vec::new(),
+                tps_numerator: 1,
+                tps_denominator: 1,
                 pixel_data: Vec::new(),
                 accumulated_bytes: 0,
                 width: 0,
                 height: 0,
                 layout: None,
-                gain_map,
-            }
-        }
-
-        /// Wrap an encoded animation codestream with EXIF/XMP metadata boxes
-        /// and an optional gain map box.
-        fn wrap_with_metadata_and_gain_map(&self, codestream: Vec<u8>) -> Vec<u8> {
-            let has_meta = self
-                .anim_meta
-                .as_ref()
-                .is_some_and(|m| m.exif.is_some() || m.xmp.is_some());
-            let has_gain_map = self.gain_map.is_some();
-
-            if !has_meta && !has_gain_map {
-                return codestream;
-            }
-
-            // Always need container format if we have metadata or gain map.
-            let exif = self.anim_meta.as_ref().and_then(|m| m.exif.as_deref());
-            let xmp = self.anim_meta.as_ref().and_then(|m| m.xmp.as_deref());
-
-            let wrapped = if has_meta {
-                wrap_codestream_with_metadata(&codestream, exif, xmp)
-            } else {
-                codestream
-            };
-
-            match &self.gain_map {
-                Some(gm) => jxl_encoder::append_gain_map_box(&wrapped, &gm.jhgm_payload),
-                None => wrapped,
+                descriptor: None,
+                color_context: None,
             }
         }
     }
 
-    /// Wrap a bare JXL codestream in an ISOBMFF container with optional
-    /// Exif / XMP metadata boxes.
-    ///
-    /// Local port of jxl-encoder's `container::wrap_in_container` in its
-    /// default arm (level 5 — no `jxll` box — no jbrd, no jumbf), which lost
-    /// its public path in the 0.4.0 API restructure (jxl-encoder#76 kept only
-    /// the container probes and `append_gain_map_box` reachable; the
-    /// still-image and streaming paths thread Exif/XMP through
-    /// `EncodeRequest`, but the animation API has no metadata support yet, so
-    /// this post-encode wrap is the only route). The byte layout is fixed by
-    /// the JPEG XL container format (ISO/IEC 18181-2), not by jxl-encoder
-    /// internals: signature box, `ftyp`, the whole codestream in one `jxlc`
-    /// box, then `Exif` (4-byte zero TIFF-offset prefix) and `xml ` boxes.
-    /// Delete in favour of an upstream re-export if one returns.
-    fn wrap_codestream_with_metadata(
-        codestream: &[u8],
-        exif: Option<&[u8]>,
-        xmp: Option<&[u8]>,
-    ) -> Vec<u8> {
-        /// ISOBMFF box: 4-byte BE total size (8-byte header + payload) and
-        /// 4-byte type; payloads ≥ 4 GiB take the extended-size form (size=1
-        /// sentinel + 8-byte size after the type), matching the upstream
-        /// writer bit-for-bit.
-        fn write_box(out: &mut Vec<u8>, box_type: &[u8; 4], parts: &[&[u8]]) {
-            let payload_len: u64 = parts.iter().map(|p| p.len() as u64).sum();
-            if let Ok(size32) = u32::try_from(8u64 + payload_len) {
-                out.extend_from_slice(&size32.to_be_bytes());
-                out.extend_from_slice(box_type);
-            } else {
-                out.extend_from_slice(&1u32.to_be_bytes());
-                out.extend_from_slice(box_type);
-                out.extend_from_slice(&(16u64 + payload_len).to_be_bytes());
+    struct AnimationStops<'a> {
+        job: Option<&'a zencodec::StopToken>,
+        call: Option<&'a dyn Stop>,
+    }
+    impl Stop for AnimationStops<'_> {
+        fn check(&self) -> Result<(), enough::StopReason> {
+            if let Some(stop) = self.job {
+                stop.check()?;
             }
-            for part in parts {
-                out.extend_from_slice(part);
+            if let Some(stop) = self.call {
+                stop.check()?;
             }
+            Ok(())
         }
-
-        const JXL_CONTAINER_SIGNATURE: [u8; 12] = [
-            0x00, 0x00, 0x00, 0x0C, // box size = 12
-            b'J', b'X', b'L', b' ', // box type
-            0x0D, 0x0A, 0x87, 0x0A, // JXL container magic
-        ];
-        const FTYP_BOX: [u8; 20] = [
-            0x00, 0x00, 0x00, 0x14, // box size = 20
-            b'f', b't', b'y', b'p', // box type
-            b'j', b'x', b'l', b' ', // major brand
-            0x00, 0x00, 0x00, 0x00, // minor version
-            b'j', b'x', b'l', b' ', // compatible brand
-        ];
-
-        let mut out = Vec::with_capacity(
-            JXL_CONTAINER_SIGNATURE.len()
-                + FTYP_BOX.len()
-                + 8
-                + codestream.len()
-                + exif.map_or(0, |e| 8 + 4 + e.len())
-                + xmp.map_or(0, |x| 8 + x.len()),
-        );
-        out.extend_from_slice(&JXL_CONTAINER_SIGNATURE);
-        out.extend_from_slice(&FTYP_BOX);
-        write_box(&mut out, b"jxlc", &[codestream]);
-        if let Some(exif_data) = exif {
-            // Exif box payload = 4-byte TIFF header offset (always 0) + data.
-            write_box(&mut out, b"Exif", &[&[0u8; 4], exif_data]);
-        }
-        if let Some(xmp_data) = xmp {
-            write_box(&mut out, b"xml ", &[xmp_data]);
-        }
-        out
     }
 
     impl zencodec::encode::AnimationFrameEncoder for JxlAnimationFrameEncoder {
@@ -1459,14 +1410,29 @@ mod encoding {
             duration_ms: u32,
             stop: Option<&dyn Stop>,
         ) -> Result<(), At<zencodec::CodecError>> {
+            self.push_frame_timed(
+                pixels,
+                zencodec::animation::FrameDuration::from_millis(duration_ms),
+                stop,
+            )
+        }
+
+        fn push_frame_timed(
+            &mut self,
+            pixels: PixelSlice<'_>,
+            duration: zencodec::animation::FrameDuration,
+            stop: Option<&dyn Stop>,
+        ) -> Result<(), At<zencodec::CodecError>> {
+            let (clock_num, clock_den, previous_factor, ticks) = self
+                .plan_clock(duration)
+                .ok_or_else(|| Self::reject(UnsupportedOperation::AnimationTiming))?;
             (move || -> Result<(), At<JxlError>> {
                 use zenpixels::PixelFormat;
 
                 // Check cancellation before doing any work.
-                if let Some(stop) = stop {
-                    stop.check()
-                        .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
-                }
+                let job = self.encoder.stop.clone();
+                let stops = AnimationStops { job: job.as_ref(), call: stop };
+                stops.check().map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
 
                 let desc = pixels.descriptor();
                 let pf = desc.pixel_format();
@@ -1481,57 +1447,88 @@ mod encoding {
 
                 if self.pixel_data.is_empty() {
                     // Validate dimensions against limits on first frame.
-                    if let Some(ref limits) = self.limits {
+                    if let Some(ref limits) = self.encoder.limits {
                         limits.check_dimensions(w, h).map_err(|e| {
                             whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind()))
                         })?;
                     }
-                    self.width = w;
-                    self.height = h;
-                    self.layout = Some(layout);
-                } else if w != self.width || h != self.height {
+                } else if w != self.width || h != self.height || self.layout != Some(layout) {
                     return Err(whereat::at!(JxlError::InvalidInput(
-                        "animation frame dimensions must match first frame".into(),
+                        "animation frame dimensions and pixel format must match first frame".into(),
                     )));
                 }
 
-                // Check max_frames limit.
-                if let Some(ref limits) = self.limits {
-                    limits
-                        .check_frames(self.pixel_data.len() as u32 + 1)
-                        .map_err(|e| {
-                            whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind()))
-                        })?;
+                let count = u32::try_from(self.frames.len()).ok().and_then(|n| n.checked_add(1))
+                    .ok_or_else(|| whereat::at!(JxlError::InvalidInput("animation frame count overflow".into())))?;
+                if let Some(ref limits) = self.encoder.limits {
+                    limits.check_frames(count).map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind())))?;
+                    limits.check_total_pixels(u64::from(w).saturating_mul(u64::from(h)).saturating_mul(u64::from(count)))
+                        .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind())))?;
+                    let total_ticks = self.frames.iter().map(|&v| u128::from(v) * u128::from(previous_factor)).sum::<u128>() + u128::from(ticks);
+                    let total_ms = (total_ticks * u128::from(clock_den) * 1000).div_ceil(u128::from(clock_num));
+                    limits.check_animation_ms(u64::try_from(total_ms).unwrap_or(u64::MAX))
+                        .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind())))?;
                 }
 
-                let frame_data = if strip_padding {
-                    let raw = pixels.contiguous_bytes();
-                    let mut rgb = Vec::with_capacity((w as usize) * (h as usize) * 3);
-                    if matches!(pf, PixelFormat::Rgbx8) {
-                        for px in raw.as_chunks::<4>().0.iter() {
-                            rgb.extend_from_slice(&[px[0], px[1], px[2]]);
+                if w == 0 || h == 0 || desc.signal_range != zenpixels::SignalRange::Full
+                    || matches!(desc.alpha(), Some(zenpixels::AlphaMode::Premultiplied))
+                    || (matches!(self.encoder.mode, JxlEncMode::Lossless(_)) && desc.channel_type() == ChannelType::F32)
+                {
+                    return Err(whereat::at!(JxlError::UnsupportedOperation(UnsupportedOperation::PixelFormat)));
+                }
+                if self.descriptor.is_some_and(|d| d != desc)
+                    || (self.descriptor.is_some() && self.color_context.as_ref() != pixels.color_context())
+                {
+                    return Err(whereat::at!(JxlError::InvalidInput("animation frames must share precision and color interpretation".into())));
+                }
+                let frame_bytes = u64::from(w)*u64::from(h)*layout.bytes_per_pixel() as u64;
+                let accumulated_bytes = self.accumulated_bytes.checked_add(frame_bytes).ok_or_else(|| whereat::at!(JxlError::InvalidInput("animation memory size overflow".into())))?;
+                if let Some(limits) = &self.encoder.limits {
+                    limits.check_memory(accumulated_bytes).map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string(),e.kind())))?;
+                }
+                let mut frame_data=Vec::new();
+                frame_data.try_reserve_exact(usize::try_from(frame_bytes).map_err(|_| whereat::at!(JxlError::InvalidInput("frame byte size overflow".into())))?)
+                    .map_err(|_| whereat::at!(JxlError::InvalidInput("animation allocation failed".into())))?;
+                for y in 0..h {
+                    stops.check().map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
+                    let row=pixels.row(y);
+                    if strip_padding {
+                        for pixel in row.as_chunks::<4>().0 {
+                            if pf == PixelFormat::Rgbx8 { frame_data.extend_from_slice(&pixel[..3]); }
+                            else { frame_data.extend_from_slice(&[pixel[2],pixel[1],pixel[0]]); }
                         }
-                    } else {
-                        for px in raw.as_chunks::<4>().0.iter() {
-                            rgb.extend_from_slice(&[px[2], px[1], px[0]]);
-                        }
+                    } else { frame_data.extend_from_slice(row); }
+                }
+                self.frames.try_reserve(1).map_err(|_| whereat::at!(JxlError::InvalidInput("animation allocation failed".into())))?;
+                self.pixel_data.try_reserve(1).map_err(|_| whereat::at!(JxlError::InvalidInput("animation allocation failed".into())))?;
+                if self.pixel_data.is_empty() {
+                    let mut metadata=self.encoder.metadata.clone().unwrap_or_else(Metadata::none);
+                    if let Some(context)=pixels.color_context() {
+                        if metadata.icc_profile.is_none() { metadata.icc_profile=context.icc.clone(); }
+                        if metadata.cicp.is_none() { metadata.cicp=context.cicp; }
                     }
-                    rgb
-                } else {
-                    pixels.contiguous_bytes().into_owned()
-                };
-                let frame_bytes = frame_data.len() as u64;
-                self.accumulated_bytes += frame_bytes;
-
-                // Check accumulated memory across ALL frames, not just the first.
-                if let Some(ref limits) = self.limits {
-                    limits.check_memory(self.accumulated_bytes).map_err(|e| {
-                        whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind()))
-                    })?;
+                    if metadata.cicp.is_none() && metadata.icc_profile.is_none() {
+                        metadata.cicp=desc.primaries.to_cicp().zip(desc.transfer().to_cicp()).map(|(cp,tc)| zencodec::Cicp::new(cp,tc,0,true));
+                    }
+                    if metadata.cicp.is_none() && metadata.icc_profile.is_none() {
+                        return Err(whereat::at!(JxlError::InvalidInput("animation input needs an explicit color interpretation".into())));
+                    }
+                    let (ce,_) = JxlEncoder::resolve_color(Some(&metadata), &self.encoder.policy, layout);
+                    if matches!(self.encoder.mode, JxlEncMode::Lossy(_)) && ce.is_none() && metadata.icc_profile.is_some() {
+                        return Err(whereat::at!(JxlError::InvalidInput("lossy animation with an unrecognized ICC requires explicit color conversion".into())));
+                    }
+                    self.encoder.metadata=Some(metadata);
                 }
-
+                self.width=w; self.height=h; self.layout=Some(layout);
+                self.descriptor=Some(desc); self.color_context=pixels.color_context().cloned();
+                self.accumulated_bytes = accumulated_bytes;
                 self.pixel_data.push(frame_data);
-                self.frames.push(duration_ms);
+                for previous in &mut self.frames {
+                    *previous *= previous_factor;
+                }
+                self.frames.push(ticks);
+                self.tps_numerator = clock_num;
+                self.tps_denominator = clock_den;
                 Ok(())
             })()
             .map_err(zencodec::CodecError::of)
@@ -1540,10 +1537,14 @@ mod encoding {
         fn finish(self, stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<zencodec::CodecError>> {
             (move || -> Result<EncodeOutput, At<JxlError>> {
                 // Check cancellation before expensive encode.
-                if let Some(stop) = stop {
-                    stop.check()
-                        .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
-                }
+                let job = self.encoder.stop.clone();
+                let stops = AnimationStops {
+                    job: job.as_ref(),
+                    call: stop,
+                };
+                stops
+                    .check()
+                    .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
 
                 // Calling `finish()` before any frames were pushed is an
                 // out-of-sequence call, not a bad parameter value.
@@ -1552,8 +1553,8 @@ mod encoding {
                 })?;
 
                 let animation = AnimationParams {
-                    tps_numerator: 1000,
-                    tps_denominator: 1,
+                    tps_numerator: self.tps_numerator,
+                    tps_denominator: self.tps_denominator,
                     num_loops: self.loop_count.unwrap_or(0),
                     // jxl-encoder 0.3.2 (W12-4 a1-audit chunk-1) added
                     // associated/premultiplied-alpha signalling on the
@@ -1585,95 +1586,48 @@ mod encoding {
                 // caller's cap and charges every per-frame allocation against
                 // one shared budget; without it the core's path-aware default
                 // cap applies.
-                let jxl_limits = to_jxl_encode_limits(&self.limits);
-                let encoded = match (&self.mode, &jxl_limits) {
-                    (JxlEncMode::Lossy(cfg), Some(lim)) => cfg
-                        .encode_animation_with_limits(
-                            self.width,
-                            self.height,
-                            layout,
-                            &animation,
-                            &anim_frames,
-                            lim,
-                        )
-                        .map_err_at(JxlError::Encode)?,
-                    (JxlEncMode::Lossy(cfg), None) => cfg
-                        .encode_animation(self.width, self.height, layout, &animation, &anim_frames)
-                        .map_err_at(JxlError::Encode)?,
-                    (JxlEncMode::Lossless(cfg), Some(lim)) => cfg
-                        .encode_animation_with_limits(
-                            self.width,
-                            self.height,
-                            layout,
-                            &animation,
-                            &anim_frames,
-                            lim,
-                        )
-                        .map_err_at(JxlError::Encode)?,
-                    (JxlEncMode::Lossless(cfg), None) => cfg
-                        .encode_animation(self.width, self.height, layout, &animation, &anim_frames)
-                        .map_err_at(JxlError::Encode)?,
+                let mut remaining_limits = self.encoder.limits;
+                if let Some(limits) = &mut remaining_limits
+                    && let Some(bytes) = limits.max_memory_bytes
+                {
+                    limits.max_memory_bytes = Some(bytes.saturating_sub(self.accumulated_bytes));
+                }
+                let jxl_limits = to_jxl_encode_limits(&remaining_limits);
+                let (color_encoding, embed_icc) = self.encoder.resolve_jxl_color(layout);
+                let metadata = self.encoder.build_jxl_metadata(embed_icc);
+                let request = match &self.encoder.mode {
+                    JxlEncMode::Lossless(cfg) => {
+                        cfg.encode_request(self.width, self.height, layout)
+                    }
+                    JxlEncMode::Lossy(cfg) => cfg.encode_request(self.width, self.height, layout),
                 };
-
-                let encoded = self.wrap_with_metadata_and_gain_map(encoded);
+                let request = if let Some(ref ce) = color_encoding {
+                    request.with_color_encoding(ce.clone())
+                } else {
+                    request
+                };
+                let request = if let Some(ref meta) = metadata {
+                    request.with_metadata(meta)
+                } else {
+                    request
+                };
+                let request = if let Some(ref limits) = jxl_limits {
+                    request.with_limits(limits)
+                } else {
+                    request
+                };
+                let encoded = request
+                    .with_stop(&stops)
+                    .encode_animation(&animation, &anim_frames)
+                    .map_err_at(JxlError::Encode)?;
+                let encoded = self.encoder.maybe_attach_gain_map(encoded);
+                self.encoder.check_encoded_output_size(&encoded)?;
 
                 Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                     .with_mime_type("image/jxl")
                     .with_extension("jxl"))
             })()
             .map_err(zencodec::CodecError::of)
-        }
-    }
-
-    /// Byte-layout pin for [`wrap_codestream_with_metadata`]: the exact
-    /// ISO/IEC 18181-2 box sequence the ported upstream writer emitted, so
-    /// the local copy can never drift silently.
-    #[cfg(test)]
-    mod wrap_layout_tests {
-        use super::wrap_codestream_with_metadata;
-
-        #[test]
-        fn wrap_codestream_with_metadata_layout() {
-            let codestream = [0xFFu8, 0x0A, 0x01, 0x02, 0x03];
-            let exif = [0xAAu8, 0xBB, 0xCC];
-            let xmp = b"<x/>";
-            let out = wrap_codestream_with_metadata(&codestream, Some(&exif), Some(xmp));
-
-            // Signature box + ftyp box.
-            assert_eq!(
-                &out[..12],
-                &[
-                    0x00, 0x00, 0x00, 0x0C, b'J', b'X', b'L', b' ', 0x0D, 0x0A, 0x87, 0x0A
-                ]
-            );
-            assert_eq!(
-                &out[12..32],
-                &[
-                    0x00, 0x00, 0x00, 0x14, b'f', b't', b'y', b'p', b'j', b'x', b'l', b' ', 0x00,
-                    0x00, 0x00, 0x00, b'j', b'x', b'l', b' '
-                ]
-            );
-            // jxlc box: size = 8-byte header + 5-byte codestream.
-            assert_eq!(out[32..36], 13u32.to_be_bytes());
-            assert_eq!(&out[36..40], b"jxlc");
-            assert_eq!(out[40..45], codestream);
-            // Exif box: size = 8 + 4 (zero TIFF offset) + 3.
-            assert_eq!(out[45..49], 15u32.to_be_bytes());
-            assert_eq!(&out[49..53], b"Exif");
-            assert_eq!(out[53..57], [0u8; 4]);
-            assert_eq!(out[57..60], exif);
-            // xml box: size = 8 + 4.
-            assert_eq!(out[60..64], 12u32.to_be_bytes());
-            assert_eq!(&out[64..68], b"xml ");
-            assert_eq!(&out[68..72], xmp);
-            assert_eq!(out.len(), 72);
-            // The wrap is what makes the stream a container.
-            assert!(jxl_encoder::is_container(&out));
-
-            // Metadata-free wrap: signature + ftyp + jxlc only.
-            let bare = wrap_codestream_with_metadata(&codestream, None, None);
-            assert_eq!(bare.len(), 32 + 8 + codestream.len());
-            assert_eq!(&bare[36..40], b"jxlc");
         }
     }
 }
@@ -1684,7 +1638,6 @@ mod encoding {
 mod decoding {
     use super::*;
     use alloc::borrow::Cow;
-    use alloc::collections::VecDeque;
     use alloc::vec::Vec;
 
     use alloc::string::ToString;
@@ -1706,7 +1659,7 @@ mod decoding {
 
     use crate::decode::{
         JxlInfo, JxlLimits, build_pixel_data, choose_pixel_format, decode_with_options_oriented,
-        extract_color_info, is_hdr_or_wide_gamut, map_err, probe, probe_with_orientation,
+        extract_color_info, map_err, probe, probe_with_orientation,
     };
 
     /// Determine the decoder `parallel` flag from limits.
@@ -2638,17 +2591,20 @@ mod decoding {
                     Self::jxl_info_to_image_info(&info),
                     &self.policy,
                 ));
-                Ok(JxlAnimationFrameDecoder {
+                let mut animation = JxlAnimationFrameDecoder {
                     data: data.into_owned(),
                     limits: self.limits,
                     policy: self.policy,
                     stop: self.stop,
                     preferred: preferred.to_vec(),
-                    frames: None,
+                    state: None,
                     image_info: Some(image_info),
                     current: None,
                     start_frame_index: self.start_frame_index,
-                })
+                    failed: false,
+                };
+                animation.initialize()?;
+                Ok(animation)
             })()
             .map_err(zencodec::CodecError::of)
         }
@@ -2824,348 +2780,345 @@ mod decoding {
 
     // ── JxlAnimationFrameDecoder ──────────────────────────────────────────────
 
-    /// Animation JPEG XL decoder (fully composited frames).
-    ///
-    /// Decodes all frames eagerly on first call to `render_next_frame()` — the
-    /// jxl-rs decoder handles blending/disposal internally, producing
-    /// fully composited frames.
+    /// Animation JPEG XL decoder delivering one composited canvas at a time.
+    /// The compressed input is retained; decoded output does not accumulate.
     pub struct JxlAnimationFrameDecoder {
         data: Vec<u8>,
         limits: Option<ResourceLimits>,
         policy: DecodePolicy,
         stop: Option<zencodec::StopToken>,
         preferred: Vec<PixelDescriptor>,
-        /// Pre-decoded frames (lazily populated on first render_next_frame call).
-        frames: Option<DecodedFrames>,
-        /// Image info, set after decoding.
+        state: Option<AnimationDecodeState>,
         image_info: Option<Arc<ImageInfo>>,
-        /// Current frame for borrowed access via `render_next_frame`.
         current: Option<OwnedAnimationFrame>,
-        /// Number of displayed frames to skip from the front.
         start_frame_index: u32,
+        failed: bool,
     }
 
-    struct DecodedFrames {
-        frames: VecDeque<OwnedAnimationFrame>,
-        loop_count: Option<u32>,
+    struct AnimationDecodeState {
+        decoder: Option<JxlRsDecoder<jxl::api::states::WithImageInfo>>,
+        offset: usize,
+        chosen: crate::decode::ChosenFormat,
+        width: usize,
+        height: usize,
+        bytes_per_row: usize,
+        frame_bytes: usize,
+        color: zencodec::SourceColor,
+        clock: Option<(u32, u32)>,
+        loops: Option<u32>,
+        index: u32,
+        total_ticks: u128,
+        ended: bool,
     }
 
     impl JxlAnimationFrameDecoder {
-        /// Decode all frames up front.
-        fn decode_all_frames(&mut self) -> Result<(), At<JxlError>> {
+        fn initialize(&mut self) -> Result<(), At<JxlError>> {
+            self.check_stop(None)?;
             let mut options = JxlDecoderOptions::default();
-
-            // Per-frame output buffers are sized from the (untrusted) header
-            // dimensions, so they honor the caller's allocation-fallibility
-            // preference with a *fallible* site default. The direct decode API
-            // never reaches this path; only the zencodec adapter does, mapping
-            // `ResourceLimits::prefer_fallible_allocations`.
-            let alloc_pref = self
-                .limits
-                .as_ref()
-                .map(|l| l.prefer_fallible_allocations)
-                .unwrap_or_default();
-
-            // Honor the same progressive gate as the single-image decode path:
-            // an animation whose frames are progressive must also be rejected
-            // when the policy forbids it. Header parse below stays unaffected
-            // (the gate fires only at frame headers, of which there are none yet).
             options.reject_progressive = !self.policy.resolve_progressive(true);
-
             if let Some(p) = policy_to_parallel(&self.limits) {
                 options.parallel = p;
             }
-
-            if let Some(ref lim) = self.limits {
-                if let Some(max_px) = lim.max_pixels {
-                    // Saturate u64 → usize on 32-bit targets.
-                    options.limits.max_pixels = Some(usize::try_from(max_px).unwrap_or(usize::MAX));
-                }
-                if let Some(max_mem) = lim.max_memory_bytes {
-                    // jxl-rs takes max_memory_bytes as u64; pass through directly
-                    // so the wrapper's memory cap is honored end-to-end.
-                    options.limits.max_memory_bytes = Some(max_mem);
-                }
+            if let Some(lim) = &self.limits {
+                options.limits.max_pixels = lim
+                    .max_pixels
+                    .map(|v| usize::try_from(v).unwrap_or(usize::MAX));
+                options.limits.max_memory_bytes = lim.max_memory_bytes;
             }
-
-            // Forward stop token for cooperative cancellation.
-            if let Some(ref stop) = self.stop {
+            if let Some(stop) = &self.stop {
                 options.stop = Arc::new(stop.clone());
             }
-
-            let decoder = JxlRsDecoder::new(options);
-
-            // Parse header
-            let mut input: &[u8] = &self.data;
-            let result = decoder.process(&mut input).map_err_at(JxlError::from)?;
-            let mut decoder = match result {
-                ProcessingResult::Complete { result } => result,
-                // Truncated input, not a bad parameter — matches the four
-                // `NeedsMoreInput` sites in decode.rs.
-                ProcessingResult::NeedsMoreInput { .. } => {
-                    return Err(whereat::at!(JxlError::UnexpectedEof(
-                        "JXL: insufficient data for header".into(),
-                    )));
-                }
+            let mut input = self.data.as_slice();
+            let ProcessingResult::Complete {
+                result: mut decoder,
+            } = JxlRsDecoder::new(options)
+                .process(&mut input)
+                .map_err_at(JxlError::from)?
+            else {
+                return Err(whereat::at!(JxlError::UnexpectedEof(
+                    "JXL: incomplete image header".into()
+                )));
             };
-
-            let basic_info = decoder.basic_info();
-            // Animation decodes use the default options (orientation adjusted):
-            // `size` is the display geometry and `orientation` is the residual
-            // (Identity). `coded_size` / `intrinsic_orientation` report the
-            // stored values.
-            let (width, height) = basic_info.size;
-            let (coded_width, coded_height) = basic_info.coded_size;
-            let has_alpha = basic_info
+            let basic = decoder.basic_info();
+            let (width, height) = basic.size;
+            let has_alpha = basic
                 .extra_channels
                 .iter()
                 .any(|ec| matches!(ec.ec_type, ExtraChannel::Alpha));
-            let has_animation = basic_info.animation.is_some();
-            let loop_count = basic_info.animation.as_ref().map(|a| a.num_loops);
-            let bit_depth_u8 = basic_info.bit_depth.bits_per_sample() as u8;
-            let orientation = basic_info.orientation as u8;
-            let intrinsic_orientation = basic_info.intrinsic_orientation as u8;
-            let is_gray = crate::decode::profile_is_grayscale(decoder.embedded_color_profile());
-            let num_extra = basic_info.extra_channels.len();
-            let xyb_encoded = !basic_info.uses_original_profile;
-            let extra_channels = crate::decode::convert_extra_channels(&basic_info.extra_channels);
-            let preview_size = basic_info.preview_size.map(|(w, h)| (w as u32, h as u32));
-            let intrinsic_size = basic_info.intrinsic_size.map(|(w, h)| (w as u32, h as u32));
-            let intensity_target = basic_info.tone_mapping.intensity_target;
-            let min_nits = basic_info.tone_mapping.min_nits;
-            let relative_to_max_display = basic_info.tone_mapping.relative_to_max_display;
-            let linear_below = basic_info.tone_mapping.linear_below;
-
-            let (icc_profile, cicp) = extract_color_info(decoder.embedded_color_profile());
-
             let chosen = choose_pixel_format(
-                &basic_info.bit_depth,
+                &basic.bit_depth,
                 has_alpha,
-                is_gray,
-                num_extra,
+                crate::decode::profile_is_grayscale(decoder.embedded_color_profile()),
+                basic.extra_channels.len(),
                 &self.preferred,
             );
-
-            let channels = chosen.color_type.samples_per_pixel();
+            let clock = basic
+                .animation
+                .as_ref()
+                .map(|a| (a.tps_numerator, a.tps_denominator));
+            let loops = basic.animation.as_ref().map(|a| a.num_loops);
+            if clock.is_some_and(|(n, d)| n == 0 || d == 0) {
+                return Err(whereat::at!(JxlError::InvalidInput(
+                    "JXL: invalid animation clock".into()
+                )));
+            }
             let bytes_per_sample = match chosen.channel_type {
                 zenpixels::ChannelType::U8 => 1,
                 zenpixels::ChannelType::U16 => 2,
-                zenpixels::ChannelType::F32 => 4,
-                _ => 1,
+                _ => 4,
             };
-
+            let (bytes_per_row, frame_bytes) = crate::decode::checked_buf_size(
+                width,
+                height,
+                chosen.color_type.samples_per_pixel(),
+                bytes_per_sample,
+            )
+            .map_err(|e| whereat::at!(e))?;
+            if let Some(limits) = &self.limits {
+                let retained = (frame_bytes as u64)
+                    .saturating_mul(2)
+                    .saturating_add(self.data.len() as u64);
+                limits
+                    .check_memory(retained)
+                    .map_err(|e| whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind())))?;
+            }
             decoder.set_pixel_format(chosen.pixel_format.clone());
+            // Pixel-format negotiation can change the output profile (notably
+            // ICC-only XYB to linear floats). Tag the actual output profile.
+            let (icc, cicp) = extract_color_info(decoder.output_color_profile());
+            let mut color = zencodec::SourceColor::default();
+            if let Some(icc) = icc {
+                color = color.with_icc_profile(icc);
+            }
+            if let Some((cp, tc, mc, fr)) = cicp {
+                color = color.with_cicp(Cicp::new(cp, tc, mc, fr));
+                color.color_authority = ColorAuthority::Cicp;
+            }
+            if let Some(info) = self.image_info.as_mut() {
+                let info = Arc::make_mut(info);
+                if clock.is_some() {
+                    info.sequence = zencodec::ImageSequence::Animation {
+                        frame_count: None,
+                        loop_count: loops,
+                        random_access: false,
+                    };
+                }
+            }
+            self.state = Some(AnimationDecodeState {
+                decoder: Some(decoder),
+                offset: self.data.len() - input.len(),
+                chosen,
+                width,
+                height,
+                bytes_per_row,
+                frame_bytes,
+                color,
+                clock,
+                loops,
+                index: 0,
+                total_ticks: 0,
+                ended: false,
+            });
+            Ok(())
+        }
 
-            let width_u32 =
-                crate::decode::dim_to_u32(width, "width").map_err(|e| whereat::at!(e))?;
-            let height_u32 =
-                crate::decode::dim_to_u32(height, "height").map_err(|e| whereat::at!(e))?;
-            let coded_width_u32 = crate::decode::dim_to_u32(coded_width, "coded width")
-                .map_err(|e| whereat::at!(e))?;
-            let coded_height_u32 = crate::decode::dim_to_u32(coded_height, "coded height")
-                .map_err(|e| whereat::at!(e))?;
+        fn check_stop(&self, call: Option<&dyn Stop>) -> Result<(), At<JxlError>> {
+            if let Some(stop) = &self.stop {
+                stop.check()
+                    .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
+            }
+            if let Some(stop) = call {
+                stop.check()
+                    .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
+            }
+            Ok(())
+        }
 
-            let (bytes_per_row, frame_buf_bytes) =
-                crate::decode::checked_buf_size(width, height, channels, bytes_per_sample)
-                    .map_err(|e| whereat::at!(e))?;
+        fn next_frame(
+            &mut self,
+            call: Option<&dyn Stop>,
+        ) -> Result<Option<OwnedAnimationFrame>, At<JxlError>> {
+            if self.failed {
+                return Err(whereat::at!(JxlError::InvalidState(
+                    "animation decoder failed".into()
+                )));
+            }
+            let result = self.next_frame_inner(call);
+            if result.is_err() {
+                self.failed = true;
+            }
+            result
+        }
 
-            let is_f32 = matches!(
-                chosen.pixel_format.color_data_format,
-                Some(jxl::api::JxlDataFormat::F32 { .. })
-            );
-            // Only clamp when CICP explicitly tells us it's SDR.
-            // When CICP is absent (ICC-only), we don't know the gamut.
-            let clamp = is_f32 && cicp.is_some() && !is_hdr_or_wide_gamut(cicp);
-
-            let mut frames = VecDeque::new();
-            let mut frame_index = 0u32;
-            // Bytes retained across frames (matches encoder-side accumulator) —
-            // used to gate against ResourceLimits.max_memory_bytes so a long
-            // animation cannot allocate without bound.
-            let mut accumulated_bytes: u64 = 0;
-            // Track the final decoder so we can extract EXIF/XMP after the loop.
-            let mut final_decoder = None;
-
+        fn next_frame_inner(
+            &mut self,
+            call: Option<&dyn Stop>,
+        ) -> Result<Option<OwnedAnimationFrame>, At<JxlError>> {
+            self.current = None;
             loop {
-                // Gate frame count BEFORE allocating the next frame's buffer.
-                // `frame_index` is the count of frames seen so far, so the
-                // (frame_index + 1)th frame must satisfy max_frames.
-                if let Some(ref limits) = self.limits {
+                self.check_stop(call)?;
+                let state = self.state.as_mut().expect("initialized animation decoder");
+                if state.ended {
+                    return Ok(None);
+                }
+                let count = state.index.checked_add(1).ok_or_else(|| {
+                    whereat::at!(JxlError::InvalidInput(
+                        "animation frame count overflow".into()
+                    ))
+                })?;
+                if let Some(limits) = &self.limits {
+                    limits.check_frames(count).map_err(|e| {
+                        whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind()))
+                    })?;
                     limits
-                        .check_frames(frame_index.saturating_add(1))
+                        .check_total_pixels(
+                            (state.width as u64)
+                                .saturating_mul(state.height as u64)
+                                .saturating_mul(u64::from(count)),
+                        )
                         .map_err(|e| {
                             whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind()))
                         })?;
                 }
-
-                // Advance to frame info. This is where `reject_progressive`
-                // fires (at the frame header), so route through `map_err` to
-                // surface the dedicated `JxlError::ProgressiveRejected`.
-                let result = decoder
+                let mut input = &self.data[state.offset..];
+                let decoder = state.decoder.take().expect("active animation decoder");
+                let ProcessingResult::Complete { result: frame } = decoder
                     .process(&mut input)
-                    .map_err(|e| e.map_error(map_err))?;
-                let decoder_fi = match result {
-                    ProcessingResult::Complete { result } => result,
-                    ProcessingResult::NeedsMoreInput { .. } => break,
+                    .map_err(|e| e.map_error(map_err))?
+                else {
+                    return Err(whereat::at!(JxlError::UnexpectedEof(
+                        "JXL: incomplete animation frame header".into()
+                    )));
                 };
-
-                let frame_header = decoder_fi.frame_header();
-                let duration_ms = frame_header.duration.map(|d| d as u32).unwrap_or(0);
-
-                // Decode pixels. The per-frame output buffer is sized from the
-                // (untrusted) header dimensions, so it honors `alloc_pref` with
-                // a *fallible* site default.
-                let mut buf = crate::alloc_util::alloc_zeroed(alloc_pref, true, frame_buf_bytes)?;
-                let output = JxlOutputBuffer::new(&mut buf, height, bytes_per_row);
-
-                let result = decoder_fi
+                let duration = if let Some((num, den)) = state.clock {
+                    let ticks = frame
+                        .scanned_frames()
+                        .iter()
+                        .find(|f| f.index == state.index as usize)
+                        .ok_or_else(|| {
+                            whereat::at!(JxlError::InvalidState(
+                                "JXL decoder omitted visible timing".into()
+                            ))
+                        })?
+                        .duration_ticks;
+                    state.total_ticks += u128::from(ticks);
+                    if let Some(limits) = &self.limits {
+                        let ms =
+                            (state.total_ticks * u128::from(den) * 1000).div_ceil(u128::from(num));
+                        limits
+                            .check_animation_ms(u64::try_from(ms).unwrap_or(u64::MAX))
+                            .map_err(|e| {
+                                whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind()))
+                            })?;
+                    }
+                    zencodec::animation::FrameDuration::new(u64::from(ticks) * u64::from(den), num)
+                        .map_err(|_| {
+                            whereat::at!(JxlError::InvalidInput(
+                                "invalid animation duration".into()
+                            ))
+                        })?
+                } else {
+                    zencodec::animation::FrameDuration::from_millis(0)
+                };
+                if let Some(stop) = call {
+                    stop.check()
+                        .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
+                }
+                let alloc_pref = self
+                    .limits
+                    .as_ref()
+                    .map(|l| l.prefer_fallible_allocations)
+                    .unwrap_or_default();
+                let mut buf = crate::alloc_util::alloc_zeroed(alloc_pref, true, state.frame_bytes)?;
+                let output = JxlOutputBuffer::new(&mut buf, state.height, state.bytes_per_row);
+                let ProcessingResult::Complete {
+                    result: mut decoder,
+                } = frame
                     .process(&mut input, &mut [output])
-                    .map_err(|e| e.map_error(map_err))?;
-                let next_decoder = match result {
-                    ProcessingResult::Complete { result } => result,
-                    // Truncated input, not a bad parameter — matches the four
-                    // `NeedsMoreInput` sites in decode.rs.
-                    ProcessingResult::NeedsMoreInput { .. } => {
-                        return Err(whereat::at!(JxlError::UnexpectedEof(
-                            "JXL: insufficient data for frame pixels".into(),
-                        )));
-                    }
+                    .map_err(|e| e.map_error(map_err))?
+                else {
+                    return Err(whereat::at!(JxlError::UnexpectedEof(
+                        "JXL: incomplete animation frame pixels".into()
+                    )));
                 };
-
-                // Skip frames before start_frame_index: decode them (jxl-rs
-                // requires sequential decode) but drop immediately instead of
-                // storing in the VecDeque.  This avoids holding all skipped
-                // frames in memory at peak.
-                if frame_index >= self.start_frame_index {
-                    // Track retained-memory growth and gate against limits
-                    // before pushing the new frame, mirroring the encoder
-                    // path (ResourceLimits.check_memory).
-                    accumulated_bytes = accumulated_bytes.saturating_add(frame_buf_bytes as u64);
-                    if let Some(ref limits) = self.limits {
-                        limits.check_memory(accumulated_bytes).map_err(|e| {
-                            whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind()))
-                        })?;
-                    }
-                    if clamp {
-                        crate::decode::clamp_f32_buf(&mut buf);
-                    }
-                    let pixel_buf = build_pixel_data(&buf, width, height, &chosen);
-                    frames.push_back(OwnedAnimationFrame::new(
-                        pixel_buf,
-                        duration_ms,
-                        frame_index,
-                    ));
+                if let Some(stop) = call {
+                    stop.check()
+                        .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
                 }
-
-                frame_index += 1;
-
-                if !next_decoder.has_more_frames() {
-                    final_decoder = Some(next_decoder);
-                    break;
+                state.offset = self.data.len() - input.len();
+                state.ended = !decoder.has_more_frames();
+                let index = state.index;
+                state.index = count;
+                if state.ended {
+                    let info =
+                        Arc::make_mut(self.image_info.as_mut().expect("initialized image info"));
+                    if self.policy.resolve_exif(true) {
+                        info.embedded_metadata.exif = decoder.take_exif().map(Into::into);
+                    }
+                    if self.policy.resolve_xmp(true) {
+                        info.embedded_metadata.xmp = decoder.take_xmp().map(Into::into);
+                    }
+                    if state.clock.is_some() {
+                        info.sequence = zencodec::ImageSequence::Animation {
+                            frame_count: Some(count),
+                            loop_count: state.loops,
+                            random_access: false,
+                        };
+                    }
                 }
-                decoder = next_decoder;
+                state.decoder = Some(decoder);
+                if index < self.start_frame_index {
+                    continue;
+                }
+                let pixels = build_pixel_data(&buf, state.width, state.height, &state.chosen);
+                let descriptor = zencodec::helpers::descriptor_for_decoded_pixels_v2(
+                    pixels.descriptor().pixel_format(),
+                    &state.color,
+                    None,
+                );
+                let pixels = pixels
+                    .with_descriptor(descriptor)
+                    .with_color_context(Arc::new(state.color.to_color_context()));
+                return Ok(Some(OwnedAnimationFrame::with_duration(
+                    pixels, duration, index,
+                )));
             }
-
-            // Extract EXIF and XMP metadata from container boxes.
-            // These may appear after the codestream, so they're only
-            // available after all frames have been decoded.
-            let exif = final_decoder.as_mut().and_then(|d| d.take_exif());
-            let xmp = final_decoder.as_mut().and_then(|d| d.take_xmp());
-
-            let jxl_info = JxlInfo {
-                width: width_u32,
-                height: height_u32,
-                coded_width: coded_width_u32,
-                coded_height: coded_height_u32,
-                has_alpha,
-                has_animation,
-                bit_depth: Some(bit_depth_u8),
-                icc_profile,
-                orientation,
-                intrinsic_orientation,
-                cicp,
-                is_gray,
-                exif,
-                xmp,
-                extra_channels,
-                preview_size,
-                xyb_encoded,
-                intensity_target,
-                min_nits,
-                relative_to_max_display,
-                linear_below,
-                intrinsic_size,
-            };
-            let image_info = Arc::new(JxlDecodeJob::apply_policy(
-                JxlDecodeJob::jxl_info_to_image_info(&jxl_info),
-                &self.policy,
-            ));
-
-            self.image_info = Some(image_info);
-            self.frames = Some(DecodedFrames { frames, loop_count });
-
-            Ok(())
         }
     }
 
     impl zencodec::decode::AnimationFrameDecoder for JxlAnimationFrameDecoder {
         type Error = At<zencodec::CodecError>;
-
-        fn wrap_sink_error(err: SinkError) -> At<zencodec::CodecError> {
+        fn wrap_sink_error(err: SinkError) -> Self::Error {
             JxlError::Sink(err).into()
         }
-
         fn info(&self) -> &ImageInfo {
-            self.image_info
-                .as_ref()
-                .expect("info() called before decode_all_frames()")
+            self.image_info.as_ref().expect("initialized image info")
         }
-
         fn frame_count(&self) -> Option<u32> {
-            self.frames.as_ref().map(|f| f.frames.len() as u32)
+            self.state.as_ref().and_then(|s| s.ended.then_some(s.index))
         }
-
         fn loop_count(&self) -> Option<u32> {
-            self.frames.as_ref().and_then(|f| f.loop_count)
+            self.state.as_ref().and_then(|s| s.loops)
         }
-
         fn render_next_frame(
             &mut self,
-            _stop: Option<&dyn Stop>,
-        ) -> Result<Option<AnimationFrame<'_>>, At<zencodec::CodecError>> {
-            // Single fallible site (the eager all-frames decode): convert at the
-            // boundary. `render_next_frame` returns a frame borrowing `self`, so
-            // a closure-wrapped inner body cannot be used here (the borrow would
-            // not outlive the closure).
-            if self.frames.is_none() {
-                self.decode_all_frames().map_err(zencodec::CodecError::of)?;
-            }
-
-            let decoded = self.frames.as_mut().unwrap();
-            self.current = decoded.frames.pop_front();
+            stop: Option<&dyn Stop>,
+        ) -> Result<Option<AnimationFrame<'_>>, Self::Error> {
+            self.current = self.next_frame(stop).map_err(zencodec::CodecError::of)?;
             Ok(self.current.as_ref().map(|f| f.as_animation_frame()))
         }
-
+        fn render_next_frame_owned(
+            &mut self,
+            stop: Option<&dyn Stop>,
+        ) -> Result<Option<OwnedAnimationFrame>, Self::Error> {
+            self.next_frame(stop).map_err(zencodec::CodecError::of)
+        }
         fn render_next_frame_to_sink(
             &mut self,
             stop: Option<&dyn Stop>,
             sink: &mut dyn zencodec::decode::DecodeRowSink,
-        ) -> Result<Option<OutputInfo>, At<zencodec::CodecError>> {
-            // The helper drives `render_next_frame_owned` + `wrap_sink_error`,
-            // both `Self::Error` (now `At<CodecError>`).
+        ) -> Result<Option<OutputInfo>, Self::Error> {
             zencodec::helpers::copy_frame_to_sink(self, stop, sink)
-        }
-
-        fn render_next_frame_owned(
-            &mut self,
-            _stop: Option<&dyn Stop>,
-        ) -> Result<Option<OwnedAnimationFrame>, At<zencodec::CodecError>> {
-            if self.frames.is_none() {
-                self.decode_all_frames().map_err(zencodec::CodecError::of)?;
-            }
-
-            let decoded = self.frames.as_mut().unwrap();
-            Ok(decoded.frames.pop_front())
         }
     }
 }
@@ -3878,12 +3831,12 @@ mod tests {
         assert_eq!(info.format, ImageFormat::Jxl);
     }
 
-    /// H2 (audit): animation decode must gate accumulated retained-frame
-    /// memory against ResourceLimits.max_memory_bytes.
+    /// Incremental animation decode must gate its current frame buffers
+    /// against ResourceLimits.max_memory_bytes.
     ///
     /// We encode a 4-frame animation, then ask the animation decoder to
     /// render under a memory cap that's too tight to hold even the first
-    /// decoded frame. The first call to `render_next_frame` must error.
+    /// decoded frame. Construction or the first render must report a memory limit.
     #[cfg(all(feature = "encode", feature = "decode"))]
     #[test]
     fn animation_decode_respects_max_memory_bytes() {
@@ -3923,18 +3876,21 @@ mod tests {
             .with_threading(ThreadingPolicy::Sequential)
             .with_max_memory(128);
         let dec_config = JxlDecoderConfig::new();
-        let mut ffd = dec_config
+        use zencodec::{CategorizedError, ErrorCategory, LimitKind, ResourceError};
+        let error = match dec_config
             .job()
             .with_limits(dec_limits)
             .animation_frame_decoder(Cow::Borrowed(encoded.data()), &[])
-            .unwrap();
-
-        // First render call triggers decode_all_frames and must fail with
-        // a LimitExceeded error from the new accumulated_bytes gate.
-        let result = ffd.render_next_frame(None);
-        assert!(
-            result.is_err(),
-            "animation render under tight memory cap must error, got Ok"
+        {
+            Err(error) => error,
+            Ok(mut decoder) => match decoder.render_next_frame(None) {
+                Err(error) => error,
+                Ok(_) => panic!("animation must reject a cap smaller than one frame"),
+            },
+        };
+        assert_eq!(
+            error.category(),
+            ErrorCategory::Resource(ResourceError::Limits(LimitKind::Memory))
         );
     }
 
@@ -3981,18 +3937,24 @@ mod tests {
             .with_limits(dec_limits)
             .animation_frame_decoder(Cow::Borrowed(encoded.data()), &[])
             .unwrap();
-        let result = ffd.render_next_frame(None);
-        assert!(
-            result.is_err(),
-            "animation render with 3 frames under max_frames=2 must error"
+        // The first two displays are available without decoding the third.
+        for index in 0..2 {
+            let frame = ffd.render_next_frame(None).unwrap().unwrap();
+            assert_eq!(frame.frame_index(), index);
+        }
+        let error = match ffd.render_next_frame(None) {
+            Err(error) => error,
+            Ok(_) => panic!("third display must exceed max_frames=2"),
+        };
+        use zencodec::{CategorizedError, ErrorCategory, LimitKind, ResourceError};
+        assert_eq!(
+            error.category(),
+            ErrorCategory::Resource(ResourceError::Limits(LimitKind::Frames))
         );
     }
 
-    /// Animation EXIF/XMP: the jxl-encoder animation API carries no metadata,
-    /// so the adapter post-wraps the codestream with the local ISOBMFF port
-    /// (`wrap_codestream_with_metadata`). Assert the wrap yields a container
-    /// whose metadata round-trips through a real decode and whose frames all
-    /// still render.
+    /// The native animation request carries EXIF/XMP into its container.
+    /// Metadata round-trips through a real decode and every frame renders.
     #[cfg(all(feature = "encode", feature = "decode"))]
     #[test]
     fn animation_exif_xmp_roundtrip() {
@@ -4694,7 +4656,7 @@ mod tests {
         use zencodec::estimate::{ComputeEnvironment, ImageCharacteristics};
 
         let cfg = JxlDecoderConfig::new();
-        let compute = ComputeEnvironment::new();
+        let compute = ComputeEnvironment::conservative();
         let small = ImageCharacteristics::new(256, 256, zenpixels::PixelDescriptor::RGBA8_SRGB);
         let large = ImageCharacteristics::new(2048, 2048, zenpixels::PixelDescriptor::RGBA8_SRGB);
 

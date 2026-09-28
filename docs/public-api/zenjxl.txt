@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenjxl.txt 96 lines (supported surface) | zenjxl.features.txt 67 added (features: butteraugli-loop,decode,encode,jpeg-lossy,parallel,reconstruct-hdr,threads,zencodec) | zenjxl.internal.txt 201 lines (9 hidden + 353 excluded-feature)
+# files: zenjxl.txt 102 lines (supported surface) | zenjxl.features.txt 68 added (features: butteraugli-loop,decode,encode,jpeg-lossy,parallel,reconstruct-hdr,threads,zencodec) | zenjxl.internal.txt 236 lines (10 hidden + 400 excluded-feature)
 
 ## summary
 #
@@ -14,16 +14,16 @@
 #   pub types (struct/enum/trait/alias)         7
 #   free functions                              4
 #   struct fields                              38
-#   enum variants                              20
+#   enum variants                              25
 #   re-exports                                 17
-#   trait roster entries (type × trait)        25
+#   trait roster entries (type × trait)        27
 #   auto-trait-complete types                   6
 #   auto-trait exceptions                       1
 #
 # per-module pub lines:
-#   (root)                           87
+#   (root)                           92
 
-## items (87 lines)
+## items (92 lines)
 
 pub mod zenjxl
 pub use GainMapBundle
@@ -46,10 +46,15 @@ pub use quality_to_distance
 #[non_exhaustive] pub enum JxlError
 pub JxlError::Cancelled(enough::reason::StopReason)
 pub JxlError::Decode(zenjxl_decoder::error::Error)
-pub JxlError::Encode(jxl_encoder::api::EncodeError)
+pub JxlError::Encode(jxl_encoder::api::errors::EncodeError)
 pub JxlError::InvalidInput(alloc::string::String)
-pub JxlError::LimitExceeded(alloc::string::String)
+pub JxlError::InvalidState(alloc::string::String)
+pub JxlError::LimitExceeded(alloc::string::String, zencodec::limits::LimitKind)
+pub JxlError::MalformedImage(alloc::string::String)
+pub JxlError::OutOfMemory(alloc::string::String)
+pub JxlError::ProgressiveRejected
 pub JxlError::Sink(zencodec::sink::SinkError)
+pub JxlError::UnexpectedEof(alloc::string::String)
 pub JxlError::UnsupportedOperation(zencodec::capabilities::UnsupportedOperation)
 #[non_exhaustive] pub enum JxlExtraChannelType
 pub JxlExtraChannelType::Alpha
@@ -113,15 +118,16 @@ pub fn decode_with_options(&[u8], core::option::Option<&JxlLimits>, &[zenpixels:
 pub fn decode_with_parallel(&[u8], core::option::Option<&JxlLimits>, &[zenpixels::descriptor::PixelDescriptor], core::option::Option<bool>) -> core::result::Result<JxlDecodeOutput, whereat::at::At<JxlError>>
 pub fn probe(&[u8]) -> core::result::Result<JxlInfo, whereat::at::At<JxlError>>
 
-## trait impls (7 types)
+## trait impls (8 types)
 
 JxlDecodeOutput: Debug
-JxlError: Debug, Display, Error, From<jxl_encoder::api::EncodeError>, From<zencodec::capabilities::UnsupportedOperation>, From<zenjxl_decoder::error::Error>
+JxlError: Debug, Display, Error, From<jxl_encoder::api::errors::EncodeError>, From<zencodec::capabilities::UnsupportedOperation>, From<zenjxl_decoder::error::Error>, zencodec::error::CategorizedError
 JxlExtraChannelInfo: Clone, Debug
 JxlExtraChannelType: Clone, Copy, Debug, Eq, Hash, PartialEq
 JxlInfo: Clone, Debug, zencodec::detect::SourceEncodingDetails
 JxlLimits: Clone, Debug, Default
 ValidationError: Clone, Debug, Display, Error
+whereat::at::At<zencodec::error::CodecError>: From<JxlError>
 
 ## auto traits
 
