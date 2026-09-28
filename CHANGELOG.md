@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Animation timing, color, and bounded decoding
+
+- Preserve exact rational durations through zencodec. Choose a representable
+  native clock (numerator at most 2^30, denominator at most 1024) and reject
+  unrepresentable durations before changing accepted frames. Zero-duration
+  native helper frames are not accepted as displayed input frames.
+- Decode one complete display canvas at a time. Retain compressed input and
+  native reference state; never collect all decoded frames before the first
+  result. Incomplete frame headers/pixels return truncation errors. Errors
+  poison the state, and skipped frames count toward limits.
+- Label each returned buffer with the actual output color profile after format
+  negotiation, including its ColorContext. Lossless HDR sample values and
+  interpretation survive animation decode/reencode.
+- Forward animation metadata, color, limits, and combined job/call cancellation
+  through the native EncodeRequest path. Reject empty, narrow-range,
+  premultiplied, incompatible, or unknown-color inputs. Enforce cumulative
+  duration/pixel/memory limits before accepting input and subtract retained
+  buffers from the native encoder's memory allowance.
+- Input frames and compressed encoded output remain buffered. Native decode
+  work polls the owned job token; borrowed per-call decode cancellation is
+  checked between headers, pixel decoding, and skipped displays, not inside
+  the native pixel kernel.
+
+
 ### QUEUED BREAKING CHANGES
 - zencodec trait impls' associated `Error` type changed from `At<JxlError>`
   to `At<zencodec::CodecError>` (the envelope, Pattern B) — breaking for code

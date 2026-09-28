@@ -283,3 +283,13 @@ contribute back than maintain a parallel codebase. Open an issue or reach out.
 [imageflow-dotnet]: https://github.com/imazen/imageflow-dotnet
 [imageflow-node]: https://github.com/imazen/imageflow-node
 [imageflow-go]: https://github.com/imazen/imageflow-go
+
+## Animation integration
+
+With `zencodec`, `push_frame_timed` accepts exact `FrameDuration` values and
+returns an error if the JPEG XL clock or frame-duration fields cannot express
+them. The decoder yields one fully composited display canvas at a time and
+attaches the actual output color interpretation to that buffer. It retains the
+compressed byte input and native reference frames. Encoding still buffers
+submitted canvases until `finish()`; use the experimental `zencodec/media`
+workspace for network spooling, cross-format policy, and incremental AV1/IVF I/O.

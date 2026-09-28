@@ -16,8 +16,8 @@
 #   struct fields                               7
 #   enum variants                               8
 #   trait roster entries (type × trait)        30
-#   auto-trait-complete types                   7
-#   auto-trait exceptions                       5
+#   auto-trait-complete types                   6
+#   auto-trait exceptions                       6
 #
 # per-module pub lines:
 #   (root)                           23
@@ -92,8 +92,9 @@ jpeg_lossy::QualityTarget: Clone, Copy, Debug
 
 ## auto traits
 
-7 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-JxlAnimationFrameDecoder: !RefUnwindSafe !UnwindSafe
+6 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+JxlAnimationFrameDecoder: !RefUnwindSafe !Sync !UnwindSafe
+JxlAnimationFrameEncoder: !RefUnwindSafe !UnwindSafe
 JxlDecodeJob: !RefUnwindSafe !UnwindSafe
 JxlDecoder<'a>: !RefUnwindSafe !UnwindSafe
 JxlEncodeJob: !RefUnwindSafe !UnwindSafe
