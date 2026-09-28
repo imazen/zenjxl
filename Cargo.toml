@@ -58,7 +58,7 @@ zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "cabe3d
 # Coordinated exact animation timing series.
 zencodec = { git = "https://github.com/imazen/zencodec", rev = "2031094449ad1177ff96461d7c4d586c7ed384e6" }
 zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "2031094449ad1177ff96461d7c4d586c7ed384e6" }
-jxl-encoder = { git = "https://github.com/imazen/jxl-encoder", rev = "65cd22a13826cbf29e65127be511de520b0845ba" }
+jxl-encoder = { git = "https://github.com/imazen/jxl-encoder", rev = "3c1be8179ac7fdb7e7322e299cdad645046acf6c" }
 zenjpeg = { git = "https://github.com/imazen/zenjpeg", rev = "afc2ccbb0857bc9736f07d1583e062a8a1fd09e3" }
 # Sendable typed decoder state used by incremental animation output.
 zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "21159c6ba149bc802f0d985851e568976a44da04" }
