@@ -1880,6 +1880,7 @@ mod decoding {
             .with_exif(true)
             .with_xmp(true)
             .with_gain_map(true)
+            .with_inventory(true)
             .with_native_gray(true)
             .with_native_16bit(true)
             .with_native_f32(true)
@@ -2484,6 +2485,41 @@ mod decoding {
         fn with_orientation(mut self, hint: OrientationHint) -> Self {
             self.orientation = hint;
             self
+        }
+
+        /// Container-level structural inventory (see `docs/INVENTORY.md`).
+        ///
+        /// Dispositions describe this job's one-shot `Decode` path: Exif/XMP
+        /// follow the decode policy, `jhgm` follows the gain-map settings.
+        fn inventory(
+            &self,
+            data: &[u8],
+        ) -> Result<Option<zencodec::inventory::Inventory>, At<zencodec::CodecError>> {
+            (move || -> Result<Option<zencodec::inventory::Inventory>, At<JxlError>> {
+                if let Some(ref limits) = self.limits {
+                    limits.check_input_size(data.len() as u64).map_err(|e| {
+                        whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind()))
+                    })?;
+                }
+                let cfg = crate::inventory::WalkConfig {
+                    exif: self.policy.resolve_exif(true),
+                    xmp: self.policy.resolve_xmp(true),
+                    gain_map: self.extract_gain_map
+                        || !matches!(self.gain_map_render, zencodec::GainMapRender::BaseOnly),
+                };
+                let stop = self.stop.as_ref().map(|s| s as &dyn Stop);
+                crate::inventory::walk(data, cfg, stop)
+                    .map(Some)
+                    .map_err(|e| match e {
+                        crate::inventory::WalkError::Parts(e) => whereat::at!(
+                            JxlError::LimitExceeded(e.to_string(), zencodec::LimitKind::Memory)
+                        ),
+                        crate::inventory::WalkError::Stopped(r) => {
+                            whereat::at!(JxlError::Cancelled(r))
+                        }
+                    })
+            })()
+            .map_err(zencodec::CodecError::of)
         }
 
         fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<zencodec::CodecError>> {

@@ -71,7 +71,7 @@ ultrahdr-core = { version = "0.5.0", optional = true, default-features = false, 
 # zencodec-testkit is unpublished (path-deps zencodec internally); unify the
 # graph on the content-identical released tag until the testkit ships on
 # crates.io.
-zencodec = { git = "https://github.com/imazen/zencodec", tag = "v0.1.26" }
+zencodec = { git = "https://github.com/imazen/zencodec", branch = "feat/inventory" }
 jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../zenjpeg/zenjpeg" }
 # zenjxl-decoder 0.4.0 (the `reject_progressive` decode-time gate, the
@@ -134,7 +134,7 @@ backtrace = "0.3.76"
 # reintroduce "multiple different versions of crate zencodec"). Drop both the
 # patch and this tag pin for a plain crates.io version dep once zencodec-testkit
 # itself publishes.
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", tag = "v0.1.26" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", branch = "feat/inventory" }
 # Concrete `enough::Stop` token for the README cancellation example
 # (tests/readme_examples.rs compiles the documented snippets).
 almost-enough = "0.4.4"

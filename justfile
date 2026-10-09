@@ -66,3 +66,11 @@ ci: fmt-check clippy-all feature-check
 arm-wrapper-tests-macos:
     mkdir -p "$HOME/tmp"
     CARGO_BUILD_JOBS=4 RAYON_NUM_THREADS=4 OMP_NUM_THREADS=4 RUST_TEST_THREADS=4 TMPDIR="$HOME/tmp" nice -n 19 cargo test --locked -p zenjxl --features zencodec,__expert --lib --tests > "$HOME/tmp/zenjxl-wrapper-tests.log" 2>&1
+
+# Structural-inventory cross-checks: every codec-corpus JXL through check_inventory,
+# and the box lists against `jxlinfo -v -v` and `exiftool -v3`.
+inventory-oracle:
+    INVENTORY_CORPUS_JXL="${INVENTORY_CORPUS_JXL:-$HOME/work/codec-corpus/jxl}" \
+    INVENTORY_ORACLE_JXLINFO="$(command -v jxlinfo)" \
+    INVENTORY_ORACLE_EXIFTOOL="$(command -v exiftool)" \
+    cargo test --features zencodec --test inventory corpus_ -- --nocapture
