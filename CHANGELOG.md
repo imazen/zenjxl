@@ -18,6 +18,12 @@
   `#[non_exhaustive]` enum, but batched here since they land in the same
   0.3.0 release as the other breaks. See *Fixed* below.
 
+### Added
+- `DecodeJob::inventory` for `JxlDecoderConfig` (`DecodeCapabilities::inventory`):
+  a byte-exact map of the container boxes (or bare codestream) with the
+  disposition the zencodec decode path gives each box. Depends on
+  imazen/zencodec#133 (`feat/inventory`); `d2401f35`. See `docs/INVENTORY.md`.
+
 **Release gate cleared:** zenjxl 0.3.0's `CategorizedError` taxonomy adoption
 (zencodec#103, reshaped into a two-level origin-first taxonomy —
 `Image`/`Request`/`Resource`/`Policy`/`Stopped`/`Io`/`Internal` — by #116, and
