@@ -668,8 +668,12 @@ impl Walker<'_> {
 
         // Reject bookkeeping: fail the decode (main phase) or stop the walk.
         if let Some(why) = v.reject.clone() {
+            // Once the last codestream box has been entered, a box that fails
+            // to parse stops the walk without failing the decode.
+            let fatal =
+                matches!(self.phase, Phase::Main) && !matches!(self.state, Cs::Jxlc | Cs::Last);
             match self.phase {
-                Phase::Main => {
+                Phase::Main if fatal => {
                     self.fail_at = Some((raw.start, why.clone()));
                     v.detail = Some(match v.detail.take() {
                         Some(d) => format!("decode fails here: {why} ({d})"),
@@ -680,10 +684,10 @@ impl Walker<'_> {
                         raw.start
                     ));
                 }
-                Phase::Drain => {
+                Phase::Main | Phase::Drain => {
                     v.detail = Some(format!(
-                        "the decoder stops reading boxes here: {why}; the image has already \
-                         decoded, but small files can fail here (zenjxl#22)"
+                        "the decoder stops reading boxes here: {why}; the codestream is \
+                         whole, so the decode is not affected"
                     ));
                     self.phase = Phase::Dead(format!(
                         "never read: the decoder stops reading boxes at offset {}",
@@ -998,12 +1002,8 @@ impl Walker<'_> {
             v.disposition = Disposition::Unreferenced;
             v.detail = Some(join(
                 note,
-                "the codestream had already ended; the decoder enters this box but reads none \
-                 of it",
-            ));
-            self.phase = Phase::Dead(format!(
-                "never read: the box parser stops at the codestream box at offset {}",
-                raw.start
+                "the codestream had already ended; the decoder skips this box's payload and \
+                 reads the boxes after it",
             ));
             return v;
         }
@@ -1028,28 +1028,14 @@ impl Walker<'_> {
             _ => pe,
         };
         if used_end < pe {
-            // Junk after the codestream inside the box: the decoder never
-            // reads it, and never advances to the boxes after this one.
+            // Junk after the codestream inside the box: the decoder skips it
+            // and carries on with the boxes after this one.
             v.split = Some((
                 raw.start + raw.header,
                 split_children(raw, ps, used_end, pe),
             ));
-            self.phase = Phase::Dead(format!(
-                "not reliably read: the codestream box at offset {} holds bytes after the \
-                 codestream, and the decoder then parses the boxes after it only for some \
-                 layouts (measured: small junk tails read them, others do not)",
-                raw.start
-            ));
-        } else if self.animated {
-            // A one-shot decode of an animation stops after its first frame.
-            self.phase = Phase::Dead(
-                "only AnimationFrameDecoder surfaces boxes after an animation's codestream; \
-                 the one-shot decode reads them only when its pixel pass happens to reach them"
-                    .to_string(),
-            );
-        } else {
-            self.phase = Phase::Drain;
         }
+        self.phase = Phase::Drain;
         v
     }
 
