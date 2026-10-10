@@ -3,21 +3,39 @@
 //! Walks the ISO/IEC 18181-2 box structure without decoding pixels and records
 //! what the zencodec decode path (`JxlDecodeJob`) does with each box. The
 //! codestream itself is one opaque `ImageData` part: frame headers, extra
-//! channel names and header extension bits are not walked yet (see
+//! channel names and header extension bits are not walked (see
 //! `docs/INVENTORY.md`).
 //!
-//! The box framing rules follow `zenjxl-decoder`'s `BoxParser`
-//! (`src/api/inner/box_parser.rs`), because the inventory has to describe what
-//! that parser accepts, not what the specification allows.
+//! The box rules mirror `zenjxl-decoder`'s `BoxParser`
+//! (`src/api/inner/box_parser.rs`, `get_more_codestream_impl`), because the
+//! inventory has to describe what that parser does, not what the specification
+//! allows. The end of the codestream comes from the decoder's header-only
+//! frame scan (`scan_frames_only`), which allocates no per-frame pixel buffers.
+//!
+//! Reading model (with the extra poll added in `decode.rs`, zenjxl#22):
+//!
+//! 1. **Main phase.** Every box up to and including the codestream box that
+//!    holds the last codestream byte is parsed. A rejected box there fails the
+//!    decode.
+//! 2. **Drain phase.** If that box ends exactly where the codestream ends, the
+//!    boxes after it are parsed until the end of the input, a rejected box, or
+//!    the next non-empty codestream box. A rejected box there only stops the
+//!    walk: the image has already decoded.
+//! 3. Everything after the point where parsing stops is never read.
 
+extern crate std;
+
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::vec;
 use alloc::vec::Vec;
 use core::ops::Range;
+use std::sync::OnceLock;
 
 use zencodec::ImageFormat;
 use zencodec::inventory::{
-    Disposition, Inventory, InventoryError, MetadataKind, Part, PartKind, PartTag,
+    Disposition, Inventory, InventoryError, MetadataKind, Part, PartId, PartKind, PartTag,
 };
 
 /// The 12-byte container signature box.
@@ -30,14 +48,12 @@ const SIGNATURE: [u8; 12] = [
 const METADATA_BOX_CAP: u64 = 16 * 1024 * 1024;
 /// Same for the gain-map bundle (`jhgm`).
 const GAIN_MAP_BOX_CAP: u64 = 256 * 1024 * 1024;
-/// Largest single-`jxlc` codestream after which the decoder still reads the
-/// boxes that follow it. Measured against `zenjxl-decoder` 0.4.0 (see the
-/// `trailing_box_model_matches_decoder` test): with codestream payloads up to
-/// and including 4096 bytes a trailing `Exif`/`xml ` box surfaces, from 4097
-/// bytes on it does not.
-const TRAILING_POLL_LIMIT: u64 = 4096;
+/// Memory cap for the header scan when the caller sets none.
+const DEFAULT_SCAN_MEMORY: u64 = 256 * 1024 * 1024;
 /// Longest label copied from the file.
 const LABEL_MAX: usize = 64;
+/// Out-of-order `jxlp` boxes the decoder buffers (`OooJxlp::MAX_BUFFERED_BOXES`).
+const MAX_OOO: usize = 1 << 20;
 
 /// What the caller's decode job would surface.
 #[derive(Clone, Copy, Debug)]
@@ -49,6 +65,8 @@ pub(crate) struct WalkConfig {
     /// The job surfaces the gain map (`extract_gain_map` or a render mode
     /// other than `BaseOnly`).
     pub gain_map: bool,
+    /// The caller's `max_memory_bytes`, applied to the header scan.
+    pub max_memory: Option<u64>,
 }
 
 /// Why a walk produced no inventory.
@@ -58,6 +76,8 @@ pub(crate) enum WalkError {
     Parts(InventoryError),
     /// The caller's stop token fired.
     Stopped(enough::StopReason),
+    /// The caller's memory limit stopped the header scan.
+    Limit(String),
 }
 
 impl From<InventoryError> for WalkError {
@@ -65,6 +85,129 @@ impl From<InventoryError> for WalkError {
         Self::Parts(e)
     }
 }
+
+// ── header scan ─────────────────────────────────────────────────────────────
+
+struct ScanOut {
+    /// Codestream bytes the frames used (for a bare codestream: the offset
+    /// just past the last byte), or why that is unknown.
+    end: Result<u64, String>,
+    /// The scan had parsed an `Exif` box by the time it finished.
+    exif_seen: bool,
+}
+
+/// Drive `zenjxl-decoder` through a header-only scan: frame headers and TOCs
+/// are parsed, section data is skipped, no pixels or per-frame buffers exist.
+fn scan(
+    data: &[u8],
+    max_memory: Option<u64>,
+    stop: Option<&dyn enough::Stop>,
+) -> Result<ScanOut, WalkError> {
+    use jxl::api::{ErrorClass, JxlDecoder, JxlDecoderOptions, ProcessingResult, states};
+
+    let mut options = JxlDecoderOptions::default().with_scan_frames_only(true);
+    options.limits.max_icc_size = Some(16 << 20);
+    options.limits.max_memory_bytes = Some(max_memory.unwrap_or(DEFAULT_SCAN_MEMORY));
+    let mut input: &[u8] = data;
+    let fail = |what: &str, kind: ErrorClass, msg: String| -> Result<ScanOut, WalkError> {
+        if max_memory.is_some()
+            && matches!(kind, ErrorClass::LimitExceeded | ErrorClass::OutOfMemory)
+        {
+            return Err(WalkError::Limit(format!("{what}: {msg}")));
+        }
+        Ok(ScanOut {
+            end: Err(format!("{what}: {msg}")),
+            exif_seen: false,
+        })
+    };
+    let truncated = |what: &str| ScanOut {
+        end: Err(format!("truncated in {what}")),
+        exif_seen: false,
+    };
+    let decoder = JxlDecoder::<states::Initialized>::new(options);
+    let mut decoder = match decoder.process(&mut input) {
+        Ok(ProcessingResult::Complete { result }) => result,
+        Ok(ProcessingResult::NeedsMoreInput { .. }) => return Ok(truncated("the image header")),
+        Err(e) => return fail("image header", e.error().kind(), e.error().to_string()),
+    };
+    let mut frames = 0u32;
+    while decoder.has_more_frames() {
+        if let Some(s) = stop {
+            s.check().map_err(WalkError::Stopped)?;
+        }
+        let with_frame = match decoder.process(&mut input) {
+            Ok(ProcessingResult::Complete { result }) => result,
+            Ok(ProcessingResult::NeedsMoreInput { .. }) => {
+                return Ok(truncated(&format!("frame {frames}'s header")));
+            }
+            Err(e) => {
+                return fail(
+                    &format!("frame {frames} header"),
+                    e.error().kind(),
+                    e.error().to_string(),
+                );
+            }
+        };
+        decoder = match with_frame.skip_frame(&mut input) {
+            Ok(ProcessingResult::Complete { result }) => result,
+            Ok(ProcessingResult::NeedsMoreInput { .. }) => {
+                return Ok(truncated(&format!("frame {frames}'s sections")));
+            }
+            Err(e) => {
+                return fail(
+                    &format!("frame {frames} sections"),
+                    e.error().kind(),
+                    e.error().to_string(),
+                );
+            }
+        };
+        frames = frames.saturating_add(1);
+    }
+    let end = decoder
+        .codestream_length()
+        .filter(|&n| n <= data.len() as u64)
+        .ok_or_else(|| "the decoder reported no codestream length".to_string());
+    Ok(ScanOut {
+        end,
+        exif_seen: decoder.exif().is_some(),
+    })
+}
+
+/// Whether the linked `zenjxl-decoder` was built with its `jpeg` feature, which
+/// makes it buffer `jbrd` and decompress `brob` boxes. Cargo unifies features
+/// across the dependency graph, so this cannot be a compile-time constant of
+/// this crate: ask the decoder itself, once, with a tiny container whose
+/// brotli-wrapped Exif box precedes the codestream.
+fn decoder_reads_brob() -> bool {
+    static CELL: OnceLock<bool> = OnceLock::new();
+    *CELL.get_or_init(|| {
+        // A 1x1 lossless codestream written by jxl-encoder.
+        const CS: [u8; 23] = [
+            0xff, 0x0a, 0x00, 0x10, 0x10, 0x09, 0x08, 0x02, 0x01, 0x00, 0x2c, 0x00, 0x4b, 0x12,
+            0x08, 0x16, 0x07, 0xd8, 0x43, 0xee, 0x32, 0x4a, 0x30,
+        ];
+        // brotli: one uncompressed meta-block holding "\0\0\0\0EXIFPROBE".
+        const BROTLI: [u8; 17] = [
+            0xc0, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x45, 0x58, 0x49, 0x46, 0x50, 0x52, 0x4f,
+            0x42, 0x45, 0x03,
+        ];
+        let mut f = SIGNATURE.to_vec();
+        push_box(&mut f, b"ftyp", b"jxl \0\0\0\0jxl ");
+        let mut brob = b"Exif".to_vec();
+        brob.extend(BROTLI);
+        push_box(&mut f, b"brob", &brob);
+        push_box(&mut f, b"jxlc", &CS);
+        scan(&f, None, None).is_ok_and(|s| s.exif_seen)
+    })
+}
+
+fn push_box(out: &mut Vec<u8>, ty: &[u8; 4], payload: &[u8]) {
+    out.extend((8 + payload.len() as u32).to_be_bytes());
+    out.extend(ty);
+    out.extend(payload);
+}
+
+// ── box framing ─────────────────────────────────────────────────────────────
 
 /// One box as framed on disk, before any interpretation.
 struct RawBox {
@@ -74,31 +217,16 @@ struct RawBox {
     ty: [u8; 4],
     /// The declared size ran past the input; `end` is the input length.
     truncated: Option<u64>,
-    /// Size field 0: the box runs to the end of the input.
+    /// Size field 0 (or 1 with a 64-bit size of 0): runs to the end of the input.
     to_eof: bool,
 }
 
-impl RawBox {
-    fn payload(&self) -> Range<u64> {
-        self.start + self.header..self.end
-    }
-}
-
-/// A box with its disposition decided, waiting for cross-box fix-ups.
-struct Planned {
-    raw: RawBox,
-    disposition: Disposition,
-    label: Option<String>,
-    detail: Option<String>,
-}
-
-/// Which codestream box the walk is in, mirroring `CodestreamBoxType`.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Cs {
-    None,
-    Jxlc,
-    Jxlp(u32),
-    Last,
+/// Why a box header cannot be framed.
+enum FrameFail {
+    /// Fewer bytes than a header needs: the decoder runs out of input.
+    Short(String),
+    /// The size is smaller than the header: the decoder rejects the box.
+    Invalid(String),
 }
 
 fn be32(d: &[u8], at: u64) -> Option<u32> {
@@ -130,33 +258,35 @@ fn label_of(bytes: &[u8]) -> String {
         .collect()
 }
 
-/// Frame the box starting at `at`. `Err` carries why it cannot be framed.
-fn frame_box(data: &[u8], at: u64) -> Result<RawBox, String> {
+fn frame_box(data: &[u8], at: u64) -> Result<RawBox, FrameFail> {
     let len = data.len() as u64;
-    let Some(size32) = be32(data, at) else {
-        return Err(format!("{} bytes left, a box header needs 8", len - at));
-    };
-    let Some(ty) = data
-        .get(at as usize + 4..at as usize + 8)
-        .and_then(|s| <[u8; 4]>::try_from(s).ok())
-    else {
-        return Err(format!("{} bytes left, a box header needs 8", len - at));
+    let left = len - at;
+    let (Some(size32), Some(ty)) = (
+        be32(data, at),
+        data.get(at as usize + 4..at as usize + 8)
+            .and_then(|s| <[u8; 4]>::try_from(s).ok()),
+    ) else {
+        return Err(FrameFail::Short(format!(
+            "{left} bytes left, a box header needs 8"
+        )));
     };
     let (header, total, to_eof) = match size32 {
-        0 => (8, len - at, true),
+        0 => (8, left, true),
         1 => match be64(data, at + 8) {
+            Some(0) => (16, left, true),
             Some(total) => (16, total, false),
-            None => return Err("truncated extended box size".to_string()),
+            None => {
+                return Err(FrameFail::Short("truncated extended box size".to_string()));
+            }
         },
         n => (8, u64::from(n), false),
     };
     if total < header {
-        return Err(format!(
+        return Err(FrameFail::Invalid(format!(
             "box size {total} is smaller than its {header}-byte header"
-        ));
+        )));
     }
-    let declared_end = at.checked_add(total);
-    let (end, truncated) = match declared_end {
+    let (end, truncated) = match at.checked_add(total) {
         Some(e) if e <= len => (e, None),
         _ => (len, Some(total)),
     };
@@ -185,53 +315,88 @@ fn jumb_label(payload: &[u8]) -> Option<String> {
     Some(label_of(&rest[..n]))
 }
 
-/// Locate the end of the codestream by driving `zenjxl-decoder` through a
-/// header-only scan (`scan_frames_only`): frame headers and TOCs are parsed,
-/// section data is skipped, no pixels are produced. On success the decoder's
-/// `file_length()` is the offset just past the last codestream byte.
-fn codestream_end(
-    data: &[u8],
-    stop: Option<&dyn enough::Stop>,
-) -> Result<Result<u64, String>, WalkError> {
-    use jxl::api::{JxlDecoder, JxlDecoderOptions, ProcessingResult, states};
+// ── the walk ────────────────────────────────────────────────────────────────
 
-    let mut options = JxlDecoderOptions::default().with_scan_frames_only(true);
-    options.limits.max_icc_size = Some(16 << 20);
-    options.limits.max_memory_bytes = Some(256 << 20);
-    let mut input: &[u8] = data;
-    let decoder = JxlDecoder::<states::Initialized>::new(options);
-    let mut decoder = match decoder.process(&mut input) {
-        Ok(ProcessingResult::Complete { result }) => result,
-        Ok(ProcessingResult::NeedsMoreInput { .. }) => {
-            return Ok(Err("truncated before the image header ends".to_string()));
+/// Which codestream box the walk is in, mirroring `CodestreamBoxType`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Cs {
+    None,
+    Jxlc,
+    Jxlp(u32),
+    Last,
+}
+
+/// Where the decoder's box parsing stands.
+enum Phase {
+    /// Parsing boxes on the way to the end of the codestream.
+    Main,
+    /// The codestream is complete; trailing boxes are still being parsed.
+    Drain,
+    /// Parsing stopped; the string is the `detail` of every later box.
+    Dead(String),
+}
+
+/// A child part inside a split box.
+struct Child {
+    range: Range<u64>,
+    disposition: Disposition,
+    label: Option<&'static str>,
+    detail: &'static str,
+}
+
+/// What the walk decided about one box.
+struct Verdict {
+    disposition: Disposition,
+    label: Option<String>,
+    detail: Option<String>,
+    /// Box-level rejection (the string is why).
+    reject: Option<String>,
+    /// Body start and children, for a box split into used and unused bytes.
+    split: Option<(u64, Vec<Child>)>,
+}
+
+impl Verdict {
+    fn new(disposition: Disposition) -> Self {
+        Self {
+            disposition,
+            label: None,
+            detail: None,
+            reject: None,
+            split: None,
         }
-        Err(e) => return Ok(Err(format!("image header: {}", e.error()))),
-    };
-    let mut frames = 0u32;
-    while decoder.has_more_frames() {
-        if let Some(s) = stop {
-            s.check().map_err(WalkError::Stopped)?;
-        }
-        let with_frame = match decoder.process(&mut input) {
-            Ok(ProcessingResult::Complete { result }) => result,
-            Ok(ProcessingResult::NeedsMoreInput { .. }) => {
-                return Ok(Err(format!("truncated in frame {frames}'s header")));
-            }
-            Err(e) => return Ok(Err(format!("frame {frames} header: {}", e.error()))),
-        };
-        decoder = match with_frame.skip_frame(&mut input) {
-            Ok(ProcessingResult::Complete { result }) => result,
-            Ok(ProcessingResult::NeedsMoreInput { .. }) => {
-                return Ok(Err(format!("truncated in frame {frames}'s sections")));
-            }
-            Err(e) => return Ok(Err(format!("frame {frames} sections: {}", e.error()))),
-        };
-        frames = frames.saturating_add(1);
     }
-    Ok(decoder
-        .file_length()
-        .filter(|&n| n <= data.len() as u64)
-        .ok_or_else(|| "the decoder reported no file length".to_string()))
+    fn with_detail(mut self, d: impl Into<String>) -> Self {
+        self.detail = Some(d.into());
+        self
+    }
+    fn rejected(why: impl Into<String>) -> Self {
+        let mut v = Self::new(Disposition::Malformed);
+        v.reject = Some(why.into());
+        v
+    }
+}
+
+struct Walker<'a> {
+    inv: Inventory,
+    data: &'a [u8],
+    cfg: WalkConfig,
+    brob: bool,
+    end: Option<u64>,
+    end_note: Option<String>,
+    phase: Phase,
+    state: Cs,
+    ooo: BTreeMap<u32, bool>,
+    ooo_seen: bool,
+    version: u32,
+    index: usize,
+    complete: bool,
+    /// Codestream bytes carried by the codestream boxes walked so far.
+    cs_before: u64,
+    fail_at: Option<(u64, String)>,
+    consumed: Vec<PartId>,
+    last_exif: Option<PartId>,
+    last_xmp: Option<PartId>,
+    last_gain_map: Option<PartId>,
 }
 
 /// Walk `data` and describe every byte.
@@ -258,7 +423,8 @@ pub(crate) fn walk(
             .with_detail("bare codestream signature"),
         )?;
         if len > 2 {
-            let (end, note) = match codestream_end(data, stop)? {
+            let out = scan(data, cfg.max_memory, stop)?;
+            let (end, note) = match out.end {
                 Ok(end) if end > 2 => (end, None),
                 Ok(_) => (
                     len,
@@ -297,8 +463,7 @@ pub(crate) fn walk(
     }
 
     if !data.starts_with(&SIGNATURE) {
-        let truncated_sig = data == &[0xFF][..] || SIGNATURE.starts_with(data);
-        let why = if truncated_sig {
+        let why = if data == &[0xFF][..] || SIGNATURE.starts_with(data) {
             "truncated JPEG XL signature"
         } else {
             "no JPEG XL signature"
@@ -323,361 +488,544 @@ pub(crate) fn walk(
         .with_detail("container signature box"),
     )?;
 
-    // ── pass 1: frame and classify every box ────────────────────────────────
-    let mut planned: Vec<Planned> = Vec::new();
-    let mut tail: Option<(u64, String, bool)> = None; // (start, why, after codestream)
-    let mut at = 12u64;
-    let mut index = 0usize;
-    let mut state = Cs::None;
-    let mut trailing_read = false;
-    let mut version = 0u32;
-    let mut ooo: Vec<u32> = Vec::new();
-    let mut dead: Option<u64> = None;
+    let out = scan(data, cfg.max_memory, stop)?;
+    let (end, end_note) = match out.end {
+        Ok(e) => (Some(e), None),
+        Err(why) => (None, Some(format!("codestream end not located ({why})"))),
+    };
+    let mut w = Walker {
+        inv,
+        data,
+        cfg,
+        brob: decoder_reads_brob(),
+        end,
+        end_note,
+        phase: Phase::Main,
+        state: Cs::None,
+        ooo: BTreeMap::new(),
+        ooo_seen: false,
+        version: 0,
+        index: 0,
+        complete: false,
+        cs_before: 0,
+        fail_at: None,
+        consumed: Vec::new(),
+        last_exif: None,
+        last_xmp: None,
+        last_gain_map: None,
+    };
+    w.run(stop)?;
+    w.finish()
+}
 
-    while at < len {
-        if index.is_multiple_of(1024)
-            && let Some(s) = stop
-        {
-            s.check().map_err(WalkError::Stopped)?;
-        }
-        let after_cs = matches!(state, Cs::Jxlc | Cs::Last);
-        let raw = match frame_box(data, at) {
-            Ok(raw) => raw,
-            Err(why) => {
-                tail = Some((at, why, after_cs));
-                break;
+impl Walker<'_> {
+    fn run(&mut self, stop: Option<&dyn enough::Stop>) -> Result<(), WalkError> {
+        let len = self.data.len() as u64;
+        let mut at = 12u64;
+        while at < len {
+            if self.index.is_multiple_of(1024)
+                && let Some(s) = stop
+            {
+                s.check().map_err(WalkError::Stopped)?;
             }
-        };
-        let payload = raw.payload();
-        let plen = payload.end - payload.start;
-        let body = &data[payload.start as usize..payload.end as usize];
-        let ty = raw.ty;
-        let readable = !after_cs || trailing_read;
-
-        let mut label = None;
-        let mut detail = None;
-        let mut reject: Option<String> = None;
-
-        // The decoder demands `ftyp` as the second box, exactly once.
-        let is_ftyp = &ty == b"ftyp";
-        if (index == 0) != is_ftyp {
-            reject = Some(if index == 0 {
-                "the decoder requires `ftyp` as the first box after the signature".to_string()
-            } else {
-                "a second `ftyp` box".to_string()
-            });
+            let raw = match frame_box(self.data, at) {
+                Ok(raw) => raw,
+                Err(fail) => return self.tail(at, fail),
+            };
+            at = raw.end;
+            self.box_part(raw)?;
+            self.index += 1;
         }
-
-        let mut disposition = Disposition::Unknown;
-        if let Some(why) = &reject {
-            disposition = Disposition::Malformed;
-            detail = Some(format!("the decoder rejects the file here: {why}"));
-        } else if let Some(offender) = dead {
-            disposition = Disposition::Skipped;
-            detail = Some(format!(
-                "never read: the decoder rejects the file at offset {offender}"
-            ));
-        } else if raw.truncated.is_some() {
-            disposition = Disposition::Malformed;
-        } else {
-            match &ty {
-                b"ftyp" => {
-                    let ok = !raw.to_eof
-                        && plen >= 8
-                        && &body[..4] == b"jxl "
-                        && u32::from_be_bytes([body[4], body[5], body[6], body[7]]) <= 1;
-                    if ok {
-                        version = u32::from_be_bytes([body[4], body[5], body[6], body[7]]);
-                        disposition = Disposition::Structure;
-                        label = Some("jxl ".to_string());
-                        detail = Some(format!("file format version {version}"));
-                    } else {
-                        disposition = Disposition::Malformed;
-                        reject = Some("`ftyp` must carry brand `jxl ` and version 0 or 1".into());
-                        detail = Some(
-                            "the decoder rejects the file here: `ftyp` must carry brand \
-                             `jxl ` and version 0 or 1"
-                                .to_string(),
-                        );
-                    }
-                }
-                b"jxlc" => {
-                    if matches!(state, Cs::Jxlp(_) | Cs::Last) {
-                        disposition = Disposition::Malformed;
-                        reject = Some("`jxlc` after `jxlp`".into());
-                        detail =
-                            Some("the decoder rejects the file here: `jxlc` after `jxlp`".into());
-                    } else {
-                        disposition = Disposition::ImageData;
-                        state = Cs::Jxlc;
-                        trailing_read = plen <= TRAILING_POLL_LIMIT;
-                    }
-                }
-                b"jxlp" => {
-                    let idx_word = be32(data, payload.start);
-                    match idx_word {
-                        Some(word) if plen >= 4 => {
-                            let last = word & 0x8000_0000 != 0;
-                            let idx = word & 0x7fff_ffff;
-                            let wanted = match state {
-                                Cs::None => Some(0),
-                                Cs::Jxlp(i) => Some(i + 1),
-                                _ => None,
-                            };
-                            let bad = match wanted {
-                                None => Some("`jxlp` after a complete codestream"),
-                                Some(w) if idx < w => Some("`jxlp` index out of order"),
-                                Some(w)
-                                    if idx > w
-                                        && (version < 1 || ooo.contains(&idx) || raw.to_eof) =>
-                                {
-                                    Some("`jxlp` index out of order")
-                                }
-                                _ => None,
-                            };
-                            if let Some(why) = bad {
-                                disposition = Disposition::Malformed;
-                                reject = Some(why.into());
-                                detail = Some(format!("the decoder rejects the file here: {why}"));
-                            } else {
-                                disposition = Disposition::ImageData;
-                                let mut d = format!("jxlp index {idx}");
-                                if last {
-                                    d.push_str(" (last)");
-                                }
-                                if Some(idx) != wanted {
-                                    d.push_str(", out of order (ftyp version 1)");
-                                    ooo.push(idx);
-                                } else {
-                                    state = if last { Cs::Last } else { Cs::Jxlp(idx) };
-                                    // Buffered out-of-order parts splice in right after.
-                                    while let Cs::Jxlp(i) = state {
-                                        if ooo.contains(&(i + 1)) {
-                                            state = Cs::Jxlp(i + 1);
-                                        } else {
-                                            break;
-                                        }
-                                    }
-                                }
-                                detail = Some(d);
-                            }
-                        }
-                        _ => {
-                            disposition = Disposition::Malformed;
-                            reject = Some("`jxlp` box without its 4-byte index".into());
-                            detail = Some(
-                                "the decoder rejects the file here: `jxlp` box without its \
-                                 4-byte index"
-                                    .into(),
-                            );
-                        }
-                    }
-                }
-                b"jbrd" => {
-                    disposition = Disposition::Skipped;
-                    detail = Some(
-                        "JPEG reconstruction data; zenjxl-decoder is built without its `jpeg` \
-                         feature, which skips this box"
-                            .into(),
-                    );
-                }
-                b"jhgm" => {
-                    if plen > GAIN_MAP_BOX_CAP {
-                        disposition = Disposition::Skipped;
-                        detail = Some("larger than the decoder's 256 MiB gain-map cap".into());
-                    } else if !readable {
-                        disposition = Disposition::Skipped;
-                        detail = Some(post_codestream_detail());
-                    } else if cfg.gain_map {
-                        disposition = Disposition::Metadata(MetadataKind::GainMap);
-                    } else {
-                        disposition = Disposition::Dropped;
-                        detail = Some(
-                            "parsed by the decoder; zencodec surfaces it only with \
-                             extract_gain_map or a GainMapRender other than BaseOnly"
-                                .into(),
-                        );
-                    }
-                }
-                b"jxli" => {
-                    if plen > METADATA_BOX_CAP {
-                        disposition = Disposition::Skipped;
-                        detail = Some("larger than the decoder's 16 MiB cap".into());
-                    } else if !readable {
-                        disposition = Disposition::Skipped;
-                        detail = Some(post_codestream_detail());
-                    } else {
-                        disposition = Disposition::Dropped;
-                        detail = Some(
-                            "frame index: parsed by the decoder (native frame_index() only), \
-                             not surfaced through zencodec"
-                                .into(),
-                        );
-                    }
-                }
-                b"Exif" | b"xml " => {
-                    let (enabled, kind, name) = if &ty == b"Exif" {
-                        (cfg.exif, MetadataKind::Exif, "Exif")
-                    } else {
-                        (cfg.xmp, MetadataKind::Xmp, "XMP")
-                    };
-                    if plen > METADATA_BOX_CAP {
-                        disposition = Disposition::Skipped;
-                        detail = Some("larger than the decoder's 16 MiB cap".into());
-                    } else if !readable {
-                        disposition = Disposition::Skipped;
-                        detail = Some(post_codestream_detail());
-                    } else if &ty == b"Exif" && plen < 4 {
-                        disposition = Disposition::Dropped;
-                        detail = Some(
-                            "shorter than the 4-byte TIFF offset; the decoder ignores it".into(),
-                        );
-                    } else if !enabled {
-                        disposition = Disposition::Dropped;
-                        detail = Some(format!("{name} disabled by the decode policy"));
-                    } else {
-                        disposition = Disposition::Metadata(kind);
-                    }
-                }
-                b"brob" => {
-                    disposition = Disposition::Skipped;
-                    let inner = body.get(..4).map(label_of);
-                    detail = Some(
-                        "brotli-compressed box; zenjxl-decoder is built without its `jpeg` \
-                         feature, which skips brob boxes, so wrapped Exif/XMP never surfaces"
-                            .into(),
-                    );
-                    label = inner;
-                }
-                b"jumb" => {
-                    disposition = Disposition::Skipped;
-                    label = jumb_label(body);
-                    detail = Some("JUMBF superbox; the decoder skips it".into());
-                }
-                b"jxll" => {
-                    disposition = Disposition::Skipped;
-                    detail = Some("codestream level box; the decoder skips it".into());
-                }
-                _ => {}
-            }
-        }
-
-        if let Some(why) = reject {
-            // Boxes before this one were read normally; nothing after is.
-            dead = Some(raw.start);
-            let _ = why;
-        }
-        if let Some(full) = raw.truncated {
-            detail = Some(format!(
-                "declared size {full} runs {} bytes past the end of the input",
-                raw.start.saturating_add(full).saturating_sub(len)
-            ));
-        }
-        if raw.to_eof && detail.is_none() {
-            detail = Some("size field 0: runs to the end of the input".into());
-        }
-
-        planned.push(Planned {
-            raw,
-            disposition,
-            label,
-            detail,
-        });
-        if planned.last().is_some_and(|p| p.raw.truncated.is_some()) {
-            break;
-        }
-        at = planned.last().map_or(len, |p| p.raw.end);
-        index += 1;
+        Ok(())
     }
 
-    // ── where the codestream really ends ────────────────────────────────────
-    // A size-0 `jxlc` claims everything to the end of the input, and any
-    // codestream box may carry bytes past the codestream: ask the decoder's
-    // header-only scan where the last frame ends.
-    let is_cs = |p: &Planned| {
-        p.disposition == Disposition::ImageData && matches!(&p.raw.ty, b"jxlc" | b"jxlp")
-    };
-    if planned.iter().any(is_cs)
-        && let Ok(end) = codestream_end(data, stop)?
-        && let Some(p) = planned.iter_mut().rev().find(|p| is_cs(p))
-    {
-        let skip = if &p.raw.ty == b"jxlp" { 4 } else { 0 };
-        let payload_start = p.raw.start + p.raw.header + skip;
-        if end > payload_start && end < p.raw.end {
-            if p.raw.to_eof {
-                p.raw.end = end;
-                p.detail = Some(
-                    "size field 0: runs to the end of the input; the codestream ends here"
-                        .to_string(),
-                );
+    /// Bytes at `at` that do not frame as a box.
+    fn tail(&mut self, at: u64, fail: FrameFail) -> Result<(), WalkError> {
+        let len = self.data.len() as u64;
+        let (FrameFail::Short(why) | FrameFail::Invalid(why)) = fail;
+        let (kind, disposition, detail) = if matches!(self.phase, Phase::Main) {
+            // The decoder still needs boxes to reach the end of the codestream.
+            self.fail_at.get_or_insert((at, why.clone()));
+            (
+                PartKind::Gap,
+                Disposition::Malformed,
+                format!("decode fails here: {why}"),
+            )
+        } else {
+            (
+                PartKind::Trailer,
+                Disposition::Trailing,
+                format!("does not frame as a box: {why}"),
+            )
+        };
+        self.inv.push(
+            None,
+            Part::new(kind, PartTag::None, at..len, disposition).with_detail(detail),
+        )?;
+        Ok(())
+    }
+
+    fn box_part(&mut self, raw: RawBox) -> Result<(), WalkError> {
+        let data = self.data;
+        let ps = raw.start + raw.header;
+        let plen = raw.end - ps;
+        let body = &data[ps as usize..raw.end as usize];
+        let ty = raw.ty;
+        let is_codestream = matches!(&ty, b"jxlc" | b"jxlp");
+
+        let was_dead = matches!(self.phase, Phase::Dead(_));
+        let mut v = if let Phase::Dead(why) = &self.phase {
+            // A codestream box still counts as unread payload, not as a skipped type.
+            let d = if is_codestream && plen > 0 && self.complete {
+                Disposition::Unreferenced
             } else {
-                let extra = p.raw.end - end;
-                let note = format!("the codestream ends {extra} bytes before the box does");
-                p.detail = Some(match p.detail.take() {
+                Disposition::Skipped
+            };
+            Verdict::new(d).with_detail(why.clone())
+        } else {
+            self.classify(&raw, ps, plen, body)
+        };
+
+        if let Some(full) = raw.truncated {
+            let past = raw
+                .start
+                .saturating_add(full)
+                .saturating_sub(data.len() as u64);
+            let note = format!("declared size {full} runs {past} bytes past the end of the input");
+            if is_codestream || was_dead {
+                v.detail = Some(match v.detail.take() {
                     Some(d) => format!("{d}; {note}"),
                     None => note,
                 });
+            } else if v.reject.is_none() {
+                // The decoder runs out of input inside this box.
+                v = Verdict::rejected("the box runs past the end of the input");
+                v.detail = Some(note);
             }
         }
-    }
+        if raw.to_eof && v.detail.is_none() && v.reject.is_none() {
+            v.detail = Some("size field 0: runs to the end of the input".to_string());
+        }
 
-    // ── pass 2: "last Exif / xml box wins" ──────────────────────────────────
-    for kind in [MetadataKind::Exif, MetadataKind::Xmp] {
-        let name = if kind == MetadataKind::Exif {
-            "Exif"
-        } else {
-            "XMP"
-        };
-        let mut winner: Option<usize> = None;
-        for i in 0..planned.len() {
-            if planned[i].disposition == Disposition::Metadata(kind) {
-                if let Some(w) = winner {
-                    planned[w].disposition = Disposition::Skipped;
-                    planned[w].detail = Some(format!(
-                        "superseded: the decoder keeps only the last {name} box"
+        // Reject bookkeeping: fail the decode (main phase) or stop the walk.
+        if let Some(why) = v.reject.clone() {
+            match self.phase {
+                Phase::Main => {
+                    self.fail_at = Some((raw.start, why.clone()));
+                    v.detail = Some(match v.detail.take() {
+                        Some(d) => format!("decode fails here: {why} ({d})"),
+                        None => format!("decode fails here: {why}"),
+                    });
+                    self.phase = Phase::Dead(format!(
+                        "never read: the decoder rejects the file at offset {}",
+                        raw.start
                     ));
                 }
-                winner = Some(i);
+                Phase::Drain => {
+                    v.detail = Some(format!(
+                        "the decoder stops reading boxes here: {why}; the image has already \
+                         decoded, but small files can fail here (zenjxl#22)"
+                    ));
+                    self.phase = Phase::Dead(format!(
+                        "never read: the decoder stops reading boxes at offset {}",
+                        raw.start
+                    ));
+                }
+                Phase::Dead(_) => {}
             }
         }
+        self.emit(&raw, v)
     }
 
-    // ── emit ────────────────────────────────────────────────────────────────
-    for p in planned {
+    fn emit(&mut self, raw: &RawBox, v: Verdict) -> Result<(), WalkError> {
         let mut part = Part::new(
             PartKind::Box,
-            PartTag::FourCc(p.raw.ty),
-            p.raw.start..p.raw.end,
-            p.disposition,
+            PartTag::FourCc(raw.ty),
+            raw.start..raw.end,
+            v.disposition,
         );
-        if let Some(l) = p.label {
+        if let Some(l) = v.label {
             part = part.with_label(l);
         }
-        if let Some(d) = p.detail {
+        if let Some(d) = v.detail {
             part = part.with_detail(d);
         }
-        inv.push(None, part)?;
+        if let Some((body_start, _)) = &v.split {
+            part = part.with_body(*body_start..raw.end);
+        }
+        let id = self.inv.push(None, part)?;
+        if is_consumed_content(v.disposition) {
+            self.consumed.push(id);
+        }
+        if let Some((_, children)) = v.split {
+            for c in children {
+                let mut p = Part::new(PartKind::Chunk, PartTag::None, c.range, c.disposition)
+                    .with_detail(c.detail);
+                if let Some(l) = c.label {
+                    p = p.with_label(l);
+                }
+                let cid = self.inv.push(Some(id), p)?;
+                if is_consumed_content(c.disposition) {
+                    self.consumed.push(cid);
+                }
+            }
+        }
+        self.record_winner(v.disposition, id);
+        Ok(())
     }
-    if let Some((start, why, after_cs)) = tail {
-        let (kind, disposition) = if after_cs {
-            (PartKind::Trailer, Disposition::Trailing)
-        } else {
-            (PartKind::Gap, Disposition::Malformed)
+
+    /// "Last box wins": the decoder keeps only the last Exif / XMP / gain map.
+    fn record_winner(&mut self, d: Disposition, id: PartId) {
+        let slot = match d {
+            Disposition::Metadata(MetadataKind::Exif) => &mut self.last_exif,
+            Disposition::Metadata(MetadataKind::Xmp) => &mut self.last_xmp,
+            Disposition::Metadata(MetadataKind::GainMap) => &mut self.last_gain_map,
+            _ => return,
         };
-        inv.push(
-            None,
-            Part::new(kind, PartTag::None, start..len, disposition)
-                .with_detail(format!("does not frame as a box: {why}")),
-        )?;
+        if let Some(prev) = slot.replace(id) {
+            self.inv.set_disposition(prev, Disposition::Skipped);
+            self.inv.set_detail(
+                prev,
+                "superseded: the decoder keeps only the last box of this kind",
+            );
+        }
     }
-    inv.fill_gaps(None, Disposition::Trailing)?;
-    Ok(inv)
+
+    fn classify(&mut self, raw: &RawBox, ps: u64, plen: u64, body: &[u8]) -> Verdict {
+        let ty = raw.ty;
+        let is_ftyp = &ty == b"ftyp";
+        if (self.index == 0) != is_ftyp {
+            return Verdict::rejected(if self.index == 0 {
+                "`ftyp` must be the first box after the signature"
+            } else {
+                "a second `ftyp` box"
+            });
+        }
+        match &ty {
+            b"ftyp" => self.ftyp(raw, plen, body),
+            b"jxlc" => self.jxlc(raw, ps, plen),
+            b"jxlp" => self.jxlp(raw, ps, plen, body),
+            b"jbrd" => {
+                if self.brob {
+                    Verdict::new(Disposition::Dropped).with_detail(
+                        "JPEG reconstruction data: buffered by the decoder, never surfaced \
+                         through zencodec",
+                    )
+                } else {
+                    Verdict::new(Disposition::Skipped)
+                        .with_detail("JPEG reconstruction data; the decoder skips it")
+                }
+            }
+            b"jhgm" => {
+                if raw.to_eof {
+                    return Verdict::rejected("a size-0 `jhgm` box");
+                }
+                if plen > GAIN_MAP_BOX_CAP {
+                    return Verdict::new(Disposition::Skipped)
+                        .with_detail("larger than the decoder's 256 MiB gain-map cap");
+                }
+                if let Err(e) = jxl::api::GainMapBundle::parse(body) {
+                    return Verdict::rejected(format!("unparseable `jhgm` bundle ({})", e.error()));
+                }
+                if self.cfg.gain_map {
+                    Verdict::new(Disposition::Metadata(MetadataKind::GainMap)).with_detail(
+                        "only the gain-map codestream and the parsed parameters reach the \
+                         caller; the bundle's color encoding and alternate ICC do not",
+                    )
+                } else {
+                    Verdict::new(Disposition::Dropped).with_detail(
+                        "parsed by the decoder; zencodec surfaces it only with \
+                         extract_gain_map or a GainMapRender other than BaseOnly",
+                    )
+                }
+            }
+            b"jxli" => {
+                if raw.to_eof {
+                    return Verdict::rejected("a size-0 `jxli` box");
+                }
+                if plen > METADATA_BOX_CAP {
+                    return Verdict::new(Disposition::Skipped)
+                        .with_detail("larger than the decoder's 16 MiB cap");
+                }
+                if let Err(e) = jxl::api::FrameIndexBox::parse(body) {
+                    return Verdict::rejected(format!("unparseable `jxli` box ({})", e.error()));
+                }
+                Verdict::new(Disposition::Dropped).with_detail(
+                    "frame index: parsed by the decoder (native frame_index() only), not \
+                     surfaced through zencodec",
+                )
+            }
+            b"Exif" => self.metadata(raw, ps, plen, true),
+            b"xml " => self.metadata(raw, ps, plen, false),
+            b"brob" => {
+                let inner = body.get(..4);
+                let mut v = if self.brob && plen <= METADATA_BOX_CAP && !raw.to_eof {
+                    match inner {
+                        Some(b"Exif") if self.cfg.exif => {
+                            Verdict::new(Disposition::Metadata(MetadataKind::Exif)).with_detail(
+                                "brotli-compressed; the inventory does not decompress it, so a \
+                                 corrupt stream would be dropped instead",
+                            )
+                        }
+                        Some(b"xml ") if self.cfg.xmp => {
+                            Verdict::new(Disposition::Metadata(MetadataKind::Xmp)).with_detail(
+                                "brotli-compressed; the inventory does not decompress it, so a \
+                                 corrupt stream would be dropped instead",
+                            )
+                        }
+                        Some(b"Exif" | b"xml ") => Verdict::new(Disposition::Dropped)
+                            .with_detail("disabled by the decode policy"),
+                        _ => Verdict::new(Disposition::Skipped)
+                            .with_detail("brotli box of a type the decoder does not route"),
+                    }
+                } else {
+                    Verdict::new(Disposition::Skipped)
+                        .with_detail("brotli-compressed box; this decoder build skips brob boxes")
+                };
+                v.label = inner.map(label_of);
+                v
+            }
+            b"jumb" => {
+                let mut v = Verdict::new(Disposition::Skipped)
+                    .with_detail("JUMBF superbox; the decoder skips it");
+                v.label = jumb_label(body);
+                v
+            }
+            b"jxll" => Verdict::new(Disposition::Skipped)
+                .with_detail("codestream level box; the decoder skips it"),
+            _ => Verdict::new(Disposition::Unknown),
+        }
+    }
+
+    fn ftyp(&mut self, raw: &RawBox, plen: u64, body: &[u8]) -> Verdict {
+        if raw.to_eof || plen < 8 || &body[..4] != b"jxl " {
+            return Verdict::rejected("`ftyp` must carry brand `jxl `");
+        }
+        let version = u32::from_be_bytes([body[4], body[5], body[6], body[7]]);
+        if version > 1 {
+            return Verdict::rejected("`ftyp` version above 1");
+        }
+        self.version = version;
+        let mut v = Verdict::new(Disposition::Structure)
+            .with_detail(format!("file format version {version}"));
+        v.label = Some("jxl ".to_string());
+        v
+    }
+
+    fn jxlc(&mut self, raw: &RawBox, ps: u64, plen: u64) -> Verdict {
+        if matches!(self.state, Cs::Jxlp(_) | Cs::Last) {
+            return Verdict::rejected("`jxlc` after `jxlp`");
+        }
+        self.state = Cs::Jxlc;
+        self.codestream_box(raw, ps, plen, None)
+    }
+
+    fn jxlp(&mut self, raw: &RawBox, ps: u64, plen: u64, body: &[u8]) -> Verdict {
+        if plen < 4 {
+            return Verdict::rejected("`jxlp` box without its 4-byte index");
+        }
+        let word = u32::from_be_bytes([body[0], body[1], body[2], body[3]]);
+        let last = word & 0x8000_0000 != 0;
+        let idx = word & 0x7fff_ffff;
+        let wanted = match self.state {
+            Cs::None => 0,
+            Cs::Jxlp(i) => i.wrapping_add(1),
+            Cs::Jxlc | Cs::Last => return Verdict::rejected("`jxlp` after a complete codestream"),
+        };
+        if idx < wanted {
+            return Verdict::rejected("`jxlp` index out of order");
+        }
+        let mut note = format!("jxlp index {idx}");
+        if last {
+            note.push_str(" (last)");
+        }
+        if idx > wanted {
+            if self.version < 1
+                || self.ooo.contains_key(&idx)
+                || self.ooo.len() >= MAX_OOO
+                || raw.to_eof
+            {
+                return Verdict::rejected("`jxlp` index out of order");
+            }
+            self.ooo.insert(idx, last);
+            self.ooo_seen = true;
+            note.push_str(", out of order (ftyp version 1)");
+            return Verdict::new(Disposition::ImageData).with_detail(note);
+        }
+        self.state = if last { Cs::Last } else { Cs::Jxlp(idx) };
+        // Buffered out-of-order parts splice in as soon as their turn comes.
+        loop {
+            let next = match self.state {
+                Cs::None => 0,
+                Cs::Jxlp(i) => i.wrapping_add(1),
+                _ => break,
+            };
+            match self.ooo.remove(&next) {
+                Some(l) => self.state = if l { Cs::Last } else { Cs::Jxlp(next) },
+                None => break,
+            }
+        }
+        self.codestream_box(raw, ps + 4, plen - 4, Some(note))
+    }
+
+    /// A codestream box that passed the order rules. `ps`/`plen` describe the
+    /// codestream bytes only (after a `jxlp` index word).
+    fn codestream_box(
+        &mut self,
+        raw: &RawBox,
+        ps: u64,
+        plen: u64,
+        note: Option<String>,
+    ) -> Verdict {
+        let pe = ps + plen;
+        let join = |a: Option<String>, b: &str| match a {
+            Some(a) => format!("{a}; {b}"),
+            None => b.to_string(),
+        };
+        let mut v = Verdict::new(Disposition::ImageData);
+        v.detail = note.clone();
+
+        if self.complete {
+            // The codestream already ended; the decoder enters this box (a
+            // drain poll) but reads none of its payload.
+            if plen == 0 {
+                v.disposition = Disposition::Structure;
+                return v;
+            }
+            v.disposition = Disposition::Unreferenced;
+            v.detail = Some(join(
+                note,
+                "the codestream had already ended; the decoder enters this box but reads none \
+                 of it",
+            ));
+            self.phase = Phase::Dead(format!(
+                "never read: the box parser stops at the codestream box at offset {}",
+                raw.start
+            ));
+            return v;
+        }
+
+        // Out-of-order parts make file offsets and codestream order disagree,
+        // so completion is then judged by the box type sequence alone.
+        let before = self.cs_before;
+        self.cs_before = before.saturating_add(plen);
+        let completes = match self.end {
+            Some(e) if !self.ooo_seen => before < e && e <= before + plen,
+            _ => matches!(self.state, Cs::Jxlc | Cs::Last),
+        };
+        if !completes {
+            if let Some(n) = self.end_note.take() {
+                v.detail = Some(join(v.detail.take(), &n));
+            }
+            return v;
+        }
+        self.complete = true;
+        let used_end = match self.end {
+            Some(e) if !self.ooo_seen => ps + (e - before),
+            _ => pe,
+        };
+        if used_end < pe {
+            // Junk after the codestream inside the box: the decoder never
+            // reads it, and never advances to the boxes after this one.
+            v.split = Some((
+                raw.start + raw.header,
+                split_children(raw, ps, used_end, pe),
+            ));
+            self.phase = Phase::Dead(format!(
+                "not reliably read: the codestream box at offset {} holds bytes after the \
+                 codestream, and the decoder then parses the boxes after it only for some \
+                 layouts (measured: small junk tails read them, others do not)",
+                raw.start
+            ));
+        } else {
+            self.phase = Phase::Drain;
+        }
+        v
+    }
+
+    /// `Exif` (`exif == true`) or `xml `.
+    fn metadata(&mut self, raw: &RawBox, ps: u64, plen: u64, exif: bool) -> Verdict {
+        let (enabled, kind, name) = if exif {
+            (self.cfg.exif, MetadataKind::Exif, "Exif")
+        } else {
+            (self.cfg.xmp, MetadataKind::Xmp, "XMP")
+        };
+        if plen > METADATA_BOX_CAP && !raw.to_eof {
+            return Verdict::new(Disposition::Skipped)
+                .with_detail("larger than the decoder's 16 MiB cap");
+        }
+        if exif && plen < 4 {
+            return Verdict::new(Disposition::Dropped)
+                .with_detail("shorter than the 4-byte TIFF offset; the decoder ignores it");
+        }
+        if !enabled {
+            return Verdict::new(Disposition::Dropped)
+                .with_detail(format!("{name} disabled by the decode policy"));
+        }
+        let mut v = Verdict::new(Disposition::Metadata(kind));
+        if raw.to_eof && plen > METADATA_BOX_CAP {
+            // fill_metadata_box keeps the first 16 MiB of a to-EOF box.
+            let cut = ps + METADATA_BOX_CAP;
+            v.split = Some((
+                ps,
+                vec![
+                    Child {
+                        range: ps..cut,
+                        disposition: Disposition::Metadata(kind),
+                        label: None,
+                        detail: "the first 16 MiB of a size-0 box are kept",
+                    },
+                    Child {
+                        range: cut..raw.end,
+                        disposition: Disposition::Skipped,
+                        label: None,
+                        detail: "past the 16 MiB cap; the decoder then parses these bytes as \
+                                 boxes",
+                    },
+                ],
+            ));
+        }
+        v
+    }
+
+    fn finish(mut self) -> Result<Inventory, WalkError> {
+        if let Some((at, why)) = self.fail_at.take() {
+            let detail = format!("not used: decode fails at offset {at} ({why})");
+            for id in core::mem::take(&mut self.consumed) {
+                self.inv.set_disposition(id, Disposition::Skipped);
+                self.inv.set_detail(id, detail.clone());
+            }
+        }
+        self.inv.fill_gaps(None, Disposition::Trailing)?;
+        Ok(self.inv)
+    }
 }
 
-fn post_codestream_detail() -> String {
-    "follows the last codestream box: zenjxl reads metadata right after the pixels \
-     (decode.rs:935-940, codec.rs:3069-3073), when the decoder has only parsed boxes up to the \
-     end of the codestream; measured, it has also parsed these only for single-`jxlc` files \
-     with a codestream of at most 4096 bytes"
-        .to_string()
+fn split_children(raw: &RawBox, ps: u64, used_end: u64, pe: u64) -> Vec<Child> {
+    let mut kids = Vec::new();
+    if ps > raw.start + raw.header {
+        kids.push(Child {
+            range: raw.start + raw.header..ps,
+            disposition: Disposition::Structure,
+            label: None,
+            detail: "jxlp index word",
+        });
+    }
+    kids.push(Child {
+        range: ps..used_end,
+        disposition: Disposition::ImageData,
+        label: Some("codestream"),
+        detail: "the codestream ends at the end of this part",
+    });
+    kids.push(Child {
+        range: used_end..pe,
+        disposition: Disposition::Unreferenced,
+        label: None,
+        detail: "bytes after the end of the codestream; the decoder never reads them",
+    });
+    kids
+}
+
+fn is_consumed_content(d: Disposition) -> bool {
+    matches!(d, Disposition::ImageData | Disposition::Metadata(_))
 }

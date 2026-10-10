@@ -18,28 +18,38 @@
   `#[non_exhaustive]` enum, but batched here since they land in the same
   0.3.0 release as the other breaks. See *Fixed* below.
 
-### Added
-- `DecodeJob::inventory` for `JxlDecoderConfig` (`DecodeCapabilities::inventory`):
-  a byte-exact map of the container boxes (or bare codestream) with the
-  disposition the zencodec decode path gives each box. Depends on
-  imazen/zencodec#133 (`feat/inventory`); `d2401f35`. See `docs/INVENTORY.md`.
-
 **Release gate cleared:** zenjxl 0.3.0's `CategorizedError` taxonomy adoption
 (zencodec#103, reshaped into a two-level origin-first taxonomy —
 `Image`/`Request`/`Resource`/`Policy`/`Stopped`/`Io`/`Internal` — by #116, and
 including the `Lifecycle` -> `Stopped` rename) now resolves directly against
 the published zencodec 0.1.26: the declared `zencodec` requirement is bumped
 to `"0.1.26"` and the `[patch.crates-io]` git pin no longer floats on an
-unmerged branch/rev. The patch entry itself stays, repointed at the
-content-identical `v0.1.26` release tag, because `zencodec-testkit` (the
+unmerged branch/rev. The patch entry itself stays (it floats on imazen/zencodec#133's
+`feat/inventory` branch until that merges; swap it back to the `v0.1.26` tag
+or the release before merging this branch), because `zencodec-testkit` (the
 dev-only conformance-harness dependency providing
 `check_decode_truncation_series`) is still unpublished and path-deps
 `zencodec` internally — without the patch, the graph would resolve two
 distinct `zencodec` crates (crates.io 0.1.26 + the testkit's git checkout)
 and fail with "multiple different versions of crate zencodec". Both the
-patch and the `zencodec-testkit` dev-dep are tag-pinned (not a bare rev) to
-`v0.1.26` so they can't drift apart. `ErrorCategory` was never published
+patch and the `zencodec-testkit` dev-dep point at the same ref so they can't
+drift apart. `ErrorCategory` was never published
 prior to 0.1.26, so adopting the reshape was not a break of released API.
+
+### Added
+- `DecodeJob::inventory` for `JxlDecoderConfig` (`DecodeCapabilities::inventory`):
+  a byte-exact map of the container boxes (or bare codestream) with the
+  disposition the zencodec decode path gives each box, built without
+  allocating per-frame buffers (needs zenjxl-decoder's lean `scan_frames_only`,
+  imazen/zenjxl-decoder#62). Depends on imazen/zencodec#133 (`feat/inventory`);
+  `d2401f35`, reworked in review round 1. See `docs/INVENTORY.md`.
+
+### Fixed
+- Exif, `xml ` and `jhgm` boxes after the last codestream box are now always
+  read: decode polls the box parser once more after the last frame, where it
+  used to read them only for some box layouts (zenjxl#22, `43f552ab`). A
+  trailing box that fails to parse ends the walk without failing the decode.
+  The animation decoder does the same.
 
 ### Notes (unreleased)
 - **2026-09-05 — jxl-encoder 0.4.0 pin re-verified clean; the "still broken"

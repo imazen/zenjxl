@@ -68,9 +68,10 @@ ultrahdr-core = { version = "0.5.0", optional = true, default-features = false, 
 # consumes — is now published, so its path-patch was dropped and the `jxl`
 # dep above bumped to 0.3.10.)
 [patch.crates-io]
-# zencodec-testkit is unpublished (path-deps zencodec internally); unify the
-# graph on the content-identical released tag until the testkit ships on
-# crates.io.
+# TEMPORARY: imazen/zencodec#133 (`DecodeJob::inventory`) branch. Swap this
+# and the zencodec-testkit dev-dependency below back to the released tag /
+# crates.io versions before merge. (zencodec-testkit is unpublished and
+# path-deps zencodec internally, so the graph needs one patch to unify them.)
 zencodec = { git = "https://github.com/imazen/zencodec", branch = "feat/inventory" }
 jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../zenjpeg/zenjpeg" }
@@ -127,13 +128,11 @@ zenanalyze = { git = "https://github.com/imazen/zenanalyze" }
 # on stable; resolution happens once at exit.
 backtrace = "0.3.76"
 # Conformance harness (unpublished companion crate) for the EOF/truncation-series
-# decode check (tests/truncation_series.rs). Tag-pinned (not a bare rev) to
-# v0.1.26 -- the same content-identical release the [patch.crates-io]
-# `zencodec` entry above points at, so both resolve to one unified zencodec
-# crate (a bare rev here that drifted from the patch's tag would silently
-# reintroduce "multiple different versions of crate zencodec"). Drop both the
-# patch and this tag pin for a plain crates.io version dep once zencodec-testkit
-# itself publishes.
+# decode check (tests/truncation_series.rs) and the structural-inventory checks
+# (tests/inventory.rs). TEMPORARY: same imazen/zencodec#133 branch as the
+# [patch.crates-io] `zencodec` entry above, so both resolve to one zencodec
+# crate; swap both for the released tag (v0.1.26 before) or crates.io versions
+# before merge.
 zencodec-testkit = { git = "https://github.com/imazen/zencodec", branch = "feat/inventory" }
 # Concrete `enough::Stop` token for the README cancellation example
 # (tests/readme_examples.rs compiles the documented snippets).

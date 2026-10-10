@@ -2506,6 +2506,7 @@ mod decoding {
                     xmp: self.policy.resolve_xmp(true),
                     gain_map: self.extract_gain_map
                         || !matches!(self.gain_map_render, zencodec::GainMapRender::BaseOnly),
+                    max_memory: self.limits.as_ref().and_then(|l| l.max_memory_bytes),
                 };
                 let stop = self.stop.as_ref().map(|s| s as &dyn Stop);
                 crate::inventory::walk(data, cfg, stop)
@@ -2516,6 +2517,9 @@ mod decoding {
                         ),
                         crate::inventory::WalkError::Stopped(r) => {
                             whereat::at!(JxlError::Cancelled(r))
+                        }
+                        crate::inventory::WalkError::Limit(m) => {
+                            whereat::at!(JxlError::LimitExceeded(m, zencodec::LimitKind::Memory))
                         }
                     })
             })()
