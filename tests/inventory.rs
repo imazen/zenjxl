@@ -317,7 +317,19 @@ fn pinned_kitchen_sink_inventory() {
             Skipped,
             Some("Exif".into()),
         ),
-        (PartKind::Box, cc(b"jbrd"), next(10), Skipped, None),
+        (
+            PartKind::Box,
+            cc(b"jbrd"),
+            next(10),
+            // The linked decoder build decides: buffered (and dropped) with its
+            // `jpeg` feature, skipped without.
+            if decoder_reads_brob() {
+                Dropped
+            } else {
+                Skipped
+            },
+            None,
+        ),
         (PartKind::Box, cc(b"jxlp"), next(12 + 100), ImageData, None),
         (
             PartKind::Box,
@@ -1060,34 +1072,32 @@ fn brob_exif_follows_the_decoder_build() {
 /// the animation decoder.
 #[test]
 fn trailing_boxes_match_real_decode() {
-    use zencodec::decode::AnimationFrameDecoder as _;
-    fn real(bytes: &[u8]) -> Option<(bool, bool)> {
-        let job = JxlDecoderConfig::new().job();
-        let anim = job.probe(bytes).ok()?.is_animation();
-        if !anim {
-            let m = decode_meta(bytes).ok()?;
-            return Some((m.0.is_some(), m.1.is_some()));
-        }
-        let mut d = JxlDecoderConfig::new()
+    /// What the one-shot decode (the documented path) surfaces, and whether
+    /// the file is an animation.
+    fn real(bytes: &[u8]) -> Option<((bool, bool), bool)> {
+        let m = decode_meta(bytes).ok()?;
+        let anim = JxlDecoderConfig::new()
             .job()
-            .animation_frame_decoder(Cow::Owned(bytes.to_vec()), &[])
-            .ok()?;
-        d.render_next_frame_owned(None).ok()?;
-        let m = &d.info().embedded_metadata;
-        Some((m.exif.is_some(), m.xmp.is_some()))
+            .probe(bytes)
+            .ok()?
+            .is_animation();
+        Some(((m.0.is_some(), m.1.is_some()), anim))
     }
     fn check(name: &str, bytes: &[u8], agree: &mut usize) {
-        let Some(real) = real(bytes) else { return };
+        let Some((real, anim)) = real(bytes) else {
+            return;
+        };
         let inv = inventory_of(bytes);
         inv.validate().unwrap();
         let claim = (
             matches!(disposition_of(&inv, b"Exif", 0), Disposition::Metadata(_)),
             matches!(disposition_of(&inv, b"xml ", 0), Disposition::Metadata(_)),
         );
-        if name.ends_with("[jxlc + junk]") {
-            // With junk inside the codestream box the decoder reads the boxes
-            // after it only for some layouts: the inventory reports them as
-            // not reliably read, and must never claim a read the decode lacks.
+        if anim || name.ends_with("[jxlc + junk]") {
+            // Animations (one-shot stops after the first frame) and junk
+            // inside the codestream box: the decode reads the trailing boxes
+            // only for some layouts, so the inventory reports them unread and
+            // must never claim a read the decode lacks.
             assert!(
                 (!claim.0 || real.0) && (!claim.1 || real.1),
                 "{name}: claims a read that does not happen\n{inv}"
@@ -1184,4 +1194,206 @@ fn trailing_boxes_match_real_decode() {
     }
     eprintln!("trailing-box claims equal the real decode on {agree} variants");
     assert!(agree >= 15, "only {agree} variants compared");
+}
+
+/// Whether the linked decoder decompresses `brob` boxes (its `jpeg` feature).
+fn decoder_reads_brob() -> bool {
+    // brotli: one uncompressed meta-block holding "\0\0\0\0EXIFPROBE".
+    const BROTLI: [u8; 17] = [
+        0xc0, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x45, 0x58, 0x49, 0x46, 0x50, 0x52, 0x4f, 0x42,
+        0x45, 0x03,
+    ];
+    let cs = lossless(16, 16, false);
+    let bytes = container(|o| {
+        let mut p = b"Exif".to_vec();
+        p.extend(BROTLI);
+        bx(o, b"brob", &p);
+        bx(o, b"jxlc", &cs);
+    });
+    decode_meta(&bytes).unwrap().0.is_some()
+}
+
+// ── review round 2 ──────────────────────────────────────────────────────────
+
+fn animation(w: u32, h: u32, frames: u32) -> Vec<u8> {
+    use zencodec::encode::AnimationFrameEncoder as _;
+    let mut enc = JxlEncoderConfig::new()
+        .with_generic_quality(40.0)
+        .job()
+        .animation_frame_encoder()
+        .expect("animation encoder");
+    let mut x = 99u32;
+    for f in 0..frames {
+        let pixels: Vec<rgb::Rgb<u8>> = (0..w * h)
+            .map(|i| {
+                x = x.wrapping_mul(1664525).wrapping_add(1013904223);
+                rgb::Rgb {
+                    r: (i as u8).wrapping_add(f as u8 * 40),
+                    g: (x >> 24) as u8,
+                    b: ((i / w) as u8) ^ (i as u8),
+                }
+            })
+            .collect();
+        let buf =
+            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, w, h).expect("buffer");
+        enc.push_frame(buf.as_slice().into(), 100, None)
+            .expect("push");
+    }
+    enc.finish(None).expect("finish").into_vec()
+}
+
+/// Finding 1: boxes after an animation's codestream are not claimed as read
+/// (a one-shot decode stops after the first frame); only the animation
+/// decoder surfaces them.
+#[test]
+fn trailing_boxes_of_an_animation_are_not_claimed() {
+    use zencodec::decode::AnimationFrameDecoder as _;
+    for (w, h, frames) in [(16, 16, 2), (256, 256, 3)] {
+        let anim = animation(w, h, frames);
+        let bytes = container(|o| {
+            bx(o, b"jxlc", &anim);
+            bx(o, b"Exif", &exif_with(b"POST"));
+            bx(o, b"xml ", b"<x/>");
+        });
+        let inv = inventory_of(&bytes);
+        let exif = inv
+            .parts()
+            .iter()
+            .find(|p| p.tag == PartTag::FourCc(*b"Exif"))
+            .unwrap();
+        assert_eq!(exif.disposition, Disposition::Skipped, "{inv}");
+        assert!(
+            exif.detail
+                .as_deref()
+                .unwrap()
+                .contains("only AnimationFrameDecoder"),
+            "{inv}"
+        );
+        let mut d = JxlDecoderConfig::new()
+            .job()
+            .animation_frame_decoder(Cow::Owned(bytes.clone()), &[])
+            .unwrap();
+        d.render_next_frame_owned(None).unwrap();
+        assert_eq!(
+            d.info().embedded_metadata.exif.as_deref(),
+            Some(&b"POST"[..]),
+            "{w}x{h}: the animation decoder surfaces it"
+        );
+    }
+    // The large one is the reviewer's over-claim: the one-shot decode misses it.
+    let anim = animation(256, 256, 3);
+    let bytes = container(|o| {
+        bx(o, b"jxlc", &anim);
+        bx(o, b"Exif", &exif_with(b"POST"));
+    });
+    assert_eq!(decode_meta(&bytes).unwrap().0, None);
+}
+
+/// Finding 2: under `Components` a broken trailing gain map fails the decode;
+/// the inventory says so.
+#[test]
+fn broken_gain_map_in_components_mode_fails_the_decode() {
+    use zencodec::GainMapRender;
+    let cs = lossless(16, 16, false);
+    let mut bad_cs = vec![0xFF, 0x0A];
+    bad_cs.extend([0xAB; 40]);
+    let bundle = |gm: Vec<u8>| {
+        GainMapBundle {
+            metadata: vec![1, 2, 3],
+            color_encoding: None,
+            alt_icc_compressed: None,
+            gain_map_codestream: gm,
+        }
+        .serialize()
+    };
+    let with_bundle = |b: &[u8]| {
+        container(|o| {
+            bx(o, b"Exif", &exif_with(b"PRE"));
+            bx(o, b"jxlc", &cs);
+            bx(o, b"jhgm", b);
+        })
+    };
+    let components = |bytes: &[u8]| {
+        JxlDecoderConfig::new()
+            .job()
+            .with_gain_map_render(GainMapRender::Components)
+            .inventory(bytes)
+            .unwrap()
+            .unwrap()
+    };
+    let decode_components = |bytes: &[u8]| {
+        JxlDecoderConfig::new()
+            .job()
+            .with_gain_map_render(GainMapRender::Components)
+            .decoder(Cow::Owned(bytes.to_vec()), &[])
+            .unwrap()
+            .decode()
+            .map(|_| ())
+    };
+
+    let bad = with_bundle(&bundle(bad_cs));
+    assert!(decode_components(&bad).is_err(), "the decode fails");
+    let inv = components(&bad);
+    assert_eq!(
+        disposition_of(&inv, b"jhgm", 0),
+        Disposition::Malformed,
+        "{inv}"
+    );
+    assert_eq!(
+        disposition_of(&inv, b"jxlc", 0),
+        Disposition::Skipped,
+        "{inv}"
+    );
+    assert_eq!(
+        disposition_of(&inv, b"Exif", 0),
+        Disposition::Skipped,
+        "{inv}"
+    );
+    // The default mode never decodes the gain map.
+    assert!(decode_meta(&bad).is_ok());
+    let inv = inventory_of(&bad);
+    assert_eq!(
+        disposition_of(&inv, b"jhgm", 0),
+        Disposition::Dropped,
+        "{inv}"
+    );
+
+    let good = with_bundle(&bundle(lossless(8, 8, false)));
+    assert!(decode_components(&good).is_ok());
+    let inv = components(&good);
+    assert_eq!(
+        disposition_of(&inv, b"jhgm", 0),
+        Disposition::Metadata(MetadataKind::GainMap),
+        "{inv}"
+    );
+    assert_eq!(
+        disposition_of(&inv, b"jxlc", 0),
+        Disposition::ImageData,
+        "{inv}"
+    );
+}
+
+/// Finding 3: a memory limit never turns malformed input into an error.
+#[test]
+fn memory_limit_does_not_turn_malformed_input_into_errors() {
+    use std::path::PathBuf;
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fuzz");
+    let mut n = 0;
+    for dir in ["seeds", "regression"] {
+        for e in std::fs::read_dir(root.join(dir)).unwrap() {
+            let p = e.unwrap().path();
+            let data = std::fs::read(&p).unwrap();
+            for limit in [8u64 << 20, 1 << 30] {
+                let inv = JxlDecoderConfig::new()
+                    .job()
+                    .with_limits(zencodec::ResourceLimits::none().with_max_memory(limit))
+                    .inventory(&data)
+                    .unwrap_or_else(|e| panic!("{}: {e}", p.display()))
+                    .unwrap();
+                inv.validate().unwrap();
+            }
+            n += 1;
+        }
+    }
+    assert!(n >= 15);
 }

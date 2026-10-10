@@ -45,11 +45,22 @@ prior to 0.1.26, so adopting the reshape was not a break of released API.
   `d2401f35`, reworked in review round 1. See `docs/INVENTORY.md`.
 
 ### Fixed
-- Exif, `xml ` and `jhgm` boxes after the last codestream box are now always
-  read: decode polls the box parser once more after the last frame, where it
-  used to read them only for some box layouts (zenjxl#22, `43f552ab`). A
-  trailing box that fails to parse ends the walk without failing the decode.
-  The animation decoder does the same.
+- Exif, `xml ` and `jhgm` boxes after the last codestream box are now read
+  for still images whatever the codestream size (zenjxl#22, `43f552ab`):
+  decode polls the box parser once more after the last frame. They used to
+  be read only for some codestream sizes and layouts. Effects beyond "more
+  metadata": a trailing `Exif`/`xml ` box replaces an earlier one (the last
+  box wins); with `GainMapRender::Components` a trailing `jhgm` whose
+  gain-map codestream cannot be decoded now fails the decode; with native
+  `ReconstructHdr` (feature `reconstruct-hdr`) a trailing `jhgm` is now
+  applied, so the output changes from the 8-bit base to the reconstructed
+  image, and unparseable ISO 21496-1 metadata fails the decode. Not covered:
+  a one-shot decode of an animation still stops after its first frame and
+  reads trailing boxes only for small codestreams (use the animation
+  decoder); junk inside the codestream box still hides the boxes after it
+  for some layouts. A trailing box that fails to parse in the extra poll
+  does not fail the decode. No output changed on 10,466 real files
+  (reviewer's digests, review round 2).
 
 ### Notes (unreleased)
 - **2026-09-05 — jxl-encoder 0.4.0 pin re-verified clean; the "still broken"
