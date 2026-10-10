@@ -3105,8 +3105,26 @@ mod decoding {
             // Extract EXIF and XMP metadata from container boxes.
             // These may appear after the codestream, so they're only
             // available after all frames have been decoded.
-            let exif = final_decoder.as_mut().and_then(|d| d.take_exif());
-            let xmp = final_decoder.as_mut().and_then(|d| d.take_xmp());
+            // (Boxes after the last codestream box need one more poll of the
+            // box parser; see `decode::decode_with_options_oriented`, zenjxl#22.)
+            let mut exif = final_decoder.as_mut().and_then(|d| d.take_exif());
+            let mut xmp = final_decoder.as_mut().and_then(|d| d.take_xmp());
+            if let Some(d) = final_decoder.take() {
+                macro_rules! merge_trailing {
+                    ($d:expr) => {{
+                        let mut d = $d;
+                        exif = d.take_exif().or(exif.take());
+                        xmp = d.take_xmp().or(xmp.take());
+                    }};
+                }
+                match d.process(&mut input) {
+                    Ok(ProcessingResult::Complete { result }) => merge_trailing!(result),
+                    Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => {
+                        merge_trailing!(fallback)
+                    }
+                    Err(_) => {}
+                }
+            }
 
             let jxl_info = JxlInfo {
                 width: width_u32,
