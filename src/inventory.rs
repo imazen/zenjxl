@@ -335,7 +335,7 @@ pub(crate) fn walk(
     let mut dead: Option<u64> = None;
 
     while at < len {
-        if index % 1024 == 0
+        if index.is_multiple_of(1024)
             && let Some(s) = stop
         {
             s.check().map_err(WalkError::Stopped)?;

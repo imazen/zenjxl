@@ -516,11 +516,11 @@ fn policy_and_gain_map_settings_change_dispositions() {
     );
 }
 
-/// `brob` stays skipped only while zenjxl-decoder is built without its `jpeg`
-/// feature. A valid brotli stream carrying `Exif` would surface if that
-/// changed; this test then fails and the inventory needs updating.
+/// A `brob` box is skipped whatever it wraps. This synthetic box only pins the
+/// disposition and label; `corpus_files_pass_check_inventory` decodes real
+/// cjxl brotli boxes to prove nothing surfaces from them.
 #[test]
-fn brob_wrapped_exif_is_skipped_by_the_decoder() {
+fn brob_is_skipped_and_labelled_with_its_inner_type() {
     // brotli stream for the 8 bytes "\0\0\0\0EXIF" -- see the comment in docs/INVENTORY.md
     const BROTLI_EXIF: &[u8] = &[
         0x0b, 0x03, 0x80, 0x00, 0x00, 0x00, 0x00, 0x45, 0x58, 0x49, 0x46, 0x03,
@@ -601,7 +601,23 @@ fn corpus_files_pass_check_inventory() {
         zencodec_testkit::check_inventory(JxlDecoderConfig::new(), &bytes)
             .unwrap_or_else(|e| panic!("{}: {e:?}", f.display()));
     }
-    eprintln!("check_inventory passed on {} corpus files", files.len());
+    // cjxl writes Exif/XMP as brotli `brob` boxes: the inventory calls them
+    // skipped, so a real decode of such a file must not surface them.
+    let mut brob_files = 0;
+    for f in &files {
+        let bytes = std::fs::read(f).unwrap();
+        let inv = inventory_of(&bytes);
+        let has = |tag: &[u8; 4]| inv.parts().iter().any(|p| p.tag == PartTag::FourCc(*tag));
+        if has(b"brob") && !has(b"Exif") && !has(b"xml ") {
+            assert_eq!(surfaces(&bytes), (false, false), "{}", f.display());
+            brob_files += 1;
+        }
+    }
+    assert!(brob_files >= 1, "no brob-only corpus file found");
+    eprintln!(
+        "check_inventory passed on {} corpus files ({brob_files} brob-only decoded)",
+        files.len()
+    );
 }
 
 /// `jxlinfo -v -v` lists every box with its size; the inventory must list the
@@ -713,7 +729,7 @@ fn corpus_boxes_match_exiftool() {
                 let n: u64 = n.parse().unwrap();
                 let dump = lines.get(i + 1).copied().unwrap_or("");
                 let off = dump
-                    .trim_start_matches(|c: char| c == ' ' || c == '|')
+                    .trim_start_matches([' ', '|'])
                     .split(':')
                     .next()
                     .and_then(|h| u64::from_str_radix(h.trim(), 16).ok());

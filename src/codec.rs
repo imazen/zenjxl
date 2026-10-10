@@ -4725,6 +4725,7 @@ mod tests {
     /// grows with image area.
     #[cfg(feature = "decode")]
     #[test]
+    #[allow(deprecated)] // ComputeEnvironment::new is deprecated on zencodec feat/inventory; conservative() is not in 0.1.26
     fn estimate_decode_resources_is_sane() {
         use zencodec::decode::DecoderConfig;
         use zencodec::estimate::{ComputeEnvironment, ImageCharacteristics};
