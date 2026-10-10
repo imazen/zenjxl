@@ -123,8 +123,8 @@ fn large_frames_need_no_image_sized_memory() {
         .last()
         .map(|id| inv.get(*id).unwrap())
         .unwrap();
-    assert_eq!(tail.range, n as u64..bytes.len() as u64, "{inv}");
-    assert!(!tail.disposition.is_consumed());
+    assert_eq!(tail.range(), n as u64..bytes.len() as u64, "{inv}");
+    assert!(!tail.disposition().is_consumed());
     zencodec_testkit::check_inventory(JxlDecoderConfig::new(), &bytes[..n]).expect("check");
 }
 

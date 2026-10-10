@@ -241,11 +241,11 @@ fn rows(inv: &Inventory) -> Vec<Row> {
         .map(|id| {
             let p = inv.get(id).unwrap();
             (
-                p.kind,
-                p.tag.clone(),
-                p.range.clone(),
-                p.disposition,
-                p.label.as_ref().map(|l| l.to_string()),
+                p.kind(),
+                p.tag().clone(),
+                p.range(),
+                p.disposition(),
+                p.label().as_ref().map(|l| l.to_string()),
             )
         })
         .collect()
@@ -267,7 +267,7 @@ fn pinned_kitchen_sink_inventory() {
     };
     let bundle_len = {
         let (b, _) = (inv.get(inv.children(None)[7]).unwrap(), 0);
-        b.range.end - b.range.start
+        b.range().end - b.range().start
     };
     use Disposition::*;
     let expected: Vec<Row> = vec![
@@ -355,15 +355,15 @@ fn pinned_kitchen_sink_inventory() {
     let by_tag = |tag: &[u8; 4]| -> Vec<_> {
         inv.parts()
             .iter()
-            .filter(|p| p.tag == PartTag::FourCc(*tag))
+            .filter(|p| *p.tag() == PartTag::FourCc(*tag))
             .collect()
     };
     let jxlps = by_tag(b"jxlp");
-    assert_eq!(jxlps[0].detail.as_deref(), Some("jxlp index 0"));
-    assert_eq!(jxlps[1].detail.as_deref(), Some("jxlp index 1 (last)"));
+    assert_eq!(jxlps[0].detail(), Some("jxlp index 0"));
+    assert_eq!(jxlps[1].detail(), Some("jxlp index 1 (last)"));
     assert!(
         by_tag(b"Exif")[0]
-            .detail
+            .detail()
             .as_ref()
             .unwrap()
             .contains("superseded")
@@ -407,10 +407,10 @@ fn surfaces(bytes: &[u8]) -> (bool, bool) {
 fn disposition_of(inv: &Inventory, tag: &[u8; 4], nth: usize) -> Disposition {
     inv.parts()
         .iter()
-        .filter(|p| p.tag == PartTag::FourCc(*tag))
+        .filter(|p| *p.tag() == PartTag::FourCc(*tag))
         .nth(nth)
         .unwrap()
-        .disposition
+        .disposition()
 }
 
 #[test]
@@ -563,11 +563,15 @@ fn corpus_files_pass_check_inventory() {
     for f in &files {
         let bytes = std::fs::read(f).unwrap();
         let inv = inventory_of(&bytes);
-        let has = |tag: &[u8; 4]| inv.parts().iter().any(|p| p.tag == PartTag::FourCc(*tag));
+        let has = |tag: &[u8; 4]| {
+            inv.parts()
+                .iter()
+                .any(|p| *p.tag() == PartTag::FourCc(*tag))
+        };
         if has(b"brob") && !has(b"Exif") && !has(b"xml ") {
             let claim = inv.parts().iter().any(|p| {
-                p.tag == PartTag::FourCc(*b"brob")
-                    && matches!(p.disposition, Disposition::Metadata(_))
+                *p.tag() == PartTag::FourCc(*b"brob")
+                    && matches!(p.disposition(), Disposition::Metadata(_))
             });
             let (exif, xmp) = surfaces(&bytes);
             assert_eq!(claim, exif || xmp, "{}\n{inv}", f.display());
@@ -617,13 +621,13 @@ fn corpus_boxes_match_jxlinfo() {
             .children(None)
             .into_iter()
             .map(|id| inv.get(id).unwrap())
-            .filter(|p| matches!(p.kind, PartKind::Box | PartKind::Header))
+            .filter(|p| matches!(p.kind(), PartKind::Box | PartKind::Header))
             .map(|p| {
-                let ty = match &p.tag {
+                let ty = match &p.tag() {
                     PartTag::FourCc(cc) => String::from_utf8_lossy(cc).to_string(),
                     _ => "JXL ".to_string(),
                 };
-                (ty, p.range.end - p.range.start, p.range.end)
+                (ty, p.range().end - p.range().start, p.range().end)
             })
             .collect();
         assert_eq!(
@@ -702,16 +706,16 @@ fn corpus_boxes_match_exiftool() {
         for (ty, n, off) in &tags {
             let cc: [u8; 4] = ty.as_bytes().try_into().unwrap();
             let found = inv.parts().iter().any(|p| {
-                p.tag == PartTag::FourCc(cc) && {
-                    let hdr = if bytes[p.range.start as usize + 3] == 1
-                        && bytes[p.range.start as usize..][..4] == [0, 0, 0, 1]
+                *p.tag() == PartTag::FourCc(cc) && {
+                    let hdr = if bytes[p.range().start as usize + 3] == 1
+                        && bytes[p.range().start as usize..][..4] == [0, 0, 0, 1]
                     {
                         16
                     } else {
                         8
                     };
-                    let payload = p.range.start + hdr;
-                    payload == *off && n.is_none_or(|n| p.range.end - payload == n)
+                    let payload = p.range().start + hdr;
+                    payload == *off && n.is_none_or(|n| p.range().end - payload == n)
                 }
             });
             assert!(
@@ -777,7 +781,7 @@ fn exif_with(tag: &[u8]) -> Vec<u8> {
 fn leaf_dispositions(inv: &Inventory) -> Vec<(PartTag, std::ops::Range<u64>, Disposition)> {
     let mut has_child = vec![false; inv.parts().len()];
     for p in inv.parts() {
-        if let Some(parent) = p.parent {
+        if let Some(parent) = p.parent() {
             has_child[parent.index()] = true;
         }
     }
@@ -785,7 +789,7 @@ fn leaf_dispositions(inv: &Inventory) -> Vec<(PartTag, std::ops::Range<u64>, Dis
         .iter()
         .enumerate()
         .filter(|(i, _)| !has_child[*i])
-        .map(|(_, p)| (p.tag.clone(), p.range.clone(), p.disposition))
+        .map(|(_, p)| (p.tag().clone(), p.range(), p.disposition()))
         .collect()
 }
 
@@ -1060,9 +1064,9 @@ fn brob_exif_follows_the_decoder_build() {
     let brob = inv
         .parts()
         .iter()
-        .find(|p| p.tag == PartTag::FourCc(*b"brob"))
+        .find(|p| *p.tag() == PartTag::FourCc(*b"brob"))
         .unwrap();
-    assert_eq!(brob.label.as_deref(), Some("Exif"));
+    assert_eq!(brob.label(), Some("Exif"));
 }
 
 /// Every wrapping of every corpus codestream (single `jxlc`; two `jxlp`
@@ -1128,23 +1132,23 @@ fn trailing_boxes_match_real_decode() {
             let end = inv
                 .parts()
                 .iter()
-                .filter(|p| p.disposition == Disposition::ImageData)
-                .map(|p| p.range.end)
+                .filter(|p| p.disposition() == Disposition::ImageData)
+                .map(|p| p.range().end)
                 .max()
                 .unwrap() as usize;
             cs = bytes[..end].to_vec();
         } else {
             for p in inv.parts() {
-                if p.parent.is_some() || p.disposition != Disposition::ImageData {
+                if p.parent().is_some() || p.disposition() != Disposition::ImageData {
                     continue;
                 }
-                let (s, e) = (p.range.start as usize, p.range.end as usize);
+                let (s, e) = (p.range().start as usize, p.range().end as usize);
                 let hdr = if bytes[s..s + 4] == [0, 0, 0, 1] {
                     16
                 } else {
                     8
                 };
-                let skip = if p.tag == PartTag::FourCc(*b"jxlp") {
+                let skip = if *p.tag() == PartTag::FourCc(*b"jxlp") {
                     4
                 } else {
                     0
@@ -1259,11 +1263,11 @@ fn trailing_boxes_of_an_animation_are_not_claimed() {
         let exif = inv
             .parts()
             .iter()
-            .find(|p| p.tag == PartTag::FourCc(*b"Exif"))
+            .find(|p| *p.tag() == PartTag::FourCc(*b"Exif"))
             .unwrap();
-        assert_eq!(exif.disposition, Disposition::Skipped, "{inv}");
+        assert_eq!(exif.disposition(), Disposition::Skipped, "{inv}");
         assert!(
-            exif.detail
+            exif.detail()
                 .as_deref()
                 .unwrap()
                 .contains("only AnimationFrameDecoder"),
