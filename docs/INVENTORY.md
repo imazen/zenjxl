@@ -40,11 +40,17 @@ asserts that direction):
 
 - **Animations.** A one-shot decode stops after the first frame; boxes after the codestream are
   `Skipped` ("only AnimationFrameDecoder surfaces them; the one-shot decode reads them only when its
-  pixel pass happens to reach them"). Small animations do surface them.
+  pixel pass happens to reach them"). Small animations do surface them: 20 of 356 wrapped corpus
+  animations of 0.8-3.9 KB, and zenjxl's own 884 B and 1,316 B animations (zenjxl#25).
 - **Junk after the codestream inside the codestream box.** The decoder parses the boxes after it
-  only for some layouts (a 1-byte junk tail: read for `spot.jxl`, missed for `bitdepth_8.jxl`).
+  only for some layouts (a 1-byte junk tail: read for `spot.jxl`, missed for `bitdepth_8.jxl`;
+  zenjxl-decoder#64, section 2).
 - **A rejected box after a small codestream** can still fail the decode (the decoder also polls
-  trailing boxes while reading the last sections of small codestreams); the box detail says so.
+  trailing boxes while reading the last sections of small codestreams); the box detail says so
+  (zenjxl-decoder#64, section 1).
+- **Memory:** the decoder's `hf_sections` table is allocated outside the memory tracker during the
+  header scan, bounded by `max_pixels` (35 MiB peak measured on a 1,517-byte fuzz input under an
+  8 MiB limit; zenjxl-decoder#64, section 3).
 
 A gain-map bundle is checked against the job's render mode: `Components` probes the gain-map
 codestream's headers (a decode of a broken one fails), native `ReconstructHdr` also parses the
