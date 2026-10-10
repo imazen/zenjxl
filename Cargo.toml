@@ -83,7 +83,10 @@ zenjpeg = { path = "../zenjpeg/zenjpeg" }
 # the registry 0.3.10 and the lib fails to compile (`ErrorClass` missing;
 # that was CI's red state 2026-08-14..27). Drop this patch when
 # zenjxl-decoder 0.4.0 publishes.
-zenjxl-decoder = { path = "../zenjxl-decoder/zenjxl-decoder" }
+# TEMPORARY: swap before merge: zenjxl-decoder#62 (lean scan_frames_only,
+# codestream_length, FrameIndexBox export). Replaces the sibling path patch
+# for this branch so CI (which clones the decoder at main) compiles.
+zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", branch = "feat/lean-scan" }
 # jxl-encoder main needs butteraugli 0.9.4 (`ButteraugliReference::
 # estimated_reference_bytes`, the alloc-budget precompute API), which is not
 # on crates.io yet (latest published: 0.9.3). jxl-encoder's own workspace
