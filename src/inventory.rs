@@ -55,6 +55,20 @@ const LABEL_MAX: usize = 64;
 /// Out-of-order `jxlp` boxes the decoder buffers (`OooJxlp::MAX_BUFFERED_BOXES`).
 const MAX_OOO: usize = 1 << 20;
 
+/// What a decode job does with a `jhgm` gain-map bundle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GainMapMode {
+    /// `BaseOnly` without `extract_gain_map`: parsed, not surfaced.
+    Off,
+    /// `extract_gain_map`: the bundle is attached to the output.
+    Surface,
+    /// `Components`: the gain-map codestream is decoded; a failure fails the decode.
+    Components,
+    /// Native `ReconstructHdr` (feature `reconstruct-hdr`): the ISO 21496-1
+    /// metadata must parse and the gain map is applied to the base.
+    Reconstruct,
+}
+
 /// What the caller's decode job would surface.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct WalkConfig {
@@ -62,9 +76,8 @@ pub(crate) struct WalkConfig {
     pub exif: bool,
     /// `DecodePolicy::resolve_xmp(true)`.
     pub xmp: bool,
-    /// The job surfaces the gain map (`extract_gain_map` or a render mode
-    /// other than `BaseOnly`).
-    pub gain_map: bool,
+    /// What the job does with a `jhgm` gain-map bundle.
+    pub gain_map: GainMapMode,
     /// The caller's `max_memory_bytes`, applied to the header scan.
     pub max_memory: Option<u64>,
 }
@@ -110,9 +123,12 @@ fn scan(
     options.limits.max_memory_bytes = Some(max_memory.unwrap_or(DEFAULT_SCAN_MEMORY));
     let mut input: &[u8] = data;
     let fail = |what: &str, kind: ErrorClass, msg: String| -> Result<ScanOut, WalkError> {
-        if max_memory.is_some()
-            && matches!(kind, ErrorClass::LimitExceeded | ErrorClass::OutOfMemory)
-        {
+        // Only a refused memory budget is a resource error of the caller's
+        // limit; every other failure (bad ICC, too many pixels, malformed
+        // header) is malformed input and leaves the end "not located".
+        let memory = kind == ErrorClass::OutOfMemory
+            || (kind == ErrorClass::LimitExceeded && msg.contains("memory_bytes"));
+        if max_memory.is_some() && memory {
             return Err(WalkError::Limit(format!("{what}: {msg}")));
         }
         Ok(ScanOut {
@@ -397,6 +413,8 @@ struct Walker<'a> {
     last_exif: Option<PartId>,
     last_xmp: Option<PartId>,
     last_gain_map: Option<PartId>,
+    /// The latest `jhgm` would fail the decode in the configured gain-map mode.
+    gain_map_fatal: Option<(u64, String)>,
 }
 
 /// Walk `data` and describe every byte.
@@ -513,6 +531,7 @@ pub(crate) fn walk(
         last_exif: None,
         last_xmp: None,
         last_gain_map: None,
+        gain_map_fatal: None,
     };
     w.run(stop)?;
     w.finish()
@@ -609,8 +628,12 @@ impl Walker<'_> {
 
         // Reject bookkeeping: fail the decode (main phase) or stop the walk.
         if let Some(why) = v.reject.clone() {
+            // Once the last codestream box has been entered, a box that fails
+            // to parse stops the walk without failing the decode.
+            let fatal =
+                matches!(self.phase, Phase::Main) && !matches!(self.state, Cs::Jxlc | Cs::Last);
             match self.phase {
-                Phase::Main => {
+                Phase::Main if fatal => {
                     self.fail_at = Some((raw.start, why.clone()));
                     v.detail = Some(match v.detail.take() {
                         Some(d) => format!("decode fails here: {why} ({d})"),
@@ -621,10 +644,10 @@ impl Walker<'_> {
                         raw.start
                     ));
                 }
-                Phase::Drain => {
+                Phase::Main | Phase::Drain => {
                     v.detail = Some(format!(
-                        "the decoder stops reading boxes here: {why}; the image has already \
-                         decoded, but small files can fail here (zenjxl#22)"
+                        "the decoder stops reading boxes here: {why}; the codestream is \
+                         whole, so the decode is not affected"
                     ));
                     self.phase = Phase::Dead(format!(
                         "never read: the decoder stops reading boxes at offset {}",
@@ -724,19 +747,31 @@ impl Walker<'_> {
                     return Verdict::new(Disposition::Skipped)
                         .with_detail("larger than the decoder's 256 MiB gain-map cap");
                 }
-                if let Err(e) = jxl::api::GainMapBundle::parse(body) {
-                    return Verdict::rejected(format!("unparseable `jhgm` bundle ({})", e.error()));
-                }
-                if self.cfg.gain_map {
-                    Verdict::new(Disposition::Metadata(MetadataKind::GainMap)).with_detail(
-                        "only the gain-map codestream and the parsed parameters reach the \
-                         caller; the bundle's color encoding and alternate ICC do not",
-                    )
-                } else {
-                    Verdict::new(Disposition::Dropped).with_detail(
+                let bundle = match jxl::api::GainMapBundle::parse(body) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        return Verdict::rejected(format!(
+                            "unparseable `jhgm` bundle ({})",
+                            e.error()
+                        ));
+                    }
+                };
+                // The latest bundle decides: an earlier failing one is replaced.
+                self.gain_map_fatal = None;
+                match self.cfg.gain_map {
+                    GainMapMode::Off => Verdict::new(Disposition::Dropped).with_detail(
                         "parsed by the decoder; zencodec surfaces it only with \
                          extract_gain_map or a GainMapRender other than BaseOnly",
-                    )
+                    ),
+                    mode => {
+                        if let Some(why) = self.gain_map_failure(mode, &bundle) {
+                            self.gain_map_fatal = Some((raw.start, why));
+                        }
+                        Verdict::new(Disposition::Metadata(MetadataKind::GainMap)).with_detail(
+                            "only the gain-map codestream and the parsed parameters reach the \
+                             caller; the bundle's color encoding and alternate ICC do not",
+                        )
+                    }
                 }
             }
             b"jxli" => {
@@ -795,6 +830,38 @@ impl Walker<'_> {
                 .with_detail("codestream level box; the decoder skips it"),
             _ => Verdict::new(Disposition::Unknown),
         }
+    }
+
+    /// Why decoding this bundle in `mode` would fail the whole decode, if it would.
+    fn gain_map_failure(
+        &self,
+        mode: GainMapMode,
+        bundle: &jxl::api::GainMapBundle,
+    ) -> Option<String> {
+        if matches!(mode, GainMapMode::Components | GainMapMode::Reconstruct) {
+            // `Components` decodes the gain-map codestream: probe its headers.
+            match scan(&bundle.gain_map_codestream, self.cfg.max_memory, None) {
+                Ok(ScanOut { end: Err(why), .. }) => {
+                    return Some(format!("the gain-map codestream does not decode ({why})"));
+                }
+                Err(WalkError::Limit(why)) => {
+                    return Some(format!(
+                        "the gain-map codestream exceeds the limits ({why})"
+                    ));
+                }
+                _ => {}
+            }
+        }
+        if mode == GainMapMode::Reconstruct
+            && zencodec::gainmap::parse_iso21496_fmt(
+                &bundle.metadata,
+                zencodec::gainmap::Iso21496Format::JxlJhgm,
+            )
+            .is_err()
+        {
+            return Some("the ISO 21496-1 metadata does not parse".to_string());
+        }
+        None
     }
 
     fn ftyp(&mut self, raw: &RawBox, plen: u64, body: &[u8]) -> Verdict {
@@ -895,12 +962,8 @@ impl Walker<'_> {
             v.disposition = Disposition::Unreferenced;
             v.detail = Some(join(
                 note,
-                "the codestream had already ended; the decoder enters this box but reads none \
-                 of it",
-            ));
-            self.phase = Phase::Dead(format!(
-                "never read: the box parser stops at the codestream box at offset {}",
-                raw.start
+                "the codestream had already ended; the decoder skips this box's payload and \
+                 reads the boxes after it",
             ));
             return v;
         }
@@ -925,21 +988,14 @@ impl Walker<'_> {
             _ => pe,
         };
         if used_end < pe {
-            // Junk after the codestream inside the box: the decoder never
-            // reads it, and never advances to the boxes after this one.
+            // Junk after the codestream inside the box: the decoder skips it
+            // and carries on with the boxes after this one.
             v.split = Some((
                 raw.start + raw.header,
                 split_children(raw, ps, used_end, pe),
             ));
-            self.phase = Phase::Dead(format!(
-                "not reliably read: the codestream box at offset {} holds bytes after the \
-                 codestream, and the decoder then parses the boxes after it only for some \
-                 layouts (measured: small junk tails read them, others do not)",
-                raw.start
-            ));
-        } else {
-            self.phase = Phase::Drain;
         }
+        self.phase = Phase::Drain;
         v
     }
 
@@ -989,6 +1045,16 @@ impl Walker<'_> {
     }
 
     fn finish(mut self) -> Result<Inventory, WalkError> {
+        if let Some((at, why)) = self.gain_map_fatal.take()
+            && self.fail_at.is_none()
+        {
+            if let Some(id) = self.last_gain_map {
+                self.inv.set_disposition(id, Disposition::Malformed);
+                self.inv.set_detail(id, format!("decode fails here: {why}"));
+                self.consumed.retain(|c| *c != id);
+            }
+            self.fail_at = Some((at, why));
+        }
         if let Some((at, why)) = self.fail_at.take() {
             let detail = format!("not used: decode fails at offset {at} ({why})");
             for id in core::mem::take(&mut self.consumed) {

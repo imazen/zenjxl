@@ -701,6 +701,60 @@ pub(crate) fn probe_with_orientation(
     })
 }
 
+/// Gain map, Exif and XMP of the whole file by a header-only scan: every
+/// frame is framed (no pixels, no per-frame buffers), then the box parser is
+/// polled to the end of the input. Failures yield `None`s: the pixel decode
+/// has its own errors.
+fn scan_trailing_boxes(
+    data: &[u8],
+) -> (
+    Option<jxl::api::GainMapBundle>,
+    Option<Vec<u8>>,
+    Option<Vec<u8>>,
+) {
+    use jxl::api::states;
+    let options = JxlDecoderOptions::default().with_scan_frames_only(true);
+    let mut input = data;
+    let decoder = JxlDecoder::<states::Initialized>::new(options);
+    let Ok(ProcessingResult::Complete {
+        result: mut decoder,
+    }) = decoder.process(&mut input)
+    else {
+        return (None, None, None);
+    };
+    while decoder.has_more_frames() {
+        let Ok(ProcessingResult::Complete { result: with_frame }) = decoder.process(&mut input)
+        else {
+            return (None, None, None);
+        };
+        let Ok(ProcessingResult::Complete { result }) = with_frame.skip_frame(&mut input) else {
+            return (None, None, None);
+        };
+        decoder = result;
+    }
+    let (mut gm, mut ex, mut xm) = (
+        decoder.take_gain_map(),
+        decoder.take_exif(),
+        decoder.take_xmp(),
+    );
+    match decoder.process(&mut input) {
+        Ok(ProcessingResult::Complete { result: mut d }) => {
+            gm = d.take_gain_map().or(gm);
+            ex = d.take_exif().or(ex);
+            xm = d.take_xmp().or(xm);
+        }
+        Ok(ProcessingResult::NeedsMoreInput {
+            fallback: mut d, ..
+        }) => {
+            gm = d.take_gain_map().or(gm);
+            ex = d.take_exif().or(ex);
+            xm = d.take_xmp().or(xm);
+        }
+        Err(_) => {}
+    }
+    (gm, ex, xm)
+}
+
 /// Decode JXL to pixels.
 ///
 /// `preferred` is a ranked list of desired output formats. The decoder picks
@@ -948,10 +1002,20 @@ pub(crate) fn decode_with_options_oriented(
             xmp = d.take_xmp().or(xmp.take());
         }};
     }
-    match final_decoder.process(&mut input) {
-        Ok(ProcessingResult::Complete { result }) => merge_trailing!(result),
-        Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => merge_trailing!(fallback),
-        Err(_) => {}
+    if final_decoder.has_more_frames() {
+        // A one-shot decode of an animation stops after its first frame, so
+        // the boxes after the codestream are further off. Find them with a
+        // header-only scan of the whole file (no pixel buffers).
+        let (gm, ex, xm) = scan_trailing_boxes(data);
+        gain_map = gm.or(gain_map.take());
+        exif = ex.or(exif.take());
+        xmp = xm.or(xmp.take());
+    } else {
+        match final_decoder.process(&mut input) {
+            Ok(ProcessingResult::Complete { result }) => merge_trailing!(result),
+            Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => merge_trailing!(fallback),
+            Err(_) => {}
+        }
     }
 
     // Clamp f32 output to [0.0, 1.0] for SDR / BT.709 content.

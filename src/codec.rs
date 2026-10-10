@@ -2504,8 +2504,17 @@ mod decoding {
                 let cfg = crate::inventory::WalkConfig {
                     exif: self.policy.resolve_exif(true),
                     xmp: self.policy.resolve_xmp(true),
-                    gain_map: self.extract_gain_map
-                        || !matches!(self.gain_map_render, zencodec::GainMapRender::BaseOnly),
+                    gain_map: match self.gain_map_render {
+                        zencodec::GainMapRender::BaseOnly if !self.extract_gain_map => {
+                            crate::inventory::GainMapMode::Off
+                        }
+                        zencodec::GainMapRender::BaseOnly => crate::inventory::GainMapMode::Surface,
+                        #[cfg(feature = "reconstruct-hdr")]
+                        zencodec::GainMapRender::ReconstructHdr { .. } => {
+                            crate::inventory::GainMapMode::Reconstruct
+                        }
+                        _ => crate::inventory::GainMapMode::Components,
+                    },
                     max_memory: self.limits.as_ref().and_then(|l| l.max_memory_bytes),
                 };
                 let stop = self.stop.as_ref().map(|s| s as &dyn Stop);

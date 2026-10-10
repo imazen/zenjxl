@@ -27,28 +27,30 @@ phases, using the codestream length from a header-only scan (`JxlDecoder::codest
 
 1. **Main:** every box up to and including the codestream box that holds the last codestream byte.
    A rejected box (second `ftyp`, `jxlc` after `jxlp`, bad `jxlp` order, size-0 `jhgm`/`jxli`,
-   unparseable `jhgm`/`jxli`, a box running past the input) fails the decode. That box is
-   `Malformed`, every earlier `Metadata`/`ImageData` claim becomes `Skipped` ("decode fails at
-   offset N"), and later boxes are `Skipped`.
-2. **Drain:** zenjxl polls the box parser once more after the last frame (`decode.rs`, fix for
-   zenjxl#22), so boxes after the codestream are read until the end of the input, a rejected box
-   (the walk stops; the image has decoded) or the next non-empty codestream box (`Unreferenced`).
-3. **Dead:** everything after the stop is `Skipped` with a detail saying where parsing stopped.
+   unparseable `jhgm`/`jxli`, a box running past the input) fails the decode **unless the last
+   codestream box (`jxlc`, or the `jxlp` flagged last) has already been entered**: the decoder
+   defers box errors after that point. A failing box is `Malformed`, every earlier
+   `Metadata`/`ImageData` claim becomes `Skipped` ("decode fails at offset N"), and later boxes are
+   `Skipped`.
+2. **Drain:** after the last frame the decoder skips what is left of the current codestream box
+   (junk after the codestream) and parses the boxes after it until the end of the input or a
+   rejected box (the walk stops; the decode is not affected). Codestream boxes there are
+   `Unreferenced`. A one-shot decode of an animation, which stops after its first frame, reaches
+   these boxes through a header-only scan, so the same rule holds for it.
+3. **Dead:** everything after a stop is `Skipped` with a detail saying where parsing stopped.
 
-Junk after the codestream inside a codestream box is a child `Unreferenced` part. The boxes after
-such a box are reported `Skipped` ("not reliably read"): measured on the corpus, the decoder reads
-them for some layouts and not others (a 1-byte junk tail reads them for `spot.jxl` and misses them
-for `bitdepth_8.jxl`), so no disposition is exact there. The oracle test only requires that the
-inventory never claims a read the decode lacks.
-
-A rejection reached in the drain phase can still fail the decode of a small file, because the
-decoder also polls trailing boxes while reading the last sections of small codestreams. The detail
-of such a box says so.
+A gain-map bundle is checked against the job's render mode: `Components` probes the gain-map
+codestream's headers (a decode of a broken one fails), native `ReconstructHdr` also parses the
+ISO 21496-1 metadata. A failing bundle is `Malformed` and the decode counts as failed.
 
 `brob` and `jbrd` follow the linked decoder build: Cargo unifies the decoder's `jpeg` feature across
 the dependency graph, so the walker probes the decoder once with a tiny container (a brotli-wrapped
 `Exif` box before the codestream) instead of assuming the feature is off. With it on, `brob` Exif/XMP
 is `Metadata` (not decompressed by the inventory, so a corrupt stream would really be dropped).
+
+Memory limits: the job's `max_memory_bytes` is passed to the scan. Only a refused memory budget
+becomes a `LimitExceeded` error; every other scan failure (bad ICC, too many pixels, malformed
+header) leaves the codestream end "not located" and the inventory still comes back.
 
 ## Next chunk: codestream-internal strings
 
