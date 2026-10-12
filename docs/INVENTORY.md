@@ -128,3 +128,6 @@ predates metadata inventory; no additional version bump was made here.
 semver tool's temporary consumer does not inherit root dependency patches.
 Its nonzero result is intentional while these documented main-branch breaks
 are queued; it is not a compatibility pass.
+
+The standalone inventory fuzz target also compiles with the pinned decoder and
+shared contract (`just metadata-fuzz-check`).

@@ -89,3 +89,6 @@ metadata-semver:
     RUSTC_BOOTSTRAP=1 cargo rustdoc --manifest-path "$root/Cargo.toml" --lib --features inventory,reconstruct-hdr,jpeg-lossy -- -Zunstable-options --output-format json
     RUSTC_BOOTSTRAP=1 cargo rustdoc --manifest-path "$baseline/Cargo.toml" --target-dir "$root/target/published-api/0.2.1" --lib --features zencodec -- -Zunstable-options --output-format json
     cargo semver-checks check-release --manifest-path "$root/Cargo.toml" --current-rustdoc "$root/target/doc/zenjxl.json" --baseline-rustdoc "$root/target/published-api/0.2.1/doc/zenjxl.json" --release-type patch
+
+metadata-fuzz-check:
+    cd .. && cargo check --manifest-path zenjxl/fuzz/Cargo.toml --bin inventory
