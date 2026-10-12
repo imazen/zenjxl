@@ -24,6 +24,8 @@ mod codec;
 #[cfg(feature = "decode")]
 mod decode;
 mod error;
+#[cfg(feature = "inventory")]
+mod inventory;
 #[cfg(feature = "jpeg-lossy")]
 pub mod jpeg_lossy;
 /// Self-verified lossless encode for low-color-count content — a small
@@ -158,3 +160,6 @@ pub use jxl_encoder::{ProgressiveMode, RctType};
 /// (`*InternalParams`) is itself only reachable through that feature.
 #[cfg(feature = "__expert")]
 pub use jxl_encoder::ValidationError as JxlValidationError;
+
+#[cfg(feature = "metadata-rewrite")]
+pub mod metadata;

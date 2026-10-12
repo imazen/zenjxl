@@ -1,5 +1,5 @@
 # zenjxl public API — additions from non-default features
-# features: butteraugli-loop,decode,encode,jpeg-lossy,parallel,reconstruct-hdr,threads,zencodec
+# features: butteraugli-loop,decode,encode,inventory,jpeg-lossy,parallel,reconstruct-hdr,threads,zencodec
 # (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
 # Encodings: crate-name prefix stripped; auto traits collapse to a
 # count + exceptions; trait impls collapse to one roster line per

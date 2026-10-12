@@ -932,12 +932,27 @@ pub(crate) fn decode_with_options_oriented(
         }
     };
 
-    // Extract gain map bundle (jhgm box) if present
-    let gain_map = final_decoder.take_gain_map();
-
-    // Extract EXIF and XMP metadata from container boxes
-    let exif = final_decoder.take_exif();
-    let xmp = final_decoder.take_xmp();
+    // Container boxes after the last codestream box (`Exif`, `xml `, `jhgm`)
+    // are parsed only when the box parser is polled again, which the pixel
+    // pass does just sometimes (zenjxl#22). Take what is already parsed, then
+    // poll once more so the rest of the input is parsed. A trailing box that
+    // fails to parse ends the walk without failing an image that decoded.
+    let mut gain_map = final_decoder.take_gain_map();
+    let mut exif = final_decoder.take_exif();
+    let mut xmp = final_decoder.take_xmp();
+    macro_rules! merge_trailing {
+        ($d:expr) => {{
+            let mut d = $d;
+            gain_map = d.take_gain_map().or(gain_map.take());
+            exif = d.take_exif().or(exif.take());
+            xmp = d.take_xmp().or(xmp.take());
+        }};
+    }
+    match final_decoder.process(&mut input) {
+        Ok(ProcessingResult::Complete { result }) => merge_trailing!(result),
+        Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => merge_trailing!(fallback),
+        Err(_) => {}
+    }
 
     // Clamp f32 output to [0.0, 1.0] for SDR / BT.709 content.
     // Lossy JXL can produce values slightly outside range as compression artifacts.
