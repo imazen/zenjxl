@@ -81,4 +81,11 @@ metadata-portability:
     cd .. && cargo test --manifest-path zenjxl/apidoc/Cargo.toml
 
 metadata-semver:
-    cd .. && cargo semver-checks check-release --manifest-path zenjxl/Cargo.toml --baseline-version 0.2.1 --release-type patch --all-features
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{justfile_directory()}}"
+    baseline=$(cargo read zenjxl==0.2.1 --path-only)
+    cd "$root/.."
+    RUSTC_BOOTSTRAP=1 cargo rustdoc --manifest-path "$root/Cargo.toml" --lib --features inventory,reconstruct-hdr,jpeg-lossy -- -Zunstable-options --output-format json
+    RUSTC_BOOTSTRAP=1 cargo rustdoc --manifest-path "$baseline/Cargo.toml" --target-dir "$root/target/published-api/0.2.1" --lib --features zencodec -- -Zunstable-options --output-format json
+    cargo semver-checks check-release --manifest-path "$root/Cargo.toml" --current-rustdoc "$root/target/doc/zenjxl.json" --baseline-rustdoc "$root/target/published-api/0.2.1/doc/zenjxl.json" --release-type patch

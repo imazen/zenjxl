@@ -113,3 +113,18 @@ attributes and decoder limitations listed above.
 Local recipes run Cargo from the parent directory because this checkout has an
 ignored legacy `paths` override that otherwise replaces pinned dependencies.
 The ignored override is preserved. CI has no such local configuration.
+
+## Published API audit
+
+The forced patch comparison against crates.io zenjxl 0.2.1 reports 222 checks
+passed, one failed, and 31 skipped. The failure is the second tuple field of
+`JxlError::LimitExceeded`, already present on main before this integration.
+Manual source inspection also finds eight trait associated error types changed
+from `At<JxlError>` to `At<CodecError>`; the tool does not detect these. Both
+breaks remain in the existing queued-breaking changelog. The local 0.3.0 bump
+predates metadata inventory; no additional version bump was made here.
+
+`just metadata-semver` builds both rustdoc JSON files explicitly because the
+semver tool's temporary consumer does not inherit root dependency patches.
+Its nonzero result is intentional while these documented main-branch breaks
+are queued; it is not a compatibility pass.

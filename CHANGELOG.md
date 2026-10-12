@@ -4,6 +4,10 @@
 
 ### Metadata integration
 
+- Integration source: `354e35e0`. Registry 0.2.1 comparison finds only the
+  existing LimitExceeded tuple-field break; manual review retains the eight
+  existing associated-error changes below. See docs/INVENTORY.md for evidence.
+
 - Add default-off `inventory`, reusing PR24 (`3fa2837f`) and its original
   regression fixtures. Disabled jobs return typed unsupported; part-cap failures
   retain InventoryParts rather than being labeled as memory limits.
