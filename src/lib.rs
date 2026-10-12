@@ -24,6 +24,8 @@ mod codec;
 #[cfg(feature = "decode")]
 mod decode;
 mod error;
+#[cfg(feature = "inventory")]
+mod inventory;
 #[cfg(feature = "jpeg-lossy")]
 pub mod jpeg_lossy;
 /// Self-verified lossless encode for low-color-count content — a small

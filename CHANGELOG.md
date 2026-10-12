@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Metadata integration
+
+- Add default-off `inventory`, reusing PR24 (`3fa2837f`) and its original
+  regression fixtures. Disabled jobs return typed unsupported; part-cap failures
+  retain InventoryParts rather than being labeled as memory limits.
+- Preserve cancellation through nested gain-map header scans, including
+  one-shot timeouts on empty and malformed input.
+- Carry PR24's trailing-container poll repair (`43f552ab`): still-image decode
+  now consistently reads trailing Exif/XMP/jhgm. Later copies can replace earlier
+  metadata and a surfaced gain map can affect HDR reconstruction or its error.
+  Animation and codestream-slack limitations remain documented in INVENTORY.md.
+- Pin unpublished zencodec (`c1c3292f`) and the lean decoder scan (`f27c5c6f`)
+  for integration. These must become released dependencies before publishing.
+
+
 ### QUEUED BREAKING CHANGES
 - zencodec trait impls' associated `Error` type changed from `At<JxlError>`
   to `At<zencodec::CodecError>` (the envelope, Pattern B) — breaking for code

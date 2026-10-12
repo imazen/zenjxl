@@ -1880,6 +1880,7 @@ mod decoding {
             .with_exif(true)
             .with_xmp(true)
             .with_gain_map(true)
+            .with_inventory(cfg!(feature = "inventory"))
             .with_native_gray(true)
             .with_native_16bit(true)
             .with_native_f32(true)
@@ -2486,6 +2487,60 @@ mod decoding {
             self
         }
 
+        /// Container-level structural inventory (see `docs/INVENTORY.md`).
+        ///
+        /// Dispositions describe this job's one-shot `Decode` path: Exif/XMP
+        /// follow the decode policy, `jhgm` follows the gain-map settings.
+        #[cfg(feature = "inventory")]
+        fn inventory(
+            &self,
+            data: &[u8],
+        ) -> Result<zencodec::inventory::Inventory, At<zencodec::CodecError>> {
+            (move || -> Result<zencodec::inventory::Inventory, At<zencodec::CodecError>> {
+                if let Some(ref limits) = self.limits {
+                    limits.check_input_size(data.len() as u64).map_err(|e| {
+                        zencodec::CodecError::of(whereat::at!(JxlError::LimitExceeded(
+                            e.to_string(),
+                            e.kind()
+                        )))
+                    })?;
+                }
+                let cfg = crate::inventory::WalkConfig {
+                    exif: self.policy.resolve_exif(true),
+                    xmp: self.policy.resolve_xmp(true),
+                    gain_map: match self.gain_map_render {
+                        zencodec::GainMapRender::BaseOnly if !self.extract_gain_map => {
+                            crate::inventory::GainMapMode::Off
+                        }
+                        zencodec::GainMapRender::BaseOnly => crate::inventory::GainMapMode::Surface,
+                        #[cfg(feature = "reconstruct-hdr")]
+                        zencodec::GainMapRender::ReconstructHdr { .. } => {
+                            crate::inventory::GainMapMode::Reconstruct
+                        }
+                        _ => crate::inventory::GainMapMode::Components,
+                    },
+                    max_memory: self.limits.as_ref().and_then(|l| l.max_memory_bytes),
+                };
+                let stop = self.stop.as_ref().map(|s| s as &dyn Stop);
+                crate::inventory::walk(data, cfg, stop).map_err(|e| match e {
+                    crate::inventory::WalkError::Parts(e) => {
+                        use zencodec::CategorizedError;
+                        whereat::at!(zencodec::CodecError::from_parts(
+                            Some("zenjxl"),
+                            e.category(),
+                            alloc::boxed::Box::new(e)
+                        ))
+                    }
+                    crate::inventory::WalkError::Stopped(r) => {
+                        zencodec::CodecError::of(whereat::at!(JxlError::Cancelled(r)))
+                    }
+                    crate::inventory::WalkError::Limit(m) => zencodec::CodecError::of(
+                        whereat::at!(JxlError::LimitExceeded(m, zencodec::LimitKind::Memory)),
+                    ),
+                })
+            })()
+        }
+
         fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<zencodec::CodecError>> {
             (move || -> Result<ImageInfo, At<JxlError>> {
                 // Enforce input size limit.
@@ -3069,8 +3124,26 @@ mod decoding {
             // Extract EXIF and XMP metadata from container boxes.
             // These may appear after the codestream, so they're only
             // available after all frames have been decoded.
-            let exif = final_decoder.as_mut().and_then(|d| d.take_exif());
-            let xmp = final_decoder.as_mut().and_then(|d| d.take_xmp());
+            // (Boxes after the last codestream box need one more poll of the
+            // box parser; see `decode::decode_with_options_oriented`, zenjxl#22.)
+            let mut exif = final_decoder.as_mut().and_then(|d| d.take_exif());
+            let mut xmp = final_decoder.as_mut().and_then(|d| d.take_xmp());
+            if let Some(d) = final_decoder.take() {
+                macro_rules! merge_trailing {
+                    ($d:expr) => {{
+                        let mut d = $d;
+                        exif = d.take_exif().or(exif.take());
+                        xmp = d.take_xmp().or(xmp.take());
+                    }};
+                }
+                match d.process(&mut input) {
+                    Ok(ProcessingResult::Complete { result }) => merge_trailing!(result),
+                    Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => {
+                        merge_trailing!(fallback)
+                    }
+                    Err(_) => {}
+                }
+            }
 
             let jxl_info = JxlInfo {
                 width: width_u32,
@@ -4689,6 +4762,7 @@ mod tests {
     /// grows with image area.
     #[cfg(feature = "decode")]
     #[test]
+    #[allow(deprecated)] // ComputeEnvironment::new is deprecated on zencodec feat/inventory; conservative() is not in 0.1.26
     fn estimate_decode_resources_is_sane() {
         use zencodec::decode::DecoderConfig;
         use zencodec::estimate::{ComputeEnvironment, ImageCharacteristics};

@@ -66,3 +66,19 @@ ci: fmt-check clippy-all feature-check
 arm-wrapper-tests-macos:
     mkdir -p "$HOME/tmp"
     CARGO_BUILD_JOBS=4 RAYON_NUM_THREADS=4 OMP_NUM_THREADS=4 RUST_TEST_THREADS=4 TMPDIR="$HOME/tmp" nice -n 19 cargo test --locked -p zenjxl --features zencodec,__expert --lib --tests > "$HOME/tmp/zenjxl-wrapper-tests.log" 2>&1
+
+# Metadata integration; resource limits are supplied by the caller.
+metadata-check:
+    cd .. && cargo test --manifest-path zenjxl/Cargo.toml --features inventory --test inventory --test inventory_alloc --test fuzz_regression --test inventory_feature
+    cd .. && cargo clippy --manifest-path zenjxl/Cargo.toml --features inventory --all-targets -- -D warnings
+    cd .. && cargo test --manifest-path zenjxl/Cargo.toml --no-default-features --features decode,zencodec --test inventory_feature
+
+inventory-oracle:
+    cd .. && INVENTORY_CORPUS_JXL="${INVENTORY_CORPUS_JXL:-$HOME/work/codec-corpus/jxl}" INVENTORY_ORACLE_JXLINFO="$(command -v jxlinfo)" INVENTORY_ORACLE_EXIFTOOL="$(command -v exiftool)" cargo test --manifest-path zenjxl/Cargo.toml --features inventory --test inventory corpus_ -- --nocapture
+
+metadata-portability:
+    cd .. && CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_RUNNER=env cargo test --manifest-path zenjxl/Cargo.toml --no-default-features --features inventory --test inventory_feature --test fuzz_regression --target i686-unknown-linux-gnu
+    cd .. && cargo test --manifest-path zenjxl/apidoc/Cargo.toml
+
+metadata-semver:
+    cd .. && cargo semver-checks check-release --manifest-path zenjxl/Cargo.toml --baseline-version 0.2.1 --release-type patch --all-features
