@@ -160,3 +160,6 @@ pub use jxl_encoder::{ProgressiveMode, RctType};
 /// (`*InternalParams`) is itself only reachable through that feature.
 #[cfg(feature = "__expert")]
 pub use jxl_encoder::ValidationError as JxlValidationError;
+
+#[cfg(feature = "metadata-rewrite")]
+pub mod metadata;

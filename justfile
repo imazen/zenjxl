@@ -92,3 +92,21 @@ metadata-semver:
 
 metadata-fuzz-check:
     cd .. && cargo check --manifest-path zenjxl/fuzz/Cargo.toml --bin inventory
+
+# Codec-owned planner, with neither encoder nor decoder enabled.
+metadata-rewrite-check:
+    cd .. && cargo test --manifest-path zenjxl/Cargo.toml --no-default-features --features metadata-rewrite --test metadata_rewrite
+    cd .. && cargo clippy --manifest-path zenjxl/Cargo.toml --no-default-features --features metadata-rewrite --lib -- -D warnings
+    cd .. && CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_RUNNER=env cargo test --manifest-path zenjxl/Cargo.toml --no-default-features --features metadata-rewrite --test metadata_rewrite --target i686-unknown-linux-gnu
+
+metadata-rewrite-oracle:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="$PWD"
+    output="$HOME/tmp/zenmeta-jxl-rewrite-oracle"
+    cd ..
+    cargo run --manifest-path "$root/Cargo.toml" --features metadata-rewrite --example metadata_rewrite_oracle -- "$output"
+    djxl "$output/before.jxl" "$output/before.ppm"
+    djxl "$output/after.jxl" "$output/after.ppm"
+    cmp "$output/before.ppm" "$output/after.ppm"
+    jxlinfo -v "$output/after.jxl"

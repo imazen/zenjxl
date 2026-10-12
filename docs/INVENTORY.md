@@ -131,3 +131,23 @@ are queued; it is not a compatibility pass.
 
 The standalone inventory fuzz target also compiles with the pinned decoder and
 shared contract (`just metadata-fuzz-check`).
+
+## Codec-owned metadata rewriting
+
+The separate default-off `metadata-rewrite` feature exposes
+`zenjxl::metadata::rewrite(&zencodec::metadata_rewrite::Request)`. It reuses the
+container planner and expectations from zencodecs `aa21cba0`, with shared
+processing in zenmeta (`a31a9b68`). No zenmeta type appears in its public
+signature. Inventory and pixel encoding/decoding are not prerequisites.
+
+`just metadata-rewrite-check` passes on native and i686 with default features
+off, including malformed framing, reconstruction-removal opt-in, compressed
+metadata handling, cancellation and mutated-input plan accounting.
+`just metadata-rewrite-oracle` generates a lossless image with trailing private
+XML, removes the XML, and compares native decoded pixels and ICC plus independent
+libjxl (`djxl`) PPM output byte for byte. This passed on 2026-10-12.
+
+The planner preserves opaque image codestreams; it does not validate every
+codestream bit or rewrite embedded ICC/HDR data. Compressed gain-map bundles
+remain unsupported. Broader gain-map, animation and reconstruction fixtures
+remain part of final integration review.

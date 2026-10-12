@@ -52,6 +52,8 @@ jobs:
         run: cargo test --no-default-features --features zencodec
       - name: Inventory feature boundary and regressions
         run: cargo test --no-default-features --features inventory --test inventory_feature --test fuzz_regression
+      - name: Metadata rewrite without decoder
+        run: cargo test --no-default-features --features metadata-rewrite --test metadata_rewrite
       - name: Inventory disabled
         run: cargo test --no-default-features --features decode,zencodec --test inventory_feature
 

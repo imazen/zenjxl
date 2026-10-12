@@ -19,6 +19,7 @@ include = [
 ]
 
 [dependencies]
+zenmeta = { git = "https://github.com/imazen/zencodec", rev = "a31a9b680e54d5fea555c44b0d70c65802087df3", default-features = false, features = ["rewrite"], optional = true }
 thiserror = { version = "2.0.18", default-features = false }
 whereat = { version = "0.1.5"}
 rgb = { version = "0.8.53", default-features = false, features = ["as-bytes"] }
@@ -70,7 +71,7 @@ ultrahdr-core = { version = "0.5.0", optional = true, default-features = false, 
 [patch.crates-io]
 # Unpublished metadata contract: one exact source for zencodec and testkit.
 # Replace both pins with the compatible published contract at release.
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "c1c3292ff10f386191780ad407526951165da47a" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "a31a9b680e54d5fea555c44b0d70c65802087df3" }
 jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../zenjpeg/zenjpeg" }
 # zenjxl-decoder 0.4.0 (the `reject_progressive` decode-time gate, the
@@ -133,7 +134,7 @@ backtrace = "0.3.76"
 # [patch.crates-io] `zencodec` entry above, so both resolve to one zencodec
 # crate; swap both for the released tag (v0.1.26 before) or crates.io versions
 # before merge.
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "c1c3292ff10f386191780ad407526951165da47a" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "a31a9b680e54d5fea555c44b0d70c65802087df3" }
 # Concrete `enough::Stop` token for the README cancellation example
 # (tests/readme_examples.rs compiles the documented snippets).
 almost-enough = "0.4.4"
@@ -159,6 +160,8 @@ fast-ssim2 = "0.8.2"
 zenjpeg-bench-utils = { path = "../zenjpeg/zenjpeg-bench-utils", default-features = false }
 
 [features]
+# Metadata rewriting does not require pixel decoding, encoding, or inventory.
+metadata-rewrite = ["dep:zenmeta"]
 default = ["encode", "decode"]
 # Container inventory is optional; ordinary metadata decode stays available.
 inventory = ["zencodec", "decode"]
@@ -233,3 +236,7 @@ debug = "line-tables-only"
 [[example]]
 name = "fleetbench_repro"
 required-features = ["encode", "__expert"]
+
+[[example]]
+name = "metadata_rewrite_oracle"
+required-features = ["encode", "decode", "metadata-rewrite"]

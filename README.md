@@ -283,3 +283,9 @@ contribute back than maintain a parallel codebase. Open an issue or reach out.
 [imageflow-dotnet]: https://github.com/imazen/imageflow-dotnet
 [imageflow-node]: https://github.com/imazen/imageflow-node
 [imageflow-go]: https://github.com/imazen/imageflow-go
+
+### Metadata rewriting
+
+Enable `metadata-rewrite` for `zenjxl::metadata::rewrite`, using zencodec's
+request and output-plan types. It does not require pixel decoding or zenpipe.
+See [validation and limitations](docs/INVENTORY.md#codec-owned-metadata-rewriting).

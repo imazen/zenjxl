@@ -4,6 +4,12 @@
 
 ### Metadata integration
 
+- Add default-off `metadata-rewrite` and `metadata::rewrite`, relocating the
+  JXL planner from zencodecs (`aa21cba0`). Public types belong to zencodec;
+  zenmeta supplies bounded packet processing and plan assembly. This additive
+  API needs neither encoder/decoder features nor zenpipe. The contract pin is
+  now `a31a9b68`; published 0.2.1 has no metadata rewrite API.
+
 - Integration source: `354e35e0`. Registry 0.2.1 comparison finds only the
   existing LimitExceeded tuple-field break; manual review retains the eight
   existing associated-error changes below. See docs/INVENTORY.md for evidence.
