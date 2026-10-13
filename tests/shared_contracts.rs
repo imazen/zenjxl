@@ -1,9 +1,11 @@
 #![cfg(all(feature = "encode", feature = "decode", feature = "zencodec"))]
 use std::borrow::Cow;
+use zencodec::Metadata;
+#[cfg(feature = "metadata-rewrite")]
+use zencodec::MetadataPolicy;
 use zencodec::animation::FrameDuration as Duration;
 use zencodec::decode::{Decode, DecodeJob, DecodePolicy, DecoderConfig};
 use zencodec::encode::{EncodeJob, EncodePolicy, EncoderConfig};
-use zencodec::{Metadata, MetadataPolicy};
 use zencodec_testkit as tk;
 use zenjxl::{JxlDecoderConfig as D, JxlEncoderConfig as E};
 
@@ -20,7 +22,14 @@ fn timing_admission_and_all_duration_paths() {
         (d(u64::MAX, 1), None),
         (ms(10), Some(ms(10))),
     ];
-    tk::check_animation_timing(E::new().with_lossless(true), D::new(), &img, true, &exact).unwrap();
+    tk::check_animation_timing(
+        E::new().with_lossless(true),
+        D::new(),
+        img.as_slice(),
+        true,
+        &exact,
+    )
+    .unwrap();
     let ordinary = [
         (d(1, 30), Some(ms(33))),
         (d(u64::MAX, 1), None),
@@ -30,7 +39,7 @@ fn timing_admission_and_all_duration_paths() {
     tk::check_animation_timing(
         E::new().with_lossless(true),
         D::new(),
-        &img,
+        img.as_slice(),
         false,
         &ordinary,
     )
@@ -56,7 +65,7 @@ fn checked_policy_defaults_and_inventory_feature_contract() {
         tk::check_encode_policy_admission(
             enc.clone(),
             D::new(),
-            &img,
+            img.as_slice(),
             Metadata::none(),
             EncodePolicy::none(),
             policy,

@@ -123,6 +123,8 @@ animation-timing-oracle output:
 
 # Shared contract suite with inventory enabled and absent.
 shared-contract-check:
+    cargo fmt -p zenjxl
+    cargo clippy -p zenjxl --features zencodec --test shared_contracts -- -D warnings
     cargo test -p zenjxl --features zencodec,inventory,metadata-rewrite --test shared_contracts
     cargo test -p zenjxl --features zencodec,metadata-rewrite --test shared_contracts
     cargo clippy -p zenjxl --features zencodec,inventory,metadata-rewrite --test shared_contracts -- -D warnings
