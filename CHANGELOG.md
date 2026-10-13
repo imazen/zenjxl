@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Animation timing
+
+- Implement ordinary rational timing with cumulative millisecond rounding and
+  return the duration actually encoded. Explicit exact timing selects a common
+  clock and rescales buffered durations with checked arithmetic. Zero-tick
+  display frames are rejected because JXL uses them as reference frames.
+- Preserve native rational durations when decoding, including 30000/1001 clocks.
+- Failed memory admission no longer charges a rejected frame to later frames.
+- Pin the coordinated, unpublished zencodec/zenmeta contract from PR138. Existing
+  published millisecond entrypoints retain their signatures.
+- CI targets macOS ARM64 only.
+
 ### Metadata integration
 
 - Add default-off `metadata-rewrite` and `metadata::rewrite`, relocating the

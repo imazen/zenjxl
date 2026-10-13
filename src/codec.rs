@@ -119,6 +119,7 @@ mod encoding {
         .with_native_f32(true)
         .with_push_rows(true)
         .with_animation(true)
+        .with_animation_timing(true)
         // Effort floor is 1, not 0: validate() rejects effort < 1 and the
         // generic-effort setter clamps to 1..=10 (see EFFORT_RANGE).
         .with_effort_range(1, 10)
@@ -1287,8 +1288,10 @@ mod encoding {
         anim_meta: Option<OwnedAnimMeta>,
         limits: Option<ResourceLimits>,
         loop_count: Option<u32>,
-        /// Duration per frame in milliseconds.
+        /// Duration per frame in ticks of `clock`.
         frames: Vec<u32>,
+        timing: zencodec::animation::TimingQuantizer,
+        clock: u32,
         /// Raw pixel data for each frame (owned copies).
         pixel_data: Vec<Vec<u8>>,
         /// Total accumulated pixel data in bytes (for memory limit checking).
@@ -1300,6 +1303,104 @@ mod encoding {
     }
 
     impl JxlAnimationFrameEncoder {
+        fn push_frame_ticks(
+            &mut self,
+            pixels: PixelSlice<'_>,
+            ticks: u32,
+            stop: Option<&dyn Stop>,
+        ) -> Result<(), At<zencodec::CodecError>> {
+            (move || -> Result<(), At<JxlError>> {
+                use zenpixels::PixelFormat;
+
+                // Check cancellation before doing any work.
+                if let Some(stop) = stop {
+                    stop.check()
+                        .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
+                }
+
+                let desc = pixels.descriptor();
+                let pf = desc.pixel_format();
+                let strip_padding = matches!(pf, PixelFormat::Rgbx8 | PixelFormat::Bgrx8);
+                let layout = if strip_padding {
+                    PixelLayout::Rgb8
+                } else {
+                    JxlEncoder::descriptor_to_layout(desc)?
+                };
+                let w = pixels.width();
+                let h = pixels.rows();
+
+                if self.pixel_data.is_empty() {
+                    // Validate dimensions against limits on first frame.
+                    if let Some(ref limits) = self.limits {
+                        limits.check_dimensions(w, h).map_err(|e| {
+                            whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind()))
+                        })?;
+                    }
+                } else if w != self.width || h != self.height {
+                    return Err(whereat::at!(JxlError::InvalidInput(
+                        "animation frame dimensions must match first frame".into(),
+                    )));
+                }
+
+                if self.layout.is_some_and(|first| first != layout) {
+                    return Err(whereat::at!(JxlError::InvalidInput(
+                        "animation frame pixel layout must match first frame".into(),
+                    )));
+                }
+
+                // Check max_frames limit.
+                if let Some(ref limits) = self.limits {
+                    limits
+                        .check_frames(self.pixel_data.len() as u32 + 1)
+                        .map_err(|e| {
+                            whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind()))
+                        })?;
+                }
+
+                let frame_data = if strip_padding {
+                    let raw = pixels.contiguous_bytes();
+                    let mut rgb = Vec::with_capacity((w as usize) * (h as usize) * 3);
+                    if matches!(pf, PixelFormat::Rgbx8) {
+                        for px in raw.as_chunks::<4>().0.iter() {
+                            rgb.extend_from_slice(&[px[0], px[1], px[2]]);
+                        }
+                    } else {
+                        for px in raw.as_chunks::<4>().0.iter() {
+                            rgb.extend_from_slice(&[px[2], px[1], px[0]]);
+                        }
+                    }
+                    rgb
+                } else {
+                    pixels.contiguous_bytes().into_owned()
+                };
+                let frame_bytes = frame_data.len() as u64;
+                let accumulated_bytes = self
+                    .accumulated_bytes
+                    .checked_add(frame_bytes)
+                    .ok_or_else(|| {
+                        whereat::at!(JxlError::InvalidInput("animation size overflow".into()))
+                    })?;
+
+                // Check accumulated memory across ALL frames, not just the first.
+                if let Some(ref limits) = self.limits {
+                    limits.check_memory(accumulated_bytes).map_err(|e| {
+                        whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind()))
+                    })?;
+                }
+
+                self.accumulated_bytes = accumulated_bytes;
+                self.width = w;
+                self.height = h;
+                if self.layout.is_none() {
+                    self.layout = Some(layout);
+                }
+                self.pixel_data.push(frame_data);
+                self.frames.push(ticks);
+                Ok(())
+            })()
+            .map_err(zencodec::CodecError::of)
+        }
+
         /// Create from job state, copying metadata we need for container wrapping.
         fn from_job(
             mode: JxlEncMode,
@@ -1335,6 +1436,9 @@ mod encoding {
                 limits,
                 loop_count,
                 frames: Vec::new(),
+                clock: 1,
+                timing: zencodec::animation::TimingQuantizer::new(1000, u64::from(u32::MAX))
+                    .expect("valid millisecond clock"),
                 pixel_data: Vec::new(),
                 accumulated_bytes: 0,
                 width: 0,
@@ -1453,88 +1557,64 @@ mod encoding {
             JxlError::from(op).into()
         }
 
+        fn push_frame_timed(
+            &mut self,
+            pixels: PixelSlice<'_>,
+            duration: zencodec::animation::FrameDuration,
+            stop: Option<&dyn Stop>,
+        ) -> Result<zencodec::animation::FrameDuration, Self::Error> {
+            let mut timing = self.timing;
+            let encoded = timing
+                .quantize(duration)
+                .map_err(|_| Self::reject(UnsupportedOperation::AnimationTiming))?;
+            self.push_frame_exact(pixels, encoded, stop)?;
+            self.timing = timing;
+            Ok(encoded)
+        }
+
+        fn push_frame_exact(
+            &mut self,
+            pixels: PixelSlice<'_>,
+            duration: zencodec::animation::FrameDuration,
+            stop: Option<&dyn Stop>,
+        ) -> Result<(), Self::Error> {
+            let (mut a, mut b) = (self.clock, duration.denominator());
+            while b != 0 {
+                (a, b) = (b, a % b);
+            }
+            let clock = (self.clock / a)
+                .checked_mul(duration.denominator())
+                .ok_or_else(|| Self::reject(UnsupportedOperation::AnimationTiming))?;
+            let scale = clock / self.clock;
+            let ticks = duration
+                .ticks_at(clock)
+                .ok()
+                .and_then(|n| u32::try_from(n).ok())
+                .filter(|&n| n != 0)
+                .ok_or_else(|| Self::reject(UnsupportedOperation::AnimationTiming))?;
+            if self.frames.iter().any(|&n| n.checked_mul(scale).is_none()) {
+                return Err(Self::reject(UnsupportedOperation::AnimationTiming));
+            }
+            self.push_frame_ticks(pixels, ticks, stop)?;
+            let previous = self.frames.len() - 1;
+            for ticks in &mut self.frames[..previous] {
+                *ticks *= scale;
+            }
+            self.clock = clock;
+            Ok(())
+        }
+
         fn push_frame(
             &mut self,
             pixels: PixelSlice<'_>,
             duration_ms: u32,
             stop: Option<&dyn Stop>,
-        ) -> Result<(), At<zencodec::CodecError>> {
-            (move || -> Result<(), At<JxlError>> {
-                use zenpixels::PixelFormat;
-
-                // Check cancellation before doing any work.
-                if let Some(stop) = stop {
-                    stop.check()
-                        .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
-                }
-
-                let desc = pixels.descriptor();
-                let pf = desc.pixel_format();
-                let strip_padding = matches!(pf, PixelFormat::Rgbx8 | PixelFormat::Bgrx8);
-                let layout = if strip_padding {
-                    PixelLayout::Rgb8
-                } else {
-                    JxlEncoder::descriptor_to_layout(desc)?
-                };
-                let w = pixels.width();
-                let h = pixels.rows();
-
-                if self.pixel_data.is_empty() {
-                    // Validate dimensions against limits on first frame.
-                    if let Some(ref limits) = self.limits {
-                        limits.check_dimensions(w, h).map_err(|e| {
-                            whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind()))
-                        })?;
-                    }
-                    self.width = w;
-                    self.height = h;
-                    self.layout = Some(layout);
-                } else if w != self.width || h != self.height {
-                    return Err(whereat::at!(JxlError::InvalidInput(
-                        "animation frame dimensions must match first frame".into(),
-                    )));
-                }
-
-                // Check max_frames limit.
-                if let Some(ref limits) = self.limits {
-                    limits
-                        .check_frames(self.pixel_data.len() as u32 + 1)
-                        .map_err(|e| {
-                            whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind()))
-                        })?;
-                }
-
-                let frame_data = if strip_padding {
-                    let raw = pixels.contiguous_bytes();
-                    let mut rgb = Vec::with_capacity((w as usize) * (h as usize) * 3);
-                    if matches!(pf, PixelFormat::Rgbx8) {
-                        for px in raw.as_chunks::<4>().0.iter() {
-                            rgb.extend_from_slice(&[px[0], px[1], px[2]]);
-                        }
-                    } else {
-                        for px in raw.as_chunks::<4>().0.iter() {
-                            rgb.extend_from_slice(&[px[2], px[1], px[0]]);
-                        }
-                    }
-                    rgb
-                } else {
-                    pixels.contiguous_bytes().into_owned()
-                };
-                let frame_bytes = frame_data.len() as u64;
-                self.accumulated_bytes += frame_bytes;
-
-                // Check accumulated memory across ALL frames, not just the first.
-                if let Some(ref limits) = self.limits {
-                    limits.check_memory(self.accumulated_bytes).map_err(|e| {
-                        whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind()))
-                    })?;
-                }
-
-                self.pixel_data.push(frame_data);
-                self.frames.push(duration_ms);
-                Ok(())
-            })()
-            .map_err(zencodec::CodecError::of)
+        ) -> Result<(), Self::Error> {
+            self.push_frame_exact(
+                pixels,
+                zencodec::animation::FrameDuration::from_millis(duration_ms),
+                stop,
+            )
         }
 
         fn finish(self, stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<zencodec::CodecError>> {
@@ -1552,7 +1632,7 @@ mod encoding {
                 })?;
 
                 let animation = AnimationParams {
-                    tps_numerator: 1000,
+                    tps_numerator: self.clock,
                     tps_denominator: 1,
                     num_loops: self.loop_count.unwrap_or(0),
                     // jxl-encoder 0.3.2 (W12-4 a1-audit chunk-1) added
@@ -1696,10 +1776,7 @@ mod decoding {
     use zencodec::Unsupported;
     use zencodec::decode::{DecodeCapabilities, DecodeOutput, DecodePolicy, OutputInfo, SinkError};
     use zencodec::{AnimationFrame, OwnedAnimationFrame};
-    use zencodec::{
-        ContentLightLevel, ImageInfo, Orientation, OrientationHint, ResourceLimits,
-        UnsupportedOperation,
-    };
+    use zencodec::{ImageInfo, Orientation, OrientationHint, ResourceLimits, UnsupportedOperation};
     use zenpixels::{Cicp, ColorAuthority, PixelBuffer};
 
     use enough::Stop;
@@ -1860,8 +1937,8 @@ mod decoding {
             _ => [[0.640, 0.330], [0.300, 0.600], [0.150, 0.060]],        // BT.709/sRGB
         };
         info.source_color.content_light_level =
-            Some(zencodec::ContentLightLevel::new(peak_nits as u16, 0));
-        info.source_color.mastering_display = Some(zencodec::MasteringDisplay::new(
+            Some(zenpixels::hdr::ContentLightLevel::new(peak_nits as u16, 0));
+        info.source_color.mastering_display = Some(zenpixels::hdr::MasteringDisplay::new(
             primaries,
             [0.3127, 0.3290],
             peak_nits,
@@ -2187,8 +2264,8 @@ mod decoding {
             // semantic match in the zencodec metadata model.
             if info.intensity_target > 255.0 {
                 let max_cll = info.intensity_target.min(u16::MAX as f32) as u16;
-                image_info =
-                    image_info.with_content_light_level(ContentLightLevel::new(max_cll, 0));
+                image_info = image_info
+                    .with_content_light_level(zenpixels::hdr::ContentLightLevel::new(max_cll, 0));
             }
 
             image_info
@@ -2975,6 +3052,10 @@ mod decoding {
                 .extra_channels
                 .iter()
                 .any(|ec| matches!(ec.ec_type, ExtraChannel::Alpha));
+            let animation_clock = basic_info
+                .animation
+                .as_ref()
+                .map(|a| (a.tps_numerator, a.tps_denominator));
             let has_animation = basic_info.animation.is_some();
             let loop_count = basic_info.animation.as_ref().map(|a| a.num_loops);
             let bit_depth_u8 = basic_info.bit_depth.bits_per_sample() as u8;
@@ -3064,8 +3145,25 @@ mod decoding {
                     ProcessingResult::NeedsMoreInput { .. } => break,
                 };
 
-                let frame_header = decoder_fi.frame_header();
-                let duration_ms = frame_header.duration.map(|d| d as u32).unwrap_or(0);
+                let duration = if let Some((numerator, denominator)) = animation_clock {
+                    let frame = decoder_fi
+                        .scanned_frames()
+                        .get(frame_index as usize)
+                        .ok_or_else(|| {
+                            whereat::at!(JxlError::InvalidState(
+                                "missing animation frame timing".into()
+                            ))
+                        })?;
+                    zencodec::animation::FrameDuration::new(
+                        u64::from(frame.duration_ticks) * u64::from(denominator),
+                        numerator,
+                    )
+                    .map_err(|_| {
+                        whereat::at!(JxlError::MalformedImage("invalid animation clock".into()))
+                    })?
+                } else {
+                    zencodec::animation::FrameDuration::from_millis(0)
+                };
 
                 // Decode pixels. The per-frame output buffer is sized from the
                 // (untrusted) header dimensions, so it honors `alloc_pref` with
@@ -3105,9 +3203,9 @@ mod decoding {
                         crate::decode::clamp_f32_buf(&mut buf);
                     }
                     let pixel_buf = build_pixel_data(&buf, width, height, &chosen);
-                    frames.push_back(OwnedAnimationFrame::new(
+                    frames.push_back(OwnedAnimationFrame::with_duration(
                         pixel_buf,
-                        duration_ms,
+                        duration,
                         frame_index,
                     ));
                 }

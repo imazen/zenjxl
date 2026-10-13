@@ -110,3 +110,13 @@ metadata-rewrite-oracle:
     djxl "$output/after.jxl" "$output/after.ppm"
     cmp "$output/before.ppm" "$output/after.ppm"
     jxlinfo -v "$output/after.jxl"
+
+# Shared timing admission plus encoded-duration roundtrip.
+animation-timing-check:
+    cargo test -p zenjxl --features zencodec --test animation_timing
+    cargo clippy -p zenjxl --features zencodec --lib --test animation_timing -- -D warnings
+
+animation-timing-oracle output:
+    cargo run -p zenjxl --features zencodec --example animation_timing_oracle -- "{{output}}"
+    jxlinfo -v "{{output}}"
+    djxl "{{output}}" "{{output}}.png"
