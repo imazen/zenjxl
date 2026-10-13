@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Keep the independent fuzz workspace on the same shared-contract revision as
+  its codec dependency, avoiding duplicate zencodec trait identities.
+
 ### Shared rewrite contract
 
 - Migrate unpublished metadata rewrite errors to typed `LimitKind` values.
