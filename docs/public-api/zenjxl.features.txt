@@ -1,5 +1,5 @@
 # zenjxl public API — additions from non-default features
-# features: butteraugli-loop,decode,encode,inventory,jpeg-lossy,parallel,reconstruct-hdr,threads,zencodec
+# features: butteraugli-loop,decode,encode,inventory,jpeg-lossy,metadata-rewrite,parallel,reconstruct-hdr,threads,zencodec
 # (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
 # Encodings: crate-name prefix stripped; auto traits collapse to a
 # count + exceptions; trait impls collapse to one roster line per
@@ -9,9 +9,9 @@
 
 ## summary
 #
-#   pub modules                                 1
+#   pub modules                                 2
 #   pub types (struct/enum/trait/alias)        13
-#   free functions                              5
+#   free functions                              6
 #   inherent methods                           15
 #   struct fields                               7
 #   enum variants                               8
@@ -20,10 +20,11 @@
 #   auto-trait exceptions                       5
 #
 # per-module pub lines:
-#   (root)                           23
+#   (root)                           24
 #   jpeg_lossy                       26
+#   metadata                          1
 
-## items (49 lines)
+## items (51 lines)
 
 pub mod jpeg_lossy
 #[non_exhaustive] pub enum jpeg_lossy::InferredMetric
@@ -52,6 +53,8 @@ pub fn jpeg_lossy::recompress_jpeg_lossy(&[u8], jpeg_lossy::JpegRecompressMethod
 pub fn jpeg_lossy::recompress_jpeg_lossy_relative(&[u8], f32, bool, &jpeg_lossy::RelativeScorer<'_>, u8) -> core::result::Result<alloc::vec::Vec<u8>, whereat::at::At<JxlError>>
 pub fn jpeg_lossy::recompress_jpeg_lossy_target(&[u8], jpeg_lossy::JpegRecompressMethod, jpeg_lossy::QualityTarget, &jpeg_lossy::RelativeScorer<'_>, u8) -> core::result::Result<alloc::vec::Vec<u8>, whereat::at::At<JxlError>>
 pub type jpeg_lossy::RelativeScorer<'a> = (dyn core::ops::function::Fn(&[u8], &[u8], u32, u32) -> f32 + 'a)
+pub mod metadata
+pub fn metadata::rewrite<'a>(&zencodec::metadata_rewrite::Request<'a>) -> core::result::Result<zencodec::metadata_rewrite::Plan<'a>, zencodec::metadata_rewrite::Error>
 pub struct GainMapData
 pub GainMapData::jhgm_payload: alloc::vec::Vec<u8>
 pub struct JxlAnimationFrameDecoder

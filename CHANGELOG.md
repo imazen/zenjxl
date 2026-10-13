@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Shared rewrite contract
+
+- Migrate unpublished metadata rewrite errors to typed `LimitKind` values.
+  Pin zencodec/zenmeta to `47895ac4`; retain configured resource-limit rejection.
+
 ### Animation timing
 
 - Implement ordinary rational timing with cumulative millisecond rounding and
