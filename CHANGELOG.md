@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Shared rewrite contract
+
+- Migrate unpublished metadata rewrite errors to shared typed `LimitKind` values.
+  Pin zencodec/zenmeta to `7325cfa9`; configured input/output and metadata caps
+  retain rejection behavior without string matching.
+
 ### Metadata integration
 
 - Add default-off `metadata-rewrite` and `metadata::rewrite`, relocating the
