@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Tests
+
+- Run reusable testkit checks for rational timing, policy admission, inventory
+  limits/dispatch and rewrite payload preservation, with inventory on and off.
+
+
 - Keep the independent fuzz workspace on the same shared-contract revision as
   its codec dependency, avoiding duplicate zencodec trait identities.
 

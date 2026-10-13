@@ -120,3 +120,9 @@ animation-timing-oracle output:
     cargo run -p zenjxl --features zencodec --example animation_timing_oracle -- "{{output}}"
     jxlinfo -v "{{output}}"
     djxl "{{output}}" "{{output}}.png"
+
+# Shared contract suite with inventory enabled and absent.
+shared-contract-check:
+    cargo test -p zenjxl --features zencodec,inventory,metadata-rewrite --test shared_contracts
+    cargo test -p zenjxl --features zencodec,metadata-rewrite --test shared_contracts
+    cargo clippy -p zenjxl --features zencodec,inventory,metadata-rewrite --test shared_contracts -- -D warnings

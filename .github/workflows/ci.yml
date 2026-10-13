@@ -92,6 +92,8 @@ jobs:
         run: cargo test --no-default-features --features encode
       - name: Test (all features)
         run: cargo test --all-features
+      - name: Shared contracts without inventory
+        run: cargo test --features zencodec,metadata-rewrite --test shared_contracts
 
   i686:
     name: Test (i686 cross)
