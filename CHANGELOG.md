@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- Incremental (sans-I/O) decode: `dyn_incremental_decoder` returns
+  `zencodec::helpers::WholeFileIncremental` and `DecodeCapabilities::incremental`
+  is declared, so the zencodec-io drivers (files, streams, async sources) serve
+  JPEG XL. The header is reported as soon as it probes; rows come from
+  `push_decoder` once the whole file is offered. The decoder core already reads
+  through a resumable bitstream input, so a native path that decodes as bytes
+  arrive is a follow-up.
+
 ### Dependency integration
 
 - Align temporary zencodec/zenmeta/testkit pins with the checked fidelity and operation-matrix contracts (`4fda4391`). Replace coordinated git pins with released versions before publication.
