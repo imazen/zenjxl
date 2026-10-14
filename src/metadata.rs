@@ -70,7 +70,7 @@ fn plan<'a>(req: &ScrubRequest<'a>) -> Result<Plan<'a>, Error> {
                     .try_into()
                     .unwrap(),
             ))
-            .map_err(|_| Error::Limit("JXL box size"))?,
+            .map_err(|_| Error::Limit(zencodec::LimitKind::OutputSize))?,
             n => n as usize,
         };
         if len < header {
@@ -242,9 +242,9 @@ fn plan<'a>(req: &ScrubRequest<'a>) -> Result<Plan<'a>, Error> {
     Ok(out)
 }
 
-fn remove_reconstruction(
-    req: &ScrubRequest<'_>,
-    out: &mut Plan<'_>,
+fn remove_reconstruction<'a>(
+    req: &ScrubRequest<'a>,
+    out: &mut Plan<'a>,
     range: Range<usize>,
 ) -> Result<(), Error> {
     if !req.remove_reconstruction() {
@@ -309,7 +309,7 @@ fn box_bytes(kind: &[u8; 4], data: &[u8]) -> Result<Vec<u8>, Error> {
         .len()
         .checked_add(8)
         .and_then(|n| u32::try_from(n).ok())
-        .ok_or(Error::Limit("JXL metadata box"))?;
+        .ok_or(Error::Limit(zencodec::LimitKind::MetadataSize))?;
     let mut out = Vec::new();
     out.try_reserve_exact(size as usize)
         .map_err(|_| Error::Allocation)?;

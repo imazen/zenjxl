@@ -110,3 +110,21 @@ metadata-rewrite-oracle:
     djxl "$output/after.jxl" "$output/after.ppm"
     cmp "$output/before.ppm" "$output/after.ppm"
     jxlinfo -v "$output/after.jxl"
+
+# Shared timing admission plus encoded-duration roundtrip.
+animation-timing-check:
+    cargo test -p zenjxl --features zencodec --test animation_timing
+    cargo clippy -p zenjxl --features zencodec --lib --test animation_timing -- -D warnings
+
+animation-timing-oracle output:
+    cargo run -p zenjxl --features zencodec --example animation_timing_oracle -- "{{output}}"
+    jxlinfo -v "{{output}}"
+    djxl "{{output}}" "{{output}}.png"
+
+# Shared contract suite with inventory enabled and absent.
+shared-contract-check:
+    cargo fmt -p zenjxl
+    cargo clippy -p zenjxl --features zencodec --test shared_contracts -- -D warnings
+    cargo test -p zenjxl --features zencodec,inventory,metadata-rewrite --test shared_contracts
+    cargo test -p zenjxl --features zencodec,metadata-rewrite --test shared_contracts
+    cargo clippy -p zenjxl --features zencodec,inventory,metadata-rewrite --test shared_contracts -- -D warnings

@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenjxl.txt 102 lines (supported surface) | zenjxl.features.txt 67 added (features: butteraugli-loop,decode,encode,inventory,jpeg-lossy,parallel,reconstruct-hdr,threads,zencodec) | zenjxl.internal.txt 236 lines (10 hidden + 400 excluded-feature)
+# files: zenjxl.txt 102 lines (supported surface) | zenjxl.features.txt 69 added (features: butteraugli-loop,decode,encode,inventory,jpeg-lossy,metadata-rewrite,parallel,reconstruct-hdr,threads,zencodec) | zenjxl.internal.txt 236 lines (10 hidden + 400 excluded-feature)
 
 ## summary
 #
