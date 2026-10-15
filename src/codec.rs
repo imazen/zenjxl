@@ -713,6 +713,7 @@ mod encoding {
                 stop: self.stop,
                 stream: StreamState::Empty,
                 gain_map: self.config.gain_map.clone(),
+                pixels_cicp: None,
             })
         }
 
@@ -761,6 +762,9 @@ mod encoding {
         stop: Option<zencodec::StopToken>,
         stream: StreamState,
         gain_map: Option<Arc<GainMapData>>,
+        /// The colour the pixel descriptor states, for when the metadata
+        /// describes none.
+        pixels_cicp: Option<zencodec::Cicp>,
     }
 
     impl JxlEncoder {
@@ -811,7 +815,9 @@ mod encoding {
             if self.policy.resolve_exif(true)
                 && let Some(ref exif) = meta.exif
             {
-                jxl_meta = jxl_meta.with_exif(exif);
+                // A JPEG APP1 payload starts `Exif\0\0`; the JXL Exif box
+                // holds the TIFF stream itself.
+                jxl_meta = jxl_meta.with_exif(exif.strip_prefix(b"Exif\0\0").unwrap_or(exif));
                 has_any = true;
             }
             if self.policy.resolve_xmp(true)
@@ -853,16 +859,28 @@ mod encoding {
             layout: PixelLayout,
         ) -> (Option<jxl_encoder::ColorEncoding>, bool) {
             let policy_icc = self.policy.resolve_icc(true);
-            let Some(meta) = self.metadata.as_ref() else {
+            let described = self
+                .metadata
+                .as_ref()
+                .is_some_and(|m| m.cicp.is_some() || m.icc_profile.is_some());
+            // Metadata silent: the descriptor's colour, when it is one the
+            // JXL default (sRGB, or linear sRGB for float) doesn't already
+            // say. Without this, PQ/HLG or wide-gamut pixels were tagged sRGB.
+            let from_pixels = self.pixels_cicp.filter(|c| {
+                !described
+                    && !Self::layout_is_gray(layout)
+                    && !(c.color_primaries == 1 && matches!(c.transfer_characteristics, 8 | 13))
+            });
+            if !described && from_pixels.is_none() {
                 return (None, policy_icc);
-            };
+            }
             let channel_count = if Self::layout_is_gray(layout) { 1 } else { 3 };
             let mut src = zencodec::SourceColor::default().with_channel_count(channel_count);
-            if let Some(cicp) = meta.cicp {
+            if let Some(cicp) = self.metadata.as_ref().and_then(|m| m.cicp).or(from_pixels) {
                 src = src.with_cicp(cicp);
             }
-            if let Some(ref icc) = meta.icc_profile {
-                src = src.with_icc_profile(icc.clone());
+            if let Some(icc) = self.metadata.as_ref().and_then(|m| m.icc_profile.clone()) {
+                src = src.with_icc_profile(icc);
             }
             let plan = zencodec::resolve_color_emit(
                 &src,
@@ -1046,7 +1064,11 @@ mod encoding {
             JxlError::from(op).into()
         }
 
-        fn encode(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<zencodec::CodecError>> {
+        fn encode(
+            mut self,
+            pixels: PixelSlice<'_>,
+        ) -> Result<EncodeOutput, At<zencodec::CodecError>> {
+            self.pixels_cicp = zencodec::Cicp::from_descriptor(&pixels.descriptor());
             // The fallible body stays `At<JxlError>` (internal `?` sites
             // untouched); convert once at the boundary, preserving the trace.
             (move || -> Result<EncodeOutput, At<JxlError>> {
@@ -1167,6 +1189,7 @@ mod encoding {
         }
 
         fn push_rows(&mut self, rows: PixelSlice<'_>) -> Result<(), At<zencodec::CodecError>> {
+            self.pixels_cicp = zencodec::Cicp::from_descriptor(&rows.descriptor());
             (move || -> Result<(), At<JxlError>> {
                 use zenpixels::PixelFormat;
 
@@ -1414,7 +1437,9 @@ mod encoding {
             // EXIF/XMP go in the container — copy them out now so we're 'static.
             let anim_meta = metadata.and_then(|meta| {
                 let exif = if policy.resolve_exif(true) {
-                    meta.exif.as_deref().map(|b| b.to_vec())
+                    meta.exif
+                        .as_deref()
+                        .map(|b| b.strip_prefix(b"Exif\0\0").unwrap_or(b).to_vec())
                 } else {
                     None
                 };

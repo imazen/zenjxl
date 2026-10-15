@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed (colour and Exif on encode)
+
+- PQ, HLG and wide-gamut pixels encoded with no colour metadata were tagged sRGB: the encoder read only `Metadata`. It now falls back to the pixel descriptor's colour when the metadata describes none and the descriptor says something the JXL default doesn't. Test: `hdr_and_wide_gamut_descriptors_are_signalled_without_metadata`.
+- An EXIF blob in JPEG APP1 form (`Exif\0\0` + TIFF) went into the Exif box verbatim. The prefix is now stripped on the still and animation paths. Test: `a_jpeg_exif_prefix_is_not_boxed`.
+
 ### Dependency integration
 
 - Align temporary zencodec/zenmeta/testkit pins with the checked fidelity and operation-matrix contracts (`4fda4391`). Replace coordinated git pins with released versions before publication.
