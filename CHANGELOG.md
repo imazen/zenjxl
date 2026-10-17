@@ -14,6 +14,7 @@
 
 ### Fixed (colour and Exif on encode)
 
+- Animation Exif and XMP go in libjxl's box order: between the codestream header (the first `jxlp` box) and the frames, with no box after them; a 16-bit lossless animation's level-10 container is no longer nested inside a `jxlc` box. The adapter calls `jxl_encoder::wrap_in_container` instead of a local copy. Test: `animation_exif_xmp_roundtrip` (`2b10bb7b`).
 - PQ, HLG and wide-gamut pixels encoded with no colour metadata were tagged sRGB: the encoder read only `Metadata`. It now falls back to the pixel descriptor's colour when the metadata describes none and the descriptor says something the JXL default doesn't. Test: `hdr_and_wide_gamut_descriptors_are_signalled_without_metadata`.
 - An EXIF blob in JPEG APP1 form (`Exif\0\0` + TIFF) went into the Exif box verbatim. The prefix is now stripped on the still and animation paths. Test: `a_jpeg_exif_prefix_is_not_boxed`.
 
