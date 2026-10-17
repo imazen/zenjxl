@@ -1976,6 +1976,7 @@ mod decoding {
 
     static JXL_DECODE_CAPS: DecodeCapabilities = {
         let caps = DecodeCapabilities::new()
+            .with_incremental(true)
             .with_icc(true)
             .with_cicp(true)
             .with_hdr(true)
@@ -2762,6 +2763,23 @@ mod decoding {
             zencodec::helpers::copy_decode_to_sink(self, data, sink, preferred, |e| {
                 JxlError::Sink(e).into()
             })
+        }
+
+        /// Incremental (sans-I/O) decode: the header is reported as soon as
+        /// it probes, and the image decodes through `push_decoder` once the
+        /// whole file is offered. The JXL core reads through a resumable
+        /// bitstream input; a native decoder that feeds it as bytes arrive
+        /// is a follow-up.
+        fn dyn_incremental_decoder(
+            self,
+            preferred: &[PixelDescriptor],
+        ) -> Result<
+            alloc::boxed::Box<zencodec::decode::DynIncrementalDecoder>,
+            zencodec::decode::BoxedError,
+        > {
+            Ok(zencodec::decode::erase_incremental(
+                zencodec::helpers::WholeFileIncremental::new(self, preferred),
+            ))
         }
 
         fn animation_frame_decoder(

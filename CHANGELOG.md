@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- Incremental (sans-I/O) decode: `dyn_incremental_decoder` returns
+  `zencodec::helpers::WholeFileIncremental` and `DecodeCapabilities::incremental`
+  is declared, so the zencodec-io drivers (files, streams, async sources) serve
+  JPEG XL. The header is reported as soon as it probes; rows come from
+  `push_decoder` once the whole file is offered. The decoder core already reads
+  through a resumable bitstream input, so a native path that decodes as bytes
+  arrive is a follow-up.
+
 ### Fixed (colour and Exif on encode)
 
 - PQ, HLG and wide-gamut pixels encoded with no colour metadata were tagged sRGB: the encoder read only `Metadata`. It now falls back to the pixel descriptor's colour when the metadata describes none and the descriptor says something the JXL default doesn't. Test: `hdr_and_wide_gamut_descriptors_are_signalled_without_metadata`.
