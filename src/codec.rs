@@ -1490,8 +1490,11 @@ mod encoding {
             let exif = self.anim_meta.as_ref().and_then(|m| m.exif.as_deref());
             let xmp = self.anim_meta.as_ref().and_then(|m| m.xmp.as_deref());
 
+            // jxl-encoder's wrap writes libjxl's box order: the codestream header in
+            // the first `jxlp` box, then Exif and XMP, then the frames. It also joins
+            // the level-10 container a 16-bit lossless animation comes back in.
             let wrapped = if has_meta {
-                wrap_codestream_with_metadata(&codestream, exif, xmp)
+                jxl_encoder::wrap_in_container(&codestream, exif, xmp)
             } else {
                 codestream
             };
@@ -1501,78 +1504,6 @@ mod encoding {
                 None => wrapped,
             }
         }
-    }
-
-    /// Wrap a bare JXL codestream in an ISOBMFF container with optional
-    /// Exif / XMP metadata boxes.
-    ///
-    /// Local port of jxl-encoder's `container::wrap_in_container` in its
-    /// default arm (level 5 — no `jxll` box — no jbrd, no jumbf), which lost
-    /// its public path in the 0.4.0 API restructure (jxl-encoder#76 kept only
-    /// the container probes and `append_gain_map_box` reachable; the
-    /// still-image and streaming paths thread Exif/XMP through
-    /// `EncodeRequest`, but the animation API has no metadata support yet, so
-    /// this post-encode wrap is the only route). The byte layout is fixed by
-    /// the JPEG XL container format (ISO/IEC 18181-2), not by jxl-encoder
-    /// internals: signature box, `ftyp`, the whole codestream in one `jxlc`
-    /// box, then `Exif` (4-byte zero TIFF-offset prefix) and `xml ` boxes.
-    /// Delete in favour of an upstream re-export if one returns.
-    fn wrap_codestream_with_metadata(
-        codestream: &[u8],
-        exif: Option<&[u8]>,
-        xmp: Option<&[u8]>,
-    ) -> Vec<u8> {
-        /// ISOBMFF box: 4-byte BE total size (8-byte header + payload) and
-        /// 4-byte type; payloads ≥ 4 GiB take the extended-size form (size=1
-        /// sentinel + 8-byte size after the type), matching the upstream
-        /// writer bit-for-bit.
-        fn write_box(out: &mut Vec<u8>, box_type: &[u8; 4], parts: &[&[u8]]) {
-            let payload_len: u64 = parts.iter().map(|p| p.len() as u64).sum();
-            if let Ok(size32) = u32::try_from(8u64 + payload_len) {
-                out.extend_from_slice(&size32.to_be_bytes());
-                out.extend_from_slice(box_type);
-            } else {
-                out.extend_from_slice(&1u32.to_be_bytes());
-                out.extend_from_slice(box_type);
-                out.extend_from_slice(&(16u64 + payload_len).to_be_bytes());
-            }
-            for part in parts {
-                out.extend_from_slice(part);
-            }
-        }
-
-        const JXL_CONTAINER_SIGNATURE: [u8; 12] = [
-            0x00, 0x00, 0x00, 0x0C, // box size = 12
-            b'J', b'X', b'L', b' ', // box type
-            0x0D, 0x0A, 0x87, 0x0A, // JXL container magic
-        ];
-        const FTYP_BOX: [u8; 20] = [
-            0x00, 0x00, 0x00, 0x14, // box size = 20
-            b'f', b't', b'y', b'p', // box type
-            b'j', b'x', b'l', b' ', // major brand
-            0x00, 0x00, 0x00, 0x00, // minor version
-            b'j', b'x', b'l', b' ', // compatible brand
-        ];
-
-        let mut out = Vec::with_capacity(
-            JXL_CONTAINER_SIGNATURE.len()
-                + FTYP_BOX.len()
-                + 8
-                + codestream.len()
-                + exif.map_or(0, |e| 8 + 4 + e.len())
-                + xmp.map_or(0, |x| 8 + x.len()),
-        );
-        out.extend_from_slice(&JXL_CONTAINER_SIGNATURE);
-        out.extend_from_slice(&FTYP_BOX);
-        write_box(&mut out, b"jxlc", &[codestream]);
-        if let Some(exif_data) = exif {
-            // Exif box payload = 4-byte TIFF header offset (always 0) + data.
-            write_box(&mut out, b"Exif", &[&[0u8; 4], exif_data]);
-        }
-        if let Some(xmp_data) = xmp {
-            write_box(&mut out, b"xml ", &[xmp_data]);
-        }
-        out
     }
 
     impl zencodec::encode::AnimationFrameEncoder for JxlAnimationFrameEncoder {
@@ -1727,58 +1658,6 @@ mod encoding {
                     .with_extension("jxl"))
             })()
             .map_err(zencodec::CodecError::of)
-        }
-    }
-
-    /// Byte-layout pin for [`wrap_codestream_with_metadata`]: the exact
-    /// ISO/IEC 18181-2 box sequence the ported upstream writer emitted, so
-    /// the local copy can never drift silently.
-    #[cfg(test)]
-    mod wrap_layout_tests {
-        use super::wrap_codestream_with_metadata;
-
-        #[test]
-        fn wrap_codestream_with_metadata_layout() {
-            let codestream = [0xFFu8, 0x0A, 0x01, 0x02, 0x03];
-            let exif = [0xAAu8, 0xBB, 0xCC];
-            let xmp = b"<x/>";
-            let out = wrap_codestream_with_metadata(&codestream, Some(&exif), Some(xmp));
-
-            // Signature box + ftyp box.
-            assert_eq!(
-                &out[..12],
-                &[
-                    0x00, 0x00, 0x00, 0x0C, b'J', b'X', b'L', b' ', 0x0D, 0x0A, 0x87, 0x0A
-                ]
-            );
-            assert_eq!(
-                &out[12..32],
-                &[
-                    0x00, 0x00, 0x00, 0x14, b'f', b't', b'y', b'p', b'j', b'x', b'l', b' ', 0x00,
-                    0x00, 0x00, 0x00, b'j', b'x', b'l', b' '
-                ]
-            );
-            // jxlc box: size = 8-byte header + 5-byte codestream.
-            assert_eq!(out[32..36], 13u32.to_be_bytes());
-            assert_eq!(&out[36..40], b"jxlc");
-            assert_eq!(out[40..45], codestream);
-            // Exif box: size = 8 + 4 (zero TIFF offset) + 3.
-            assert_eq!(out[45..49], 15u32.to_be_bytes());
-            assert_eq!(&out[49..53], b"Exif");
-            assert_eq!(out[53..57], [0u8; 4]);
-            assert_eq!(out[57..60], exif);
-            // xml box: size = 8 + 4.
-            assert_eq!(out[60..64], 12u32.to_be_bytes());
-            assert_eq!(&out[64..68], b"xml ");
-            assert_eq!(&out[68..72], xmp);
-            assert_eq!(out.len(), 72);
-            // The wrap is what makes the stream a container.
-            assert!(jxl_encoder::is_container(&out));
-
-            // Metadata-free wrap: signature + ftyp + jxlc only.
-            let bare = wrap_codestream_with_metadata(&codestream, None, None);
-            assert_eq!(bare.len(), 32 + 8 + codestream.len());
-            assert_eq!(&bare[36..40], b"jxlc");
         }
     }
 }
@@ -4202,11 +4081,13 @@ mod tests {
         );
     }
 
-    /// Animation EXIF/XMP: the jxl-encoder animation API carries no metadata,
-    /// so the adapter post-wraps the codestream with the local ISOBMFF port
-    /// (`wrap_codestream_with_metadata`). Assert the wrap yields a container
-    /// whose metadata round-trips through a real decode and whose frames all
-    /// still render.
+    /// Animation EXIF/XMP: the adapter wraps the animation codestream with
+    /// jxl-encoder's `wrap_in_container`, in libjxl's box order (the
+    /// codestream header in the first `jxlp` box, then Exif and XMP, then the
+    /// frames, and no box after them). Assert that order, that the metadata
+    /// round-trips through a real decode and that every frame still renders,
+    /// for 8-bit and for 16-bit lossless (which jxl-encoder returns as a
+    /// level-10 container, which the wrap used to nest whole).
     #[cfg(all(feature = "encode", feature = "decode"))]
     #[test]
     fn animation_exif_xmp_roundtrip() {
@@ -4215,65 +4096,87 @@ mod tests {
         use zencodec::{ResourceLimits, ThreadingPolicy};
         use zenpixels::{PixelDescriptor, PixelSlice};
 
+        /// Top-level box types of a container.
+        fn box_types(data: &[u8]) -> Vec<[u8; 4]> {
+            let mut out = Vec::new();
+            let mut pos = 0;
+            while pos + 8 <= data.len() {
+                let size = u32::from_be_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
+                out.push(data[pos + 4..pos + 8].try_into().unwrap());
+                pos += if size == 0 { data.len() - pos } else { size };
+            }
+            out
+        }
+
         let width = 4u32;
         let height = 4u32;
-        let stride = (width as usize) * 3;
-        let frame_pixels = stride * height as usize;
-        let make_frame = |seed: u8| -> Vec<u8> {
-            (0..frame_pixels)
-                .map(|i| seed.wrapping_add(i as u8))
-                .collect()
-        };
-
         let exif_data: &[u8] = b"MM\x00\x2a\x00\x00\x00\x08\x00\x02";
         let xmp_data: &[u8] = b"<xmp>anim</xmp>";
-        let meta = zencodec::Metadata::none()
-            .with_exif(exif_data)
-            .with_xmp(xmp_data);
 
-        let enc_limits = ResourceLimits::none().with_threading(ThreadingPolicy::Sequential);
-        let config = JxlEncoderConfig::new().with_lossless(true);
-        let mut enc = config
-            .job()
-            .with_limits(enc_limits)
-            .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
-            .animation_frame_encoder()
-            .unwrap();
-        for seed in 0u8..2 {
-            let frame = make_frame(seed.wrapping_mul(41));
-            let slice =
-                PixelSlice::new(&frame, width, height, stride, PixelDescriptor::RGB8_SRGB).unwrap();
-            enc.push_frame(slice, 50, None).unwrap();
-        }
-        let encoded = AnimationFrameEncoder::finish(enc, None).unwrap();
+        for (descriptor, bytes_per_sample, layout) in [
+            (PixelDescriptor::RGB8_SRGB, 1usize, vec![*b"JXL ", *b"ftyp"]),
+            (
+                PixelDescriptor::RGB16_SRGB,
+                2,
+                vec![*b"JXL ", *b"ftyp", *b"jxll"],
+            ),
+        ] {
+            let stride = (width as usize) * 3 * bytes_per_sample;
+            let frame_bytes = stride * height as usize;
+            let make_frame = |seed: u8| -> Vec<u8> {
+                (0..frame_bytes)
+                    .map(|i| seed.wrapping_add(i as u8))
+                    .collect()
+            };
+            let meta = zencodec::Metadata::none()
+                .with_exif(exif_data)
+                .with_xmp(xmp_data);
 
-        // Metadata forced the container wrap.
-        assert!(jxl_encoder::is_container(encoded.data()));
+            let enc_limits = ResourceLimits::none().with_threading(ThreadingPolicy::Sequential);
+            let config = JxlEncoderConfig::new().with_lossless(true);
+            let mut enc = config
+                .job()
+                .with_limits(enc_limits)
+                .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
+                .animation_frame_encoder()
+                .unwrap();
+            for seed in 0u8..2 {
+                let frame = make_frame(seed.wrapping_mul(41));
+                let slice = PixelSlice::new(&frame, width, height, stride, descriptor).unwrap();
+                enc.push_frame(slice, 50, None).unwrap();
+            }
+            let encoded = AnimationFrameEncoder::finish(enc, None).unwrap();
 
-        // EXIF/XMP round-trip through a real decode of the wrapped stream.
-        let result = crate::decode::decode(encoded.data(), None, &[]).unwrap();
-        assert_eq!(
-            result.info.exif.as_deref(),
-            Some(exif_data),
-            "EXIF should roundtrip through the animation container wrap"
-        );
-        assert_eq!(
-            result.info.xmp.as_deref(),
-            Some(xmp_data),
-            "XMP should roundtrip through the animation container wrap"
-        );
+            // libjxl's box order: the header part, Exif, XMP, then the frames.
+            let mut expected = layout;
+            expected.extend([*b"jxlp", *b"Exif", *b"xml ", *b"jxlp"]);
+            assert_eq!(box_types(encoded.data()), expected, "{descriptor:?}");
 
-        // Both frames of the wrapped container still render.
-        let dec_limits = ResourceLimits::none().with_threading(ThreadingPolicy::Sequential);
-        let dec_config = JxlDecoderConfig::new();
-        let mut ffd = dec_config
-            .job()
-            .with_limits(dec_limits)
-            .animation_frame_decoder(Cow::Borrowed(encoded.data()), &[])
-            .unwrap();
-        for i in 0..2 {
-            let frame = ffd.render_next_frame(None).unwrap();
-            assert!(frame.is_some(), "frame {i} should render");
+            // EXIF/XMP round-trip through a real decode of the wrapped stream.
+            let result = crate::decode::decode(encoded.data(), None, &[]).unwrap();
+            assert_eq!(
+                result.info.exif.as_deref(),
+                Some(exif_data),
+                "EXIF should roundtrip through the animation container wrap"
+            );
+            assert_eq!(
+                result.info.xmp.as_deref(),
+                Some(xmp_data),
+                "XMP should roundtrip through the animation container wrap"
+            );
+
+            // Both frames of the wrapped container still render.
+            let dec_limits = ResourceLimits::none().with_threading(ThreadingPolicy::Sequential);
+            let dec_config = JxlDecoderConfig::new();
+            let mut ffd = dec_config
+                .job()
+                .with_limits(dec_limits)
+                .animation_frame_decoder(Cow::Borrowed(encoded.data()), &[])
+                .unwrap();
+            for i in 0..2 {
+                let frame = ffd.render_next_frame(None).unwrap();
+                assert!(frame.is_some(), "frame {i} should render ({descriptor:?})");
+            }
         }
     }
 
