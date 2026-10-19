@@ -18,7 +18,7 @@
 
 ### Fixed (colour and Exif on encode)
 
-- CICP-to-JXL color encoding uses Relative rendering intent, the spec default, including Display P3 and PQ. This changes the header policy only; it adds no metadata plumbing or public API.
+- CICP-to-JXL color encoding uses Relative rendering intent, the spec default, including Display P3 and PQ. This changes the header policy only; it adds no metadata plumbing or public API (`586952a5`).
 
 - Animation Exif and XMP go in libjxl's box order: between the codestream header (the first `jxlp` box) and the frames, with no box after them; a 16-bit lossless animation's level-10 container is no longer nested inside a `jxlc` box. The adapter calls `jxl_encoder::wrap_in_container` instead of a local copy. Test: `animation_exif_xmp_roundtrip` (`2b10bb7b`).
 - PQ, HLG and wide-gamut pixels encoded with no colour metadata were tagged sRGB: the encoder read only `Metadata`. It now falls back to the pixel descriptor's colour when the metadata describes none and the descriptor says something the JXL default doesn't. Test: `hdr_and_wide_gamut_descriptors_are_signalled_without_metadata`.
