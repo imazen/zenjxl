@@ -145,3 +145,18 @@ rendering-intent-check:
 hdr-reconstruction-check:
     cargo test --locked --features reconstruct-hdr --test gain_map_render
     cargo clippy --locked --features reconstruct-hdr --lib -- -D warnings
+
+# Current behavior and exact inventory claims, including animation and large ICC.
+inventory-final-check:
+    cd .. && cargo fmt --manifest-path zenjxl/Cargo.toml -p zenjxl --check
+    cd .. && cargo test --manifest-path zenjxl/Cargo.toml --locked --features inventory --test inventory --test inventory_alloc --test inventory_feature --test fuzz_regression
+    cd .. && cargo clippy --manifest-path zenjxl/Cargo.toml --locked --all-targets --features inventory -- -D warnings
+
+# Verify one-shot metadata against exact structural claims for every wrapped animation.
+inventory-corpus-claims:
+    cd .. && INVENTORY_CORPUS_JXL="$HOME/work/codec-corpus/jxl" cargo test --manifest-path zenjxl/Cargo.toml --locked --features inventory --test inventory trailing_boxes_match_real_decode -- --nocapture
+
+# Exercise the wrapper walker against its accumulated block-storage corpus.
+inventory-fuzz seconds="600":
+    mkdir -p /mnt/v/fuzzes/zenjxl/artifacts
+    cd .. && cargo +nightly fuzz run --fuzz-dir zenjxl/fuzz --target x86_64-unknown-linux-gnu inventory /mnt/v/fuzzes/zenjxl/corpus/inventory -- -max_total_time={{seconds}} -max_len=65536 -rss_limit_mb=16384 -timeout=30 -artifact_prefix=/mnt/v/fuzzes/zenjxl/artifacts/

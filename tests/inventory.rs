@@ -1075,6 +1075,16 @@ fn brob_exif_follows_the_decoder_build() {
 #[test]
 fn trailing_boxes_match_real_decode() {
     use zencodec::decode::AnimationFrameDecoder as _;
+    const ISSUE25_CASES: &[&str] = &[
+        "animation_icos4d",
+        "animation_newtons_cradle",
+        "animation_spline",
+        "animation_with_patches",
+        "animation_modular",
+        "animation_progressive",
+        "animation_frame_indexed",
+        "cropped_traffic_light",
+    ];
     fn real(bytes: &[u8]) -> Option<(bool, bool)> {
         // The documented path: one-shot decode.
         let m = decode_meta(bytes).ok()?;
@@ -1096,7 +1106,13 @@ fn trailing_boxes_match_real_decode() {
         Some(one_shot)
     }
     fn check(name: &str, bytes: &[u8], agree: &mut usize) {
+        eprintln!("checking trailing-box variant: {name}");
         let Some(real) = real(bytes) else {
+            assert!(
+                !ISSUE25_CASES.iter().any(|case| name.contains(case)),
+                "issue 25 animation variant must decode: {name}"
+            );
+            eprintln!("decoder rejected corpus variant: {name}");
             return;
         };
         let inv = inventory_of(bytes);
@@ -1120,6 +1136,14 @@ fn trailing_boxes_match_real_decode() {
     if let Some(root) = std::env::var_os("INVENTORY_CORPUS_JXL") {
         files = corpus_files();
         let _ = root;
+        for case in ISSUE25_CASES {
+            assert!(
+                files
+                    .iter()
+                    .any(|file| file.file_stem().is_some_and(|stem| stem == *case)),
+                "missing issue 25 animation fixture: {case}"
+            );
+        }
     }
     for f in &files {
         let bytes = std::fs::read(f).unwrap();
@@ -1254,6 +1278,16 @@ fn one_shot_decode_of_an_animation_reads_trailing_boxes() {
             bx(o, b"Exif", &exif_with(b"POST"));
             bx(o, b"xml ", b"<x/>");
         });
+        let plain = zenjxl::decode(&anim, None, &[]).expect("plain first frame");
+        let with_metadata = zenjxl::decode(&bytes, None, &[]).expect("wrapped first frame");
+        assert_eq!(
+            plain.pixels.as_slice().descriptor(),
+            with_metadata.pixels.as_slice().descriptor()
+        );
+        assert_eq!(
+            plain.pixels.as_slice().contiguous_bytes(),
+            with_metadata.pixels.as_slice().contiguous_bytes()
+        );
         let inv = inventory_of(&bytes);
         assert_eq!(
             disposition_of(&inv, b"Exif", 0),
@@ -1375,4 +1409,54 @@ fn memory_limit_does_not_turn_malformed_input_into_errors() {
         }
     }
     assert!(n >= 15);
+}
+
+/// Probing and one-shot decode accept a valid profile above the old 1 MiB cap.
+#[test]
+fn large_icc_probe_and_decode_agree() {
+    let mut icc = moxcms::ColorProfile::new_display_p3().encode().unwrap();
+    icc.resize(2 << 20, 0);
+    let size = u32::try_from(icc.len()).unwrap();
+    icc[..4].copy_from_slice(&size.to_be_bytes());
+    let pixels = [200, 30, 90];
+    // The low-level encoder keeps the ICC bytes explicitly; the wrapper
+    // can canonicalize a recognized matrix profile to an enum header.
+    let metadata = jxl_encoder::ImageMetadata::default().with_icc_profile(&icc);
+    let encoded = jxl_encoder::LosslessConfig::new()
+        .encode_request(1, 1, jxl_encoder::PixelLayout::Rgb8)
+        .with_metadata(&metadata)
+        .encode(&pixels)
+        .unwrap();
+    let info = zenjxl::probe(&encoded).expect("large valid ICC probe");
+    assert!(
+        info.icc_profile.as_deref() == Some(icc.as_slice()),
+        "probe ICC differs"
+    );
+    let decoded = zenjxl::decode(&encoded, None, &[zenpixels::PixelDescriptor::RGB8])
+        .expect("large valid ICC decode");
+    assert!(
+        decoded.info.icc_profile.as_deref() == Some(icc.as_slice()),
+        "decoded ICC differs"
+    );
+    assert_eq!(
+        decoded.pixels.as_slice().contiguous_bytes().as_ref(),
+        pixels
+    );
+}
+
+#[test]
+fn incomplete_later_animation_frame_preserves_first_frame_pixels() {
+    let bytes = animation(256, 256, 3);
+    let expected = zenjxl::decode(&bytes, None, &[]).unwrap();
+    let truncated = &bytes[..bytes.len() - 4];
+    let actual =
+        zenjxl::decode(truncated, None, &[]).expect("one-shot first frame remains complete");
+    assert_eq!(
+        actual.pixels.as_slice().descriptor(),
+        expected.pixels.as_slice().descriptor()
+    );
+    assert_eq!(
+        actual.pixels.as_slice().contiguous_bytes(),
+        expected.pixels.as_slice().contiguous_bytes()
+    );
 }

@@ -624,10 +624,10 @@ pub(crate) fn probe_with_orientation(
     let mut options = JxlDecoderOptions::default();
     options.adjust_orientation = adjust_orientation;
     // Probe-specific limits: only header parsing is needed, so use tight bounds.
-    // - ICC 1MB: covers all real-world ICC profiles (typical sRGB is 0.5-3KB)
+    // - ICC 16MB: matches inventory and admits large valid embedded profiles
     // - 64MB memory: bounds total allocations during header+ICC parsing
     // - Minimal tree/patch/spline limits since we don't decode frames
-    options.limits.max_icc_size = Some(1 << 20); // 1 MB (vs 256 MB default)
+    options.limits.max_icc_size = Some(16 << 20); // 16 MB (vs 256 MB default)
     options.limits.max_memory_bytes = Some(64 << 20); // 64 MB
     options.limits.max_tree_size = Some(1 << 16); // 64K nodes
     options.limits.max_patches = Some(0); // no patches during probe
@@ -703,7 +703,8 @@ pub(crate) fn probe_with_orientation(
 
 /// Read an animation's trailing metadata without decoding later frames.
 /// The scan carries the same configured limits and cancellation token as the
-/// first-frame decode. Malformed later framing remains an error.
+/// first-frame decode. The caller preserves the decoded first frame if later
+/// framing is malformed; cancellation and resource failures remain errors.
 #[allow(clippy::type_complexity)]
 fn scan_trailing_boxes(
     data: &[u8],
@@ -757,8 +758,12 @@ fn scan_trailing_boxes(
         .process(&mut input)
         .map_err(|e| e.map_error(map_err))?
     {
-        ProcessingResult::Complete { result: mut d }
-        | ProcessingResult::NeedsMoreInput {
+        ProcessingResult::Complete { result: mut d } => {
+            gm = d.take_gain_map().or(gm);
+            ex = d.take_exif().or(ex);
+            xm = d.take_xmp().or(xm);
+        }
+        ProcessingResult::NeedsMoreInput {
             fallback: mut d, ..
         } => {
             gm = d.take_gain_map().or(gm);
@@ -1025,10 +1030,22 @@ pub(crate) fn decode_with_options_oriented(
         // A one-shot decode of an animation stops after its first frame, so
         // the boxes after the codestream are further off. Find them with a
         // header-only scan of the whole file (no pixel buffers).
-        let (gm, ex, xm) = scan_trailing_boxes(data, trailing_options)?;
-        gain_map = gm.or(gain_map.take());
-        exif = ex.or(exif.take());
-        xmp = xm.or(xmp.take());
+        match scan_trailing_boxes(data, trailing_options) {
+            Ok((gm, ex, xm)) => {
+                gain_map = gm.or(gain_map.take());
+                exif = ex.or(exif.take());
+                xmp = xm.or(xmp.take());
+            }
+            // One-shot decode has already produced its first frame. Preserve
+            // that result when later frames are incomplete or unsupported.
+            // Resource failures, cancellation and internal errors propagate.
+            Err(error) if matches!(error.error(), JxlError::UnexpectedEof(_)) => {}
+            Err(error)
+                if matches!(error.error(), JxlError::Decode(inner)
+                if matches!(inner.kind(), jxl::api::ErrorClass::InvalidBitstream
+                    | jxl::api::ErrorClass::Unsupported)) => {}
+            Err(error) => return Err(error),
+        }
     } else {
         match final_decoder.process(&mut input) {
             Ok(ProcessingResult::Complete { result }) => merge_trailing!(result),

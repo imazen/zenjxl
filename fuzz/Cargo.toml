@@ -9,7 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-# TEMPORARY: zencodec PR (structural inventories); swap for the released version before merge.
+# Unpublished shared inventory contract; keep this revision aligned with the wrapper.
 zencodec = { git = "https://github.com/imazen/zencodec", rev = "d327434b0826a3e39633665c76f5081c0ceb34cc" }
 
 [dependencies.zenjxl]
@@ -26,5 +26,6 @@ bench = false
 
 [patch.crates-io]
 zencodec = { git = "https://github.com/imazen/zencodec", rev = "d327434b0826a3e39633665c76f5081c0ceb34cc" }
-# TEMPORARY: swap before merge: zenjxl-decoder#62 (lean scan_frames_only, codestream_length).
-zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "f27c5c6fb56b76c952d88aa7d5231a06f7e49b51" }
+
+# Same reviewed decoder behavior revision as the wrapper root.
+zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "b6c9cf6e4d703d5f9a2e62c3ca0e859bbf2d2cd7" }

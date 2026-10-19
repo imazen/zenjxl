@@ -107,8 +107,6 @@ struct ScanOut {
     end: Result<u64, String>,
     /// The scan had parsed an `Exif` box by the time it finished.
     exif_seen: bool,
-    /// More than one visible frame: a one-shot decode stops after the first.
-    animated: bool,
 }
 
 /// Drive `zenjxl-decoder` through a header-only scan: frame headers and TOCs
@@ -136,13 +134,11 @@ fn scan(
         Ok(ScanOut {
             end: Err(format!("{what}: {msg}")),
             exif_seen: false,
-            animated: false,
         })
     };
     let truncated = |what: &str| ScanOut {
         end: Err(format!("truncated in {what}")),
         exif_seen: false,
-        animated: false,
     };
     let decoder = JxlDecoder::<states::Initialized>::new(options);
     let mut decoder = match decoder.process(&mut input) {
@@ -190,7 +186,6 @@ fn scan(
     Ok(ScanOut {
         end,
         exif_seen: decoder.exif().is_some(),
-        animated: decoder.scanned_frames().len() > 1,
     })
 }
 
@@ -429,8 +424,6 @@ struct Walker<'a> {
     version: u32,
     index: usize,
     complete: bool,
-    /// More than one visible frame (see [`ScanOut::animated`]).
-    animated: bool,
     /// Codestream bytes carried by the codestream boxes walked so far.
     cs_before: u64,
     fail_at: Option<(u64, String)>,
@@ -541,7 +534,6 @@ pub(crate) fn walk(
     )?;
 
     let out = scan(data, cfg.max_memory, stop)?;
-    let animated = out.animated;
     let (end, end_note) = match out.end {
         Ok(e) => (Some(e), None),
         Err(why) => (None, Some(format!("codestream end not located ({why})"))),
@@ -561,7 +553,6 @@ pub(crate) fn walk(
         version: 0,
         index: 0,
         complete: false,
-        animated,
         cs_before: 0,
         fail_at: None,
         consumed: Vec::new(),
