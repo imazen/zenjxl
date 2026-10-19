@@ -128,3 +128,9 @@ shared-contract-check:
     cargo test -p zenjxl --features zencodec,inventory,metadata-rewrite --test shared_contracts
     cargo test -p zenjxl --features zencodec,metadata-rewrite --test shared_contracts
     cargo clippy -p zenjxl --features zencodec,inventory,metadata-rewrite --test shared_contracts -- -D warnings
+
+# Shared metadata planners and inventory dispatch on the consumer's exact revision.
+contract-pin-check:
+    just shared-contract-check
+    cargo test --no-default-features --features metadata-rewrite --test metadata_rewrite
+    just metadata-fuzz-check

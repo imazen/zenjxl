@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Dependency integration
+
+- Use zencodec/zenmeta/testkit `d327434b` in the library and standalone fuzz graph, matching streaming consumers. Shared policy/inventory tests in both feature states, metadata rewrite tests and inventory fuzz compilation pass (`just contract-pin-check`).
+
 ### Added
 
 - Incremental (sans-I/O) decode: `dyn_incremental_decoder` returns
