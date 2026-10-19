@@ -134,3 +134,9 @@ contract-pin-check:
     just shared-contract-check
     cargo test --no-default-features --features metadata-rewrite --test metadata_rewrite
     just metadata-fuzz-check
+
+# CICP headers and native sample equality for the owner-selected intent policy.
+rendering-intent-check:
+    cargo test --locked --lib --features zencodec cicp_p3_and_pq_headers_use_relative_intent
+    cargo test --locked --lib --features zencodec metadata_cicp_round_trips_via_enum_color
+    cargo clippy --locked --lib --features zencodec -- -D warnings

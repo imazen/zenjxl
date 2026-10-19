@@ -955,7 +955,7 @@ mod encoding {
                 primaries,
                 custom_primaries: None,
                 transfer_function,
-                rendering_intent: RenderingIntent::Perceptual,
+                rendering_intent: RenderingIntent::Relative,
                 want_icc: false,
                 gamma: None,
             })
@@ -3644,6 +3644,50 @@ mod tests {
             Some(Cicp::DISPLAY_P3),
             "Display-P3 CICP should round-trip through the JXL codestream enum color"
         );
+    }
+
+    #[cfg(all(feature = "encode", feature = "decode", feature = "zencodec"))]
+    #[test]
+    fn cicp_p3_and_pq_headers_use_relative_intent() {
+        use jxl::api::{JxlColorEncoding, JxlColorProfile, JxlDecoder, JxlDecoderOptions};
+        use jxl::api::{ProcessingResult, states};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::{Cicp, Metadata};
+
+        for cicp in [Cicp::DISPLAY_P3, Cicp::new(12, 16, 0, true)] {
+            let pixels = vec![rgb::Rgb::new(17u8, 93, 211); 4];
+            let buf = zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, 2, 2).unwrap();
+            let encoder = JxlEncoderConfig::new()
+                .with_lossless(true)
+                .job()
+                .with_metadata_policy(
+                    Metadata::none().with_cicp(cicp),
+                    zencodec::MetadataPolicy::PreserveExact,
+                )
+                .encoder()
+                .unwrap();
+            let output = encoder.encode(buf.as_slice().into()).unwrap();
+            let mut input = output.data();
+            let mut decoder = JxlDecoder::<states::Initialized>::new(JxlDecoderOptions::default());
+            let header = loop {
+                match decoder.process(&mut input).unwrap() {
+                    ProcessingResult::Complete { result } => break result,
+                    ProcessingResult::NeedsMoreInput { fallback, .. } => {
+                        assert!(!input.is_empty(), "incomplete color header");
+                        decoder = fallback;
+                    }
+                }
+            };
+            let JxlColorProfile::Simple(JxlColorEncoding::RgbColorSpace {
+                rendering_intent, ..
+            }) = header.embedded_color_profile()
+            else {
+                panic!("expected RGB enum color encoding");
+            };
+            assert_eq!(*rendering_intent as u8, 1, "Relative intent for {cicp:?}");
+            let decoded = crate::decode(output.data(), None, &[]).unwrap();
+            assert_eq!(decoded.pixels.into_vec(), [17u8, 93, 211].repeat(4));
+        }
     }
 
     /// A BT.2100-PQ source re-tags the decode descriptor with PQ transfer +
