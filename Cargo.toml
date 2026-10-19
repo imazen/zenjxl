@@ -51,8 +51,8 @@ jxl-encoder = { version = "0.4.0", optional = true, default-features = false, fe
 zenjpeg = { version = "0.9.0", optional = true, default-features = false }
 # Gain-map application for GainMapRender::ReconstructHdr (reconstruct-hdr
 # feature). Pure gain-map math; jhgm ISO 21496-1 parameter parsing comes
-# from zencodec, so the registry release suffices.
-ultrahdr-core = { version = "0.5.0", optional = true, default-features = false, features = ["std"] }
+# from zencodec. f16 output is an explicit opt-in on the strided 0.6 API.
+ultrahdr-core = { version = "0.6.0", optional = true, default-features = false, features = ["std", "f16"] }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 
 # jxl-encoder 0.4.0 (release-prepped on the sibling's main, 2026-08-30 — the
@@ -69,6 +69,7 @@ ultrahdr-core = { version = "0.5.0", optional = true, default-features = false, 
 # consumes — is now published, so its path-patch was dropped and the `jxl`
 # dep above bumped to 0.3.10.)
 [patch.crates-io]
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "a834b2ccedc2b99b1fec3200365f00127a6baea6" }
 # Unpublished metadata contract: one exact source for zencodec and testkit.
 # Replace both pins with the compatible published contract at release.
 zencodec = { git = "https://github.com/imazen/zencodec", rev = "d327434b0826a3e39633665c76f5081c0ceb34cc" }

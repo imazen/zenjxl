@@ -4,6 +4,8 @@
 
 ### Dependency integration
 
+- Reconstruct HDR with ultrahdr-core 0.6, enabling its explicit f16 output feature. The six gain-map rendering tests pass against the pinned current-main implementation.
+
 - Use zencodec/zenmeta/testkit `d327434b` in the library and standalone fuzz graph, matching streaming consumers. Shared policy/inventory tests in both feature states, metadata rewrite tests and inventory fuzz compilation pass (`just contract-pin-check`).
 
 ### Added

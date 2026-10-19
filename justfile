@@ -140,3 +140,8 @@ rendering-intent-check:
     cargo test --locked --lib --features zencodec cicp_p3_and_pq_headers_use_relative_intent
     cargo test --locked --lib --features zencodec metadata_cicp_round_trips_via_enum_color
     cargo clippy --locked --lib --features zencodec -- -D warnings
+
+# Exercise gain-map reconstruction against the pinned current ultrahdr source.
+hdr-reconstruction-check:
+    cargo test --locked --features reconstruct-hdr --test gain_map_render
+    cargo clippy --locked --features reconstruct-hdr --lib -- -D warnings
