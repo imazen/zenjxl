@@ -624,10 +624,10 @@ pub(crate) fn probe_with_orientation(
     let mut options = JxlDecoderOptions::default();
     options.adjust_orientation = adjust_orientation;
     // Probe-specific limits: only header parsing is needed, so use tight bounds.
-    // - ICC 1MB: covers all real-world ICC profiles (typical sRGB is 0.5-3KB)
+    // - ICC 16MB: matches inventory and admits large valid embedded profiles
     // - 64MB memory: bounds total allocations during header+ICC parsing
     // - Minimal tree/patch/spline limits since we don't decode frames
-    options.limits.max_icc_size = Some(1 << 20); // 1 MB (vs 256 MB default)
+    options.limits.max_icc_size = Some(16 << 20); // 16 MB (vs 256 MB default)
     options.limits.max_memory_bytes = Some(64 << 20); // 64 MB
     options.limits.max_tree_size = Some(1 << 16); // 64K nodes
     options.limits.max_patches = Some(0); // no patches during probe
@@ -699,6 +699,79 @@ pub(crate) fn probe_with_orientation(
         linear_below: tm.linear_below,
         intrinsic_size,
     })
+}
+
+/// Read an animation's trailing metadata without decoding later frames.
+/// The scan carries the same configured limits and cancellation token as the
+/// first-frame decode. The caller preserves the decoded first frame if later
+/// framing is malformed; cancellation and resource failures remain errors.
+#[allow(clippy::type_complexity)]
+fn scan_trailing_boxes(
+    data: &[u8],
+    options: JxlDecoderOptions,
+) -> Result<
+    (
+        Option<jxl::api::GainMapBundle>,
+        Option<Vec<u8>>,
+        Option<Vec<u8>>,
+    ),
+    At<JxlError>,
+> {
+    use jxl::api::states;
+    let mut input = data;
+    let decoder = JxlDecoder::<states::Initialized>::new(options);
+    let ProcessingResult::Complete {
+        result: mut decoder,
+    } = decoder
+        .process(&mut input)
+        .map_err(|e| e.map_error(map_err))?
+    else {
+        return Err(whereat::at!(JxlError::UnexpectedEof(
+            "animation metadata header".into()
+        )));
+    };
+    while decoder.has_more_frames() {
+        let ProcessingResult::Complete { result: with_frame } = decoder
+            .process(&mut input)
+            .map_err(|e| e.map_error(map_err))?
+        else {
+            return Err(whereat::at!(JxlError::UnexpectedEof(
+                "animation frame header".into()
+            )));
+        };
+        let ProcessingResult::Complete { result } = with_frame
+            .skip_frame(&mut input)
+            .map_err(|e| e.map_error(map_err))?
+        else {
+            return Err(whereat::at!(JxlError::UnexpectedEof(
+                "animation frame sections".into()
+            )));
+        };
+        decoder = result;
+    }
+    let (mut gm, mut ex, mut xm) = (
+        decoder.take_gain_map(),
+        decoder.take_exif(),
+        decoder.take_xmp(),
+    );
+    match decoder
+        .process(&mut input)
+        .map_err(|e| e.map_error(map_err))?
+    {
+        ProcessingResult::Complete { result: mut d } => {
+            gm = d.take_gain_map().or(gm);
+            ex = d.take_exif().or(ex);
+            xm = d.take_xmp().or(xm);
+        }
+        ProcessingResult::NeedsMoreInput {
+            fallback: mut d, ..
+        } => {
+            gm = d.take_gain_map().or(gm);
+            ex = d.take_exif().or(ex);
+            xm = d.take_xmp().or(xm);
+        }
+    }
+    Ok((gm, ex, xm))
 }
 
 /// Decode JXL to pixels.
@@ -828,6 +901,11 @@ pub(crate) fn decode_with_options_oriented(
         options.stop = stop;
     }
 
+    let mut trailing_options = JxlDecoderOptions::default().with_scan_frames_only(true);
+    trailing_options.limits = options.limits.clone();
+    trailing_options.stop = alloc::sync::Arc::clone(&options.stop);
+    trailing_options.adjust_orientation = options.adjust_orientation;
+
     let decoder = JxlDecoder::new(options);
 
     // Phase 1: parse header
@@ -948,10 +1026,32 @@ pub(crate) fn decode_with_options_oriented(
             xmp = d.take_xmp().or(xmp.take());
         }};
     }
-    match final_decoder.process(&mut input) {
-        Ok(ProcessingResult::Complete { result }) => merge_trailing!(result),
-        Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => merge_trailing!(fallback),
-        Err(_) => {}
+    if final_decoder.has_more_frames() {
+        // A one-shot decode of an animation stops after its first frame, so
+        // the boxes after the codestream are further off. Find them with a
+        // header-only scan of the whole file (no pixel buffers).
+        match scan_trailing_boxes(data, trailing_options) {
+            Ok((gm, ex, xm)) => {
+                gain_map = gm.or(gain_map.take());
+                exif = ex.or(exif.take());
+                xmp = xm.or(xmp.take());
+            }
+            // One-shot decode has already produced its first frame. Preserve
+            // that result when later frames are incomplete or unsupported.
+            // Resource failures, cancellation and internal errors propagate.
+            Err(error) if matches!(error.error(), JxlError::UnexpectedEof(_)) => {}
+            Err(error)
+                if matches!(error.error(), JxlError::Decode(inner)
+                if matches!(inner.kind(), jxl::api::ErrorClass::InvalidBitstream
+                    | jxl::api::ErrorClass::Unsupported)) => {}
+            Err(error) => return Err(error),
+        }
+    } else {
+        match final_decoder.process(&mut input) {
+            Ok(ProcessingResult::Complete { result }) => merge_trailing!(result),
+            Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => merge_trailing!(fallback),
+            Err(_) => {}
+        }
     }
 
     // Clamp f32 output to [0.0, 1.0] for SDR / BT.709 content.

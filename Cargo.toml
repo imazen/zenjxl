@@ -83,9 +83,9 @@ zenjpeg = { path = "../zenjpeg/zenjpeg" }
 # the registry 0.3.10 and the lib fails to compile (`ErrorClass` missing;
 # that was CI's red state 2026-08-14..27). Drop this patch when
 # zenjxl-decoder 0.4.0 publishes.
-# Decoder PR62 supplies the lean header scan and codestream_length.
+# Decoder PR65 supplies deferred trailing boxes and tracked header scanning.
 # Exact pin keeps CI and local inventory behavior aligned.
-zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "f27c5c6fb56b76c952d88aa7d5231a06f7e49b51" }
+zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "b6c9cf6e4d703d5f9a2e62c3ca0e859bbf2d2cd7" }
 # jxl-encoder main needs butteraugli 0.9.4 (`ButteraugliReference::
 # estimated_reference_bytes`, the alloc-budget precompute API), which is not
 # on crates.io yet (latest published: 0.9.3). jxl-encoder's own workspace

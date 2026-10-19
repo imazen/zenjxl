@@ -18,6 +18,12 @@
   through a resumable bitstream input, so a native path that decodes as bytes
   arrive is a follow-up.
 
+### Inventory and trailing metadata
+
+- Accept valid ICC profiles up to the existing 16 MiB inventory cap during probes, preserving the 64 MiB parsing budget. One-shot decoding retains a complete first frame when later animation framing is incomplete. Exact metadata claims pass on 543 corpus variants; all 4,300 stored files retain both reader outputs.
+
+- One-shot animation decode scans trailing boxes without decoding later frames, matching the animation reader. The walker models deferred post-codestream errors and junk draining; exact-disposition tests replace the previous under-claim model (zenjxl#25, zenjxl-decoder#64).
+
 ### Fixed (colour and Exif on encode)
 
 - CICP-to-JXL color encoding uses Relative rendering intent, the spec default, including Display P3 and PQ. This changes the header policy only; it adds no metadata plumbing or public API (`586952a5`).

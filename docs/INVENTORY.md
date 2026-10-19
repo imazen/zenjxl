@@ -33,35 +33,23 @@ phases, using the codestream length from a header-only scan (`JxlDecoder::codest
 
 1. **Main:** every box up to and including the codestream box that holds the last codestream byte.
    A rejected box (second `ftyp`, `jxlc` after `jxlp`, bad `jxlp` order, size-0 `jhgm`/`jxli`,
-   unparseable `jhgm`/`jxli`, a box running past the input) fails the decode. That box is
-   `Malformed`, every earlier `Metadata`/`ImageData` claim becomes `Skipped` ("decode fails at
-   offset N"), and later boxes are `Skipped`.
-2. **Drain:** zenjxl polls the box parser once more after the last frame (`decode.rs`, zenjxl#22),
-   so for a still image the boxes after the codestream are read until the end of the input, a
-   rejected box or the next non-empty codestream box (`Unreferenced`).
+   unparseable `jhgm`/`jxli`, a box running past the input) fails the decode **unless the last
+   codestream box (`jxlc`, or the `jxlp` flagged last) has already been entered**: the decoder
+   defers box errors after that point. A failing box is `Malformed`, every earlier
+   `Metadata`/`ImageData` claim becomes `Skipped` ("decode fails at offset N"), and later boxes are
+   `Skipped`.
+2. **Drain:** after the last frame the decoder skips what is left of the current codestream box
+   (junk after the codestream) and parses the boxes after it until the end of the input or a
+   rejected box (the walk stops; the decode is not affected). Codestream boxes there are
+   `Unreferenced`. A one-shot decode of an animation, which stops after its first frame, reaches
+   these boxes through a header-only scan, so the same rule holds for it.
 3. **Dead:** everything after a stop is `Skipped` with a detail saying where parsing stopped.
-
-Not exact, reported as not read (under-claims, never over-claims; `trailing_boxes_match_real_decode`
-asserts that direction):
-
-- **Animations.** A one-shot decode stops after the first frame; boxes after the codestream are
-  `Skipped` ("only AnimationFrameDecoder surfaces them; the one-shot decode reads them only when its
-  pixel pass happens to reach them"). Small animations do surface them: 20 of 356 wrapped corpus
-  animations of 0.8-3.9 KB, and zenjxl's own 884 B and 1,316 B animations (zenjxl#25).
-- **Junk after the codestream inside the codestream box.** The decoder parses the boxes after it
-  only for some layouts (a 1-byte junk tail: read for `spot.jxl`, missed for `bitdepth_8.jxl`;
-  zenjxl-decoder#64, section 2).
-- **A rejected box after a small codestream** can still fail the decode (the decoder also polls
-  trailing boxes while reading the last sections of small codestreams); the box detail says so
-  (zenjxl-decoder#64, section 1).
-- **Memory:** the decoder's `hf_sections` table is allocated outside the memory tracker during the
-  header scan, bounded by `max_pixels` (35 MiB peak measured on a 1,517-byte fuzz input under an
-  8 MiB limit; zenjxl-decoder#64, section 3).
 
 A gain-map bundle is checked against the job's render mode: `Components` probes the gain-map
 codestream's headers (a decode of a broken one fails), native `ReconstructHdr` also parses the
-ISO 21496-1 metadata. A failing bundle is `Malformed` and the decode counts as failed. Failures
-past the headers (corrupt gain-map sections) are not modelled.
+ISO 21496-1 metadata. A failing bundle is `Malformed` and the decode counts as failed.
+
+Failures past the gain-map headers (corrupt gain-map sections) are not modelled.
 
 `brob` and `jbrd` follow the linked decoder build: Cargo unifies the decoder's `jpeg` feature across
 the dependency graph, so the walker probes the decoder once with a tiny container (a brotli-wrapped

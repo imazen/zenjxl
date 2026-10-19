@@ -808,9 +808,10 @@ fn size0_and_unparseable_aux_boxes_are_rejected() {
         });
         let inv = inventory_of(&bytes);
         assert_eq!(disposition_of(&inv, ty, 0), Disposition::Malformed, "{inv}");
+        // After the codestream the bad box only stops the box walk.
         assert!(
-            decode_meta(&bytes).is_err(),
-            "the decoder rejects a size-0 {ty:?}"
+            decode_meta(&bytes).is_ok(),
+            "a size-0 {ty:?} after the codestream does not fail the decode"
         );
     }
     for ty in [b"jxli", b"jhgm"] {
@@ -1073,19 +1074,45 @@ fn brob_exif_follows_the_decoder_build() {
 /// the animation decoder.
 #[test]
 fn trailing_boxes_match_real_decode() {
-    /// What the one-shot decode (the documented path) surfaces, and whether
-    /// the file is an animation.
-    fn real(bytes: &[u8]) -> Option<((bool, bool), bool)> {
+    use zencodec::decode::AnimationFrameDecoder as _;
+    const ISSUE25_CASES: &[&str] = &[
+        "animation_icos4d",
+        "animation_newtons_cradle",
+        "animation_spline",
+        "animation_with_patches",
+        "animation_modular",
+        "animation_progressive",
+        "animation_frame_indexed",
+        "cropped_traffic_light",
+    ];
+    fn real(bytes: &[u8]) -> Option<(bool, bool)> {
+        // The documented path: one-shot decode.
         let m = decode_meta(bytes).ok()?;
-        let anim = JxlDecoderConfig::new()
-            .job()
-            .probe(bytes)
-            .ok()?
-            .is_animation();
-        Some(((m.0.is_some(), m.1.is_some()), anim))
+        let one_shot = (m.0.is_some(), m.1.is_some());
+        let job = JxlDecoderConfig::new().job();
+        if job.probe(bytes).ok()?.is_animation() {
+            let mut d = JxlDecoderConfig::new()
+                .job()
+                .animation_frame_decoder(Cow::Owned(bytes.to_vec()), &[])
+                .ok()?;
+            d.render_next_frame_owned(None).ok()?;
+            let m = &d.info().embedded_metadata;
+            assert_eq!(
+                one_shot,
+                (m.exif.is_some(), m.xmp.is_some()),
+                "the one-shot and animation decoders disagree"
+            );
+        }
+        Some(one_shot)
     }
     fn check(name: &str, bytes: &[u8], agree: &mut usize) {
-        let Some((real, anim)) = real(bytes) else {
+        eprintln!("checking trailing-box variant: {name}");
+        let Some(real) = real(bytes) else {
+            assert!(
+                !ISSUE25_CASES.iter().any(|case| name.contains(case)),
+                "issue 25 animation variant must decode: {name}"
+            );
+            eprintln!("decoder rejected corpus variant: {name}");
             return;
         };
         let inv = inventory_of(bytes);
@@ -1094,18 +1121,7 @@ fn trailing_boxes_match_real_decode() {
             matches!(disposition_of(&inv, b"Exif", 0), Disposition::Metadata(_)),
             matches!(disposition_of(&inv, b"xml ", 0), Disposition::Metadata(_)),
         );
-        if anim || name.ends_with("[jxlc + junk]") {
-            // Animations (one-shot stops after the first frame) and junk
-            // inside the codestream box: the decode reads the trailing boxes
-            // only for some layouts, so the inventory reports them unread and
-            // must never claim a read the decode lacks.
-            assert!(
-                (!claim.0 || real.0) && (!claim.1 || real.1),
-                "{name}: claims a read that does not happen\n{inv}"
-            );
-        } else {
-            assert_eq!(claim, real, "{name}\n{inv}");
-        }
+        assert_eq!(claim, real, "{name}\n{inv}");
         *agree += 1;
     }
     let mut agree = 0;
@@ -1120,6 +1136,14 @@ fn trailing_boxes_match_real_decode() {
     if let Some(root) = std::env::var_os("INVENTORY_CORPUS_JXL") {
         files = corpus_files();
         let _ = root;
+        for case in ISSUE25_CASES {
+            assert!(
+                files
+                    .iter()
+                    .any(|file| file.file_stem().is_some_and(|stem| stem == *case)),
+                "missing issue 25 animation fixture: {case}"
+            );
+        }
     }
     for f in &files {
         let bytes = std::fs::read(f).unwrap();
@@ -1243,12 +1267,10 @@ fn animation(w: u32, h: u32, frames: u32) -> Vec<u8> {
     enc.finish(None).expect("finish").into_vec()
 }
 
-/// Finding 1: boxes after an animation's codestream are not claimed as read
-/// (a one-shot decode stops after the first frame); only the animation
-/// decoder surfaces them.
+/// Finding 1: a one-shot decode of an animation reads the boxes after the
+/// codestream, whatever its size (it used to stop after the first frame).
 #[test]
-fn trailing_boxes_of_an_animation_are_not_claimed() {
-    use zencodec::decode::AnimationFrameDecoder as _;
+fn one_shot_decode_of_an_animation_reads_trailing_boxes() {
     for (w, h, frames) in [(16, 16, 2), (256, 256, 3)] {
         let anim = animation(w, h, frames);
         let bytes = container(|o| {
@@ -1256,37 +1278,30 @@ fn trailing_boxes_of_an_animation_are_not_claimed() {
             bx(o, b"Exif", &exif_with(b"POST"));
             bx(o, b"xml ", b"<x/>");
         });
+        let plain = zenjxl::decode(&anim, None, &[]).expect("plain first frame");
+        let with_metadata = zenjxl::decode(&bytes, None, &[]).expect("wrapped first frame");
+        assert_eq!(
+            plain.pixels.as_slice().descriptor(),
+            with_metadata.pixels.as_slice().descriptor()
+        );
+        assert_eq!(
+            plain.pixels.as_slice().contiguous_bytes(),
+            with_metadata.pixels.as_slice().contiguous_bytes()
+        );
         let inv = inventory_of(&bytes);
-        let exif = inv
-            .parts()
-            .iter()
-            .find(|p| *p.tag() == PartTag::FourCc(*b"Exif"))
-            .unwrap();
-        assert_eq!(exif.disposition(), Disposition::Skipped, "{inv}");
-        assert!(
-            exif.detail()
-                .unwrap()
-                .contains("only AnimationFrameDecoder"),
+        assert_eq!(
+            disposition_of(&inv, b"Exif", 0),
+            Disposition::Metadata(MetadataKind::Exif),
             "{inv}"
         );
-        let mut d = JxlDecoderConfig::new()
-            .job()
-            .animation_frame_decoder(Cow::Owned(bytes.clone()), &[])
-            .unwrap();
-        d.render_next_frame_owned(None).unwrap();
+        let (exif, xmp) = decode_meta(&bytes).unwrap();
         assert_eq!(
-            d.info().embedded_metadata.exif.as_deref(),
-            Some(&b"POST"[..]),
-            "{w}x{h}: the animation decoder surfaces it"
+            exif,
+            Some(b"POST".to_vec()),
+            "{w}x{h} x{frames}: one-shot Exif"
         );
+        assert_eq!(xmp, Some(b"<x/>".to_vec()));
     }
-    // The large one is the reviewer's over-claim: the one-shot decode misses it.
-    let anim = animation(256, 256, 3);
-    let bytes = container(|o| {
-        bx(o, b"jxlc", &anim);
-        bx(o, b"Exif", &exif_with(b"POST"));
-    });
-    assert_eq!(decode_meta(&bytes).unwrap().0, None);
 }
 
 /// Finding 2: under `Components` a broken trailing gain map fails the decode;
@@ -1394,4 +1409,54 @@ fn memory_limit_does_not_turn_malformed_input_into_errors() {
         }
     }
     assert!(n >= 15);
+}
+
+/// Probing and one-shot decode accept a valid profile above the old 1 MiB cap.
+#[test]
+fn large_icc_probe_and_decode_agree() {
+    let mut icc = moxcms::ColorProfile::new_display_p3().encode().unwrap();
+    icc.resize(2 << 20, 0);
+    let size = u32::try_from(icc.len()).unwrap();
+    icc[..4].copy_from_slice(&size.to_be_bytes());
+    let pixels = [200, 30, 90];
+    // The low-level encoder keeps the ICC bytes explicitly; the wrapper
+    // can canonicalize a recognized matrix profile to an enum header.
+    let metadata = jxl_encoder::ImageMetadata::default().with_icc_profile(&icc);
+    let encoded = jxl_encoder::LosslessConfig::new()
+        .encode_request(1, 1, jxl_encoder::PixelLayout::Rgb8)
+        .with_metadata(&metadata)
+        .encode(&pixels)
+        .unwrap();
+    let info = zenjxl::probe(&encoded).expect("large valid ICC probe");
+    assert!(
+        info.icc_profile.as_deref() == Some(icc.as_slice()),
+        "probe ICC differs"
+    );
+    let decoded = zenjxl::decode(&encoded, None, &[zenpixels::PixelDescriptor::RGB8])
+        .expect("large valid ICC decode");
+    assert!(
+        decoded.info.icc_profile.as_deref() == Some(icc.as_slice()),
+        "decoded ICC differs"
+    );
+    assert_eq!(
+        decoded.pixels.as_slice().contiguous_bytes().as_ref(),
+        pixels
+    );
+}
+
+#[test]
+fn incomplete_later_animation_frame_preserves_first_frame_pixels() {
+    let bytes = animation(256, 256, 3);
+    let expected = zenjxl::decode(&bytes, None, &[]).unwrap();
+    let truncated = &bytes[..bytes.len() - 4];
+    let actual =
+        zenjxl::decode(truncated, None, &[]).expect("one-shot first frame remains complete");
+    assert_eq!(
+        actual.pixels.as_slice().descriptor(),
+        expected.pixels.as_slice().descriptor()
+    );
+    assert_eq!(
+        actual.pixels.as_slice().contiguous_bytes(),
+        expected.pixels.as_slice().contiguous_bytes()
+    );
 }
