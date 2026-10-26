@@ -1,6 +1,6 @@
 {
   "kind": "correctness validation, not a performance benchmark",
-  "source_commit": "e85000f44160f625c0c19091e62376657e67f52a19",
+  "source_commit": "e85000f44160f625c0c19091e62376657e67f52a",
   "host": "r7900x",
   "command": "just integration-validation",
   "export": "isolated root with immutable JXL encoder 0255e5a9, JPEG 4535ec49, butteraugli d2466a4e; shared contract ffedb4f0",
