@@ -81,17 +81,17 @@ pub enum ValidationError {
 // Internal validation helpers — only consumed by `src/codec.rs`, which
 // is itself gated on `zencodec` AND (`encode` OR `decode`). Mirror that
 // gate here so the helpers don't appear dead under any feature combo.
-#[cfg(all(feature = "zencodec", any(feature = "encode", feature = "decode")))]
+#[cfg(all(feature = "zencodec", feature = "encode"))]
 pub(crate) const GENERIC_QUALITY_RANGE: RangeInclusive<f32> = 0.0..=100.0;
-#[cfg(all(feature = "zencodec", any(feature = "encode", feature = "decode")))]
+#[cfg(all(feature = "zencodec", feature = "encode"))]
 pub(crate) const DISTANCE_RANGE: RangeInclusive<f32> = 0.0..=25.0;
-#[cfg(all(feature = "zencodec", any(feature = "encode", feature = "decode")))]
+#[cfg(all(feature = "zencodec", feature = "encode"))]
 pub(crate) const EFFORT_RANGE: RangeInclusive<i32> = 1..=10;
 
 /// Validate an `Option<f32>` field against an inclusive range.
 ///
 /// Returns `Err` if `Some(v)` is NaN or falls outside `range`.
-#[cfg(all(feature = "zencodec", any(feature = "encode", feature = "decode")))]
+#[cfg(all(feature = "zencodec", feature = "encode"))]
 pub(crate) fn check_optional_f32_range(
     value: Option<f32>,
     range: &RangeInclusive<f32>,
@@ -106,7 +106,7 @@ pub(crate) fn check_optional_f32_range(
 }
 
 /// Validate an `Option<i32>` field against an inclusive range.
-#[cfg(all(feature = "zencodec", any(feature = "encode", feature = "decode")))]
+#[cfg(all(feature = "zencodec", feature = "encode"))]
 pub(crate) fn check_optional_i32_range(
     value: Option<i32>,
     range: &RangeInclusive<i32>,

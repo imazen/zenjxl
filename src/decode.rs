@@ -741,7 +741,7 @@ pub fn decode_with_parallel(
 ///
 /// Orientation is adjusted (display geometry, Identity residual), matching the
 /// JXL decoder default. The zencodec adapter calls
-/// [`decode_with_options_oriented`] directly when it needs the un-baked
+/// `decode_with_options_oriented` directly when it needs the un-baked
 /// (Preserve) path.
 pub fn decode_with_options(
     data: &[u8],
