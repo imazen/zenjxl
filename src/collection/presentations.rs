@@ -11,6 +11,7 @@ use zencodec::collection::{
     ImageRequest, Origin, RegionRequest, SelectionError,
 };
 use zencodec::image::ImageOutput;
+use zencodec::storage::{OwnedStorage, StorageBudget};
 
 pub(super) struct JxlItems<'a> {
     data: &'a [u8],
@@ -82,27 +83,54 @@ pub(super) fn describe_header(info: &jxl::api::JxlBasicInfo) -> Result<Descripti
 
 /// Raw native channel bytes, with explicit row layout. f32 samples are compared
 /// bitwise, including NaNs; this is not a color conversion or display encoding.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub(super) struct Plane {
-    pub(super) bytes: Vec<u8>,
+    pub(super) bytes: PlaneBytes,
     pub(super) width: usize,
     pub(super) height: usize,
     pub(super) channels: usize,
     pub(super) stride: usize,
 }
 
+#[derive(Debug)]
+pub(super) enum PlaneBytes {
+    Ordinary(Vec<u32>),
+    Admitted(OwnedStorage<u32>),
+}
+impl PlaneBytes {
+    fn new(size: usize, storage: Option<&StorageBudget>) -> Result<Self, Failure> {
+        // A byte vector need not have f32 alignment. Keep aligned words as the
+        // backing allocation and borrow their bytes without changing ownership.
+        if !size.is_multiple_of(4) {
+            return Err(Error::other("native F32 plane has a partial sample").into());
+        }
+        let words = size / 4;
+        if let Some(storage) = storage {
+            return Ok(Self::Admitted(storage.filled(words, 0xa5a5_a5a5u32)?));
+        }
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(words)?;
+        bytes.resize(words, 0xa5a5_a5a5);
+        Ok(Self::Ordinary(bytes))
+    }
+    pub(super) fn as_slice(&self) -> &[u8] {
+        bytemuck::cast_slice(match self {
+            Self::Ordinary(bytes) => bytes,
+            Self::Admitted(bytes) => bytes.as_slice(),
+        })
+    }
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        bytemuck::cast_slice_mut(match self {
+            Self::Ordinary(bytes) => bytes,
+            Self::Admitted(bytes) => bytes.as_mut_slice(),
+        })
+    }
+}
+
 impl<'a> JxlItems<'a> {
     /// The view is fixed before discovery: flattened presentations and exposed
     /// layers have different cardinalities, so changing it at decode is unsound.
-    pub(super) fn open_with_stop(
-        data: &'a [u8],
-        composition: Composition,
-        limits: Limits,
-        stop: zencodec::StopToken,
-    ) -> Result<Self, Failure> {
-        Self::open_controlled(data, composition, limits, Control::new(stop))
-    }
-    fn open_controlled(
+    pub(super) fn open_controlled(
         data: &'a [u8],
         composition: Composition,
         limits: Limits,
@@ -220,7 +248,12 @@ impl<'a> JxlItems<'a> {
         // We own these buffers, so request one pixel of padding. The native
         // 13-byte padding stress path remains in the native qualification harness.
         let padding = format.color_type.samples_per_pixel() * 4;
-        let decoded = decode_next_details(decoder, &mut input, padding)?;
+        let decoded = decode_next_details(
+            decoder,
+            &mut input,
+            padding,
+            self.control.output_storage.as_ref(),
+        )?;
         self.control.check()?;
         let timing = if let Some(animation) = &info.animation {
             let ticks = self.visible[..index].iter().try_fold(
@@ -319,6 +352,7 @@ pub(super) fn decode_next_details(
     decoder: JxlDecoder<states::WithImageInfo>,
     input: &mut &[u8],
     padding: usize,
+    output_storage: Option<&StorageBudget>,
 ) -> Result<DecodedNext, Failure> {
     let format = decoder.current_pixel_format().clone();
     let frame = complete(decoder.process(input)?)?;
@@ -342,9 +376,7 @@ pub(super) fn decode_next_details(
         let size = stride
             .checked_mul(height)
             .ok_or_else(|| Error::other("plane overflow"))?;
-        let mut bytes = Vec::new();
-        bytes.try_reserve_exact(size)?;
-        bytes.resize(size, 0xa5);
+        let bytes = PlaneBytes::new(size, output_storage)?;
         planes.push(Plane {
             bytes,
             width,
@@ -358,7 +390,7 @@ pub(super) fn decode_next_details(
         .iter_mut()
         .map(|p| {
             JxlOutputBuffer::new_with_stride(
-                &mut p.bytes,
+                p.bytes.as_mut_slice(),
                 p.height,
                 p.width * p.channels * 4,
                 p.stride,

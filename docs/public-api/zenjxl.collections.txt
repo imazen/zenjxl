@@ -2,6 +2,7 @@ pub mod zenjxl::collection
 pub struct zenjxl::collection::JxlCollectionConfig
 impl zenjxl::collection::JxlCollectionConfig
 pub const fn zenjxl::collection::JxlCollectionConfig::new(usize, u64) -> Self
+pub fn zenjxl::collection::JxlCollectionConfig::with_output_storage(self, zencodec::storage::StorageBudget) -> Self
 impl zencodec::collection::factory::CollectionFactory for zenjxl::collection::JxlCollectionConfig
 pub fn zenjxl::collection::JxlCollectionConfig::formats(&self) -> &[zencodec::format::ImageFormat]
 pub fn zenjxl::collection::JxlCollectionConfig::open<'a>(&self, &'a mut dyn zencodec::source::DynReadAt, zencodec::format::ImageFormat, zencodec::collection::Composition, core::option::Option<zencodec::limits::ResourceLimits>, core::option::Option<zencodec::policy::DecodePolicy>, almost_enough::stop_token::StopToken) -> core::result::Result<zencodec::collection::erased::ErasedCollection<'a>, zencodec::collection::Cause>

@@ -37,6 +37,7 @@ use zencodec::{
     decode::DecodePolicy,
     enough::Stop,
     source::DynReadAt,
+    storage::StorageBudget,
 };
 
 /// Native discovery configuration for checked image collections.
@@ -45,9 +46,10 @@ use zencodec::{
 /// applied to each decoder, including discovery and replay; it is not a shared
 /// charge across arbitrary repeated selections. Use the shared operation's
 /// discovery allowance to bound caller-driven discovery attempts as well.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct JxlCollectionConfig {
     limits: presentations::Limits,
+    output_storage: Option<StorageBudget>,
 }
 
 impl JxlCollectionConfig {
@@ -63,7 +65,23 @@ impl JxlCollectionConfig {
                 images: max_images,
                 frame_headers: max_frame_headers,
             },
+            output_storage: None,
         }
+    }
+
+    /// Admit packed color and auxiliary output allocations before native writes.
+    ///
+    /// Clones and opened collections share this allowance. Charges remain with
+    /// returned images until their last clone drops, even after the registry or
+    /// decoder is gone. Failure retains a typed `StorageError`; no unaccounted
+    /// fallback is attempted. Omitting this setting keeps ordinary allocation.
+    ///
+    /// This bounds output payloads including padding. It excludes native work
+    /// buffers, source bytes, discovery, ICC/metadata and small owner allocations;
+    /// it does not satisfy the shared whole-memory requirement.
+    pub fn with_output_storage(mut self, storage: StorageBudget) -> Self {
+        self.output_storage = Some(storage);
+        self
     }
 }
 
@@ -93,14 +111,15 @@ impl CollectionFactory for JxlCollectionConfig {
                 .check_input_size(u64::try_from(bytes.len())?)
                 .map_err(At::wrap)?;
         }
+        let control = Control::new(stop, self.output_storage.clone());
         match view {
             Composition::Composited => Ok(ErasedCollection::new(
-                presentations::JxlItems::open_with_stop(bytes, view, self.limits, stop)?,
+                presentations::JxlItems::open_controlled(bytes, view, self.limits, control)?,
             )),
             Composition::Uncomposited => Ok(ErasedCollection::new(layers::JxlLayers::open(
                 bytes,
                 self.limits,
-                stop,
+                control,
             )?)),
             _ => Err(Box::new(SelectionError::UnsupportedComposition)),
         }
@@ -160,10 +179,14 @@ impl Error for NativeState {}
 #[derive(Clone)]
 struct Control {
     stop: StopToken,
+    output_storage: Option<StorageBudget>,
 }
 impl Control {
-    fn new(stop: StopToken) -> Self {
-        Self { stop }
+    fn new(stop: StopToken, output_storage: Option<StorageBudget>) -> Self {
+        Self {
+            stop,
+            output_storage,
+        }
     }
     fn check(&self) -> Result<(), Cause> {
         self.stop

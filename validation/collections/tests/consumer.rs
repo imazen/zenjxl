@@ -656,3 +656,275 @@ fn native_discovery_allowances_latch_failure_instead_of_reporting_exhaustion() {
         assert!(collection.next(&mut cursor).is_err(), "failed scan resumed");
     }
 }
+
+fn output_storage_size(image: &ImageOutput) -> (usize, usize) {
+    let mapped = image.map().unwrap();
+    let bytes = (0..mapped.plane_count())
+        .map(|index| {
+            let plane = mapped.plane(index).unwrap().unwrap();
+            plane.samples.stride_bytes() * plane.samples.dimensions().1
+        })
+        .sum();
+    (bytes, mapped.plane_count())
+}
+fn ordinary_first(bytes: &[u8], view: Composition) -> ImageOutput {
+    let mut source = ReadAtShim(SliceReadAt::new(bytes));
+    codecs()
+        .open_collection(
+            ImageFormat::Jxl,
+            &mut source,
+            request(view),
+            PolicySet::new(),
+            stop(),
+        )
+        .unwrap()
+        .first_image(&ImageRequest::new())
+        .unwrap()
+        .expect("fixture has a first image")
+        .into_output()
+}
+
+#[test]
+fn output_storage_follows_last_clone_across_registry_drop_and_new_operations() {
+    use zencodec::storage::{StorageBudget, StorageError};
+    for name in [
+        "named_frame_test.jxl",
+        "conformance_test_images/cmyk_layers.jxl",
+    ] {
+        for view in [Composition::Composited, Composition::Uncomposited] {
+            let bytes = fixture(name);
+            let expected = ordinary_first(&bytes, view);
+            let (size, objects) = output_storage_size(&expected);
+            let storage = StorageBudget::new(size, objects);
+            let config = JxlCollectionConfig::new(64, 64).with_output_storage(storage.clone());
+            let registry = CodecSet::new().with_collection(config.clone());
+            let mut source = ReadAtShim(SliceReadAt::new(&bytes));
+            let address = Cell::new(0usize);
+            let resolver = |question: Question<'_>| -> Result<Decision, At<Infallible>> {
+                let Question::Image { image, .. } = question else {
+                    panic!("wrong policy boundary")
+                };
+                assert_eq!(
+                    (storage.reserved_bytes(), storage.reserved_objects()),
+                    (size, objects)
+                );
+                address.set(
+                    image
+                        .with_pixels(|p| p.as_strided_bytes().as_ptr() as usize)
+                        .unwrap(),
+                );
+                assert_eq!(address.get() % core::mem::align_of::<f32>(), 0);
+                Ok(Decision::UsePreset)
+            };
+            let mut opened = registry
+                .open_collection(
+                    ImageFormat::Jxl,
+                    &mut source,
+                    request(view),
+                    resolver,
+                    stop(),
+                )
+                .unwrap();
+            drop(registry);
+            let image = opened
+                .first_image(&ImageRequest::new())
+                .unwrap()
+                .expect("fixture has a first image")
+                .into_output();
+            assert_eq!(samples(&image), samples(&expected));
+            assert_eq!(
+                image
+                    .with_pixels(|p| p.as_strided_bytes().as_ptr() as usize)
+                    .unwrap(),
+                address.get()
+            );
+            let held = image.clone();
+            drop(image);
+            drop(opened);
+            assert_eq!(
+                (storage.reserved_bytes(), storage.reserved_objects()),
+                (size, objects)
+            );
+
+            let mut other_source = ReadAtShim(SliceReadAt::new(&bytes));
+            let mut other = CodecSet::new()
+                .with_collection(config)
+                .open_collection(
+                    ImageFormat::Jxl,
+                    &mut other_source,
+                    request(view),
+                    PolicySet::new(),
+                    stop(),
+                )
+                .unwrap();
+            let mut cursor = other.images().unwrap();
+            let id = other.next(&mut cursor).unwrap().unwrap();
+            let error = other.decode(&id, &ImageRequest::new()).unwrap_err();
+            assert!(zencodec::find_cause::<StorageError>(&error).is_some());
+            assert!(!other.is_finished(), "allocation refusal is request-local");
+            assert_eq!(samples(&held), samples(&expected));
+            drop(held);
+            assert_eq!(
+                (storage.reserved_bytes(), storage.reserved_objects()),
+                (0, 0)
+            );
+            let next = other.decode(&id, &ImageRequest::new()).unwrap();
+            assert_eq!(samples(&next), samples(&expected));
+            assert_eq!(
+                (storage.reserved_bytes(), storage.reserved_objects()),
+                (size, objects)
+            );
+            drop(next);
+            assert_eq!(
+                (storage.reserved_bytes(), storage.reserved_objects()),
+                (0, 0)
+            );
+        }
+    }
+}
+
+#[test]
+fn output_storage_partial_admission_refuses_without_unaccounted_fallback() {
+    use zencodec::storage::{StorageBudget, StorageError};
+    let bytes = fixture("conformance_test_images/cmyk_layers.jxl");
+    for view in [Composition::Composited, Composition::Uncomposited] {
+        let expected = ordinary_first(&bytes, view);
+        let (size, objects) = output_storage_size(&expected);
+        assert!(
+            objects > 1,
+            "fixture must exercise partial auxiliary allocation"
+        );
+        for (byte_limit, object_limit) in [
+            (0, objects),
+            (size - 1, objects),
+            (size, 0),
+            (size, objects - 1),
+        ] {
+            let storage = StorageBudget::new(byte_limit, object_limit);
+            let registry = CodecSet::new().with_collection(
+                JxlCollectionConfig::new(64, 64).with_output_storage(storage.clone()),
+            );
+            let calls = Cell::new(0usize);
+            let resolver = |_: Question<'_>| -> Result<Decision, At<Infallible>> {
+                calls.set(calls.get() + 1);
+                Ok(Decision::UsePreset)
+            };
+            let mut source = ReadAtShim(SliceReadAt::new(&bytes));
+            let mut opened = registry
+                .open_collection(
+                    ImageFormat::Jxl,
+                    &mut source,
+                    request(view),
+                    resolver,
+                    stop(),
+                )
+                .unwrap();
+            let error = opened.first_image(&ImageRequest::new()).unwrap_err();
+            let cause = zencodec::find_cause::<StorageError>(&error).unwrap();
+            if byte_limit < size {
+                assert!(matches!(cause, StorageError::Bytes { .. }));
+            } else {
+                assert!(matches!(cause, StorageError::Objects { .. }));
+            }
+            assert_eq!(calls.get(), 0, "refused allocation reached publication");
+            assert_eq!(
+                (storage.reserved_bytes(), storage.reserved_objects()),
+                (0, 0)
+            );
+        }
+    }
+}
+
+#[derive(Clone)]
+struct StopAfterOutput {
+    storage: zencodec::storage::StorageBudget,
+    observed: Arc<AtomicUsize>,
+}
+impl Stop for StopAfterOutput {
+    fn check(&self) -> Result<(), StopReason> {
+        if self.storage.reserved_bytes() > 0 {
+            self.observed.fetch_add(1, Ordering::SeqCst);
+            Err(StopReason::Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+}
+#[test]
+fn output_storage_releases_unpublished_samples_on_stop_decline_error_and_unwind() {
+    use zencodec::{operation::Decline, storage::StorageBudget};
+    let bytes = fixture("conformance_test_images/cmyk_layers.jxl");
+    for view in [Composition::Composited, Composition::Uncomposited] {
+        let expected = ordinary_first(&bytes, view);
+        let (size, objects) = output_storage_size(&expected);
+        let storage = StorageBudget::new(size, objects);
+        let registry = CodecSet::new()
+            .with_collection(JxlCollectionConfig::new(64, 64).with_output_storage(storage.clone()));
+        let observed = Arc::new(AtomicUsize::new(0));
+        let token = StopToken::new(StopAfterOutput {
+            storage: storage.clone(),
+            observed: observed.clone(),
+        });
+        let mut source = ReadAtShim(SliceReadAt::new(&bytes));
+        let mut opened = registry
+            .open_collection(
+                ImageFormat::Jxl,
+                &mut source,
+                request(view),
+                PolicySet::new(),
+                token,
+            )
+            .unwrap();
+        let error = opened.first_image(&ImageRequest::new()).unwrap_err();
+        assert_eq!(error.error().stop_reason(), Some(StopReason::Cancelled));
+        assert!(opened.is_finished());
+        assert!(observed.load(Ordering::SeqCst) > 0);
+        assert_eq!(
+            (storage.reserved_bytes(), storage.reserved_objects()),
+            (0, 0)
+        );
+
+        for mode in 0..3 {
+            let mut source = ReadAtShim(SliceReadAt::new(&bytes));
+            let resolver = |_: Question<'_>| -> Result<Decision, At<PrivatePolicyError>> {
+                assert_eq!(
+                    (storage.reserved_bytes(), storage.reserved_objects()),
+                    (size, objects)
+                );
+                match mode {
+                    0 => Ok(Decision::decline(Decline::ApplicationRule)),
+                    1 => Err(At::wrap(PrivatePolicyError)),
+                    _ => panic!("controlled policy unwind with admitted native output"),
+                }
+            };
+            let mut opened = registry
+                .open_collection(
+                    ImageFormat::Jxl,
+                    &mut source,
+                    request(view),
+                    resolver,
+                    stop(),
+                )
+                .unwrap();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                opened.first_image(&ImageRequest::new())
+            }));
+            if mode == 2 {
+                assert!(result.is_err());
+                assert!(opened.is_finished());
+            } else {
+                let error = result.unwrap().unwrap_err();
+                assert_eq!(error.error().stage, CollectionStage::Policy);
+                if mode == 0 {
+                    assert!(zencodec::find_cause::<Decline>(&error).is_some());
+                } else {
+                    assert!(zencodec::find_cause::<At<PrivatePolicyError>>(&error).is_some());
+                }
+            }
+            assert_eq!(
+                (storage.reserved_bytes(), storage.reserved_objects()),
+                (0, 0)
+            );
+        }
+    }
+}

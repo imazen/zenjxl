@@ -7,7 +7,7 @@ and F32 layer path from [decoder PR68](https://github.com/imazen/zenjxl-decoder/
 and explicit CMYK polarity from [zenpixels PR93](https://github.com/imazen/zenpixels/pull/93).
 
 The root integration build also needs zencodec revision
-`ffedb4f0d4e2bc89fa450e947251945a15d61c18` checked out at `.zencodec`.
+`1f46337b9d4fae225a007dacd56a7a2298a4bf34` checked out at `.zencodec`.
 Its root patches replace both registry and Git dependencies with that checkout.
 This keeps HDR reconstruction, JPEG metadata and the collection adapter on one
 shared type identity without changing codec math. `just contract-identity`
@@ -15,9 +15,11 @@ checks the resolved graph. Cargo applies patches only at the consuming workspace
 root, so another application must carry its own temporary overrides until these
 dependencies are released. The standalone collection consumer has its own pins
 and does not need this checkout.
-The [integration receipt](../benchmarks/collection_integration_2026-10-26.json)
+The [earlier integration receipt](../benchmarks/collection_integration_2026-10-26.json)
 records strict all-feature lint and the existing gain-map, JPEG-lossy, lossless
-round-trip and alpha-mode regression results with this graph.
+round-trip and alpha-mode regression results with its recorded graph. The
+[current output-storage receipt](../benchmarks/collection_output_storage_2026-10-26.json)
+records the updated pin, aligned allocation controls and final integration lint.
 
 ```rust
 use zenjxl::collection::JxlCollectionConfig;
@@ -47,6 +49,23 @@ Hidden frames consume header work even when there is one visible presentation.
 Each independent selected decode gets its own native decoder and header bound.
 The shared allowance in `OpenRequest` bounds discovery calls, including cached
 calls. None is a byte budget or a guarantee about repeated decode cost.
+
+To bound retained output payloads, share a `zencodec::storage::StorageBudget`
+with `JxlCollectionConfig::with_output_storage(storage.clone())`. Each selected
+decode admits color and auxiliary buffers, including padding, before native
+reconstruction writes them. F32 backing storage is word-aligned in both
+allocation modes; mapping does not rely on incidental byte-vector alignment.
+The returned `ImageOutput` owns those same buffers;
+its last clone releases the charge even if the registry and collection have
+already dropped. Cloned factory configs and separately opened operations share
+the allowance. A `StorageError` is recoverable once enough held images drop;
+the adapter does not retry with unaccounted storage.
+
+This setting has a narrow scope: output payloads. It does not admit native
+reference/work buffers, source bytes, discovery, profiles, metadata or small
+owner allocations, and therefore does not satisfy `max_memory_bytes`. Default
+allocation remains available when no output allowance is configured. Both paths
+use the same interpretation and publication policy, without a second resolver.
 
 To browse before decoding, keep the opened operation, create an `images()`
 cursor, call `next()` and then `describe(&id)`. Descriptions retain stored

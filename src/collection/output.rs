@@ -1,7 +1,7 @@
 //! Interpret actual requested output, not merely the embedded source profile.
 use super::presentations::Plane;
 use super::{Failure, NativeState as Error};
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use jxl::api::{
     ExtraChannel, JxlBasicInfo, JxlBitDepth, JxlColorProfile, JxlColorType, JxlExtraChannelDetails,
     JxlPixelFormat,
@@ -9,11 +9,11 @@ use jxl::api::{
 use zencodec::collection::ImageId;
 use zencodec::image::{
     Auxiliary, AuxiliaryKind, ColorContribution, ImageGeometry, ImageInterpretation, ImageOutput,
-    Rect, SourcePrecision, Values,
+    OutputError, PackedImageOwner, Rect, SourcePrecision, ValueSlice,
 };
 use zenpixels::{
-    AlphaMode, ChannelLayout, ChannelType, ColorContext, ColorPrimaries, Orientation, PixelBuffer,
-    PixelBufferParts, PixelDescriptor, PixelFormat, TransferFunction,
+    AlphaMode, ChannelLayout, ChannelType, ColorContext, ColorPrimaries, Orientation,
+    PixelDescriptor, PixelFormat, PixelSlice, TransferFunction,
 };
 
 /// Retain native source facts without treating them as an output profile or
@@ -99,11 +99,11 @@ pub(super) fn adopt(
         .with_alpha(alpha)
         .with_transfer(TransferFunction::Unknown)
         .with_primaries(ColorPrimaries::Unknown);
-    let mut parts = PixelBufferParts::new(color.bytes, width, height, color.stride, descriptor);
-    parts.color_context = Some(Arc::new(ColorContext::from_icc(Arc::<[u8]>::from(icc))));
-    let pixels = PixelBuffer::try_from_parts(parts).map_err(|e| e.without_buffer())?;
+    let context = Arc::new(ColorContext::from_icc(Arc::<[u8]>::from(icc)));
     let mut extras = Vec::new();
     extras.try_reserve_exact(info.extra_channels.len())?;
+    let mut extra_planes = Vec::new();
+    extra_planes.try_reserve_exact(info.extra_channels.len())?;
     if source.extra_details.len() != info.extra_channels.len() {
         return Err(Error::other("extra-channel interpretation count differs from source").into());
     }
@@ -137,33 +137,28 @@ pub(super) fn adopt(
             ExtraChannel::Thermal => AuxiliaryKind::Thermal,
             other => AuxiliaryKind::Unknown(other as u32),
         };
-        extras.push((
-            Auxiliary {
-                kind,
-                name: ec.name.clone(),
-                source_precision: match details.bit_depth {
-                    JxlBitDepth::Int { bits_per_sample } => SourcePrecision::Integer {
-                        bits: bits_per_sample,
-                        signed: false,
-                    },
-                    JxlBitDepth::Float {
-                        bits_per_sample,
-                        exponent_bits_per_sample,
-                    } => SourcePrecision::Float {
-                        bits: bits_per_sample,
-                        exponent_bits: exponent_bits_per_sample,
-                    },
+        extras.push(Auxiliary {
+            kind,
+            name: ec.name.clone(),
+            source_precision: match details.bit_depth {
+                JxlBitDepth::Int { bits_per_sample } => SourcePrecision::Integer {
+                    bits: bits_per_sample,
+                    signed: false,
                 },
-                source_dim_shift: ec.dim_shift,
+                JxlBitDepth::Float {
+                    bits_per_sample,
+                    exponent_bits_per_sample,
+                } => SourcePrecision::Float {
+                    bits: bits_per_sample,
+                    exponent_bits: exponent_bits_per_sample,
+                },
             },
-            Values::new(
-                plane.bytes,
-                u32::try_from(plane.width)?,
-                u32::try_from(plane.height)?,
-                plane.stride,
-                ChannelType::F32,
-            )?,
-        ));
+            source_dim_shift: ec.dim_shift,
+        });
+        // Validate the addressable public dimensions before publishing the owner.
+        u32::try_from(plane.width)?;
+        u32::try_from(plane.height)?;
+        extra_planes.push(plane);
     }
     if planes.next().is_some() {
         return Err(Error::other("unidentified native extra plane").into());
@@ -201,7 +196,57 @@ pub(super) fn adopt(
     if let Some(layer) = layer {
         interpretation.source_details.insert(layer);
     }
-    ImageOutput::packed(pixels, extras, interpretation).map_err(Into::into)
+    ImageOutput::from_packed_owner(
+        Packed {
+            color,
+            extras: extra_planes,
+            descriptor,
+            context,
+        },
+        extras,
+        interpretation,
+    )
+    .map_err(Into::into)
+}
+
+// Own the original buffers, including any admission reservations. There is no
+// Vec extraction/copy between native reconstruction and shared publication.
+struct Packed {
+    color: Plane,
+    extras: Vec<Plane>,
+    descriptor: PixelDescriptor,
+    context: Arc<ColorContext>,
+}
+impl PackedImageOwner for Packed {
+    fn pixels(&self) -> Result<PixelSlice<'_>, zencodec::At<OutputError>> {
+        PixelSlice::new(
+            self.color.bytes.as_slice(),
+            self.color.width as u32,
+            self.color.height as u32,
+            self.color.stride,
+            self.descriptor,
+        )
+        .map(|p| p.with_color_context(self.context.clone()))
+        .map_err(|e| {
+            zencodec::At::wrap(OutputError::Mapping(zencodec::frame::MapError::Backend(
+                Box::new(e),
+            )))
+        })
+    }
+    fn auxiliary(&self, index: usize) -> Result<Option<ValueSlice<'_>>, zencodec::At<OutputError>> {
+        self.extras
+            .get(index)
+            .map(|plane| {
+                ValueSlice::new(
+                    plane.bytes.as_slice(),
+                    plane.width as u32,
+                    plane.height as u32,
+                    plane.stride,
+                    ChannelType::F32,
+                )
+            })
+            .transpose()
+    }
 }
 
 fn alpha_mode(associated: bool) -> AlphaMode {

@@ -33,6 +33,12 @@ collection-cross-validation:
 collection-doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path validation/collections/Cargo.toml --no-deps -p zenjxl
 
+collection-owner-contract-check:
+    just collection-portability
+    just collection-doc
+    just collection-api docs/public-api/zenjxl.collections.txt
+    cargo fmt --manifest-path validation/collections/Cargo.toml -p zenjxl-collection-validation -- --check
+
 # Source-derived review surface for the optional collection feature.
 collection-api output:
     #!/usr/bin/env bash
@@ -48,9 +54,12 @@ integration-validation-sync destination:
     rsync -a --exclude .git --exclude .jj --exclude .workongoing --exclude target --exclude .zencodec --exclude Cargo.lock ./ "{{destination}}/"
 
 integration-validation:
+    just integration-check
+    cargo test --all-features --test gain_map_render --test readme_examples --test lossless_verify --test alpha_axes_class_conditional --test jpeg_lossy
+
+integration-check:
     just contract-identity
     cargo clippy --all-features --all-targets -- -D warnings
-    cargo test --all-features --test gain_map_render --test readme_examples --test lossless_verify --test alpha_axes_class_conditional --test jpeg_lossy
 
 contract-identity:
     #!/usr/bin/env bash

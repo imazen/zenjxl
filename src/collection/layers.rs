@@ -7,12 +7,12 @@ use super::presentations::{
 use super::{Control, Failure, NativeState as Error, located};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use jxl::api::{ExtraChannel, JxlColorType, JxlDecoder, JxlLayerInfo, states};
+use zencodec::At;
 use zencodec::collection::{
     Collection, CollectionError, Composition, ImageDescription as Description, ImageId,
     ImageRequest, Origin, RegionRequest, SelectionError,
 };
 use zencodec::image::ImageOutput;
-use zencodec::{At, StopToken};
 
 pub(super) struct JxlLayers<'a> {
     bytes: &'a [u8],
@@ -45,8 +45,7 @@ pub(super) struct Cursor {
 }
 
 impl<'a> JxlLayers<'a> {
-    pub(super) fn open(bytes: &'a [u8], limits: Limits, stop: StopToken) -> Result<Self, Failure> {
-        let control = Control::new(stop);
+    pub(super) fn open(bytes: &'a [u8], limits: Limits, control: Control) -> Result<Self, Failure> {
         control.check()?;
         let options = controlled_options(&control, limits)
             .with_coalescing(false)
@@ -158,6 +157,7 @@ impl<'a> JxlLayers<'a> {
             decoder,
             &mut input,
             format.color_type.samples_per_pixel() * 4,
+            self.control.output_storage.as_ref(),
         )?;
         self.control.check()?;
         if decoded.layer != *selected {

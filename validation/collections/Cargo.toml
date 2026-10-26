@@ -15,7 +15,7 @@ zenpixels = ">=0.2.17, <0.4.0"
 codec-corpus = "1.1.0"
 
 [patch.crates-io]
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "ffedb4f0d4e2bc89fa450e947251945a15d61c18" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "1f46337b9d4fae225a007dacd56a7a2298a4bf34" }
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "284a0598abf441dc886755b1e65c34dbdf6ce94d" }
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "284a0598abf441dc886755b1e65c34dbdf6ce94d" }
 zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "fe819360581acb3796ea2925f2a81f44f0a430e6" }
