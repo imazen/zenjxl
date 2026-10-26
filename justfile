@@ -39,6 +39,12 @@ collection-owner-contract-check:
     just collection-api docs/public-api/zenjxl.collections.txt
     cargo fmt --manifest-path validation/collections/Cargo.toml -p zenjxl-collection-validation -- --check
 
+collection-context-check:
+    rustfmt --edition 2024 src/collection/mod.rs
+    cargo fmt --manifest-path validation/collections/Cargo.toml -p zenjxl-collection-validation
+    just collection-validation
+    just collection-owner-contract-check
+
 # Source-derived review surface for the optional collection feature.
 collection-api output:
     #!/usr/bin/env bash

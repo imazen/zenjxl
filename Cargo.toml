@@ -19,7 +19,7 @@ include = [
 ]
 
 [dependencies]
-zenmeta = { git = "https://github.com/imazen/zencodec", rev = "1f46337b9d4fae225a007dacd56a7a2298a4bf34", default-features = false, features = ["rewrite"], optional = true }
+zenmeta = { git = "https://github.com/imazen/zencodec", rev = "27cc94e395458e33d13888e728d9e6701ca3f4e9", default-features = false, features = ["rewrite"], optional = true }
 thiserror = { version = "2.0.18", default-features = false }
 whereat = { version = "0.1.5"}
 rgb = { version = "0.8.53", default-features = false, features = ["as-bytes"] }
@@ -129,7 +129,7 @@ butteraugli = { path = "../../butteraugli/butteraugli" }
 zenanalyze = { git = "https://github.com/imazen/zenanalyze" }
 
 # Root integration build: unify registry edges and older direct git edges from
-# HDR/JPEG dependencies. CI checks out 1f46337b at .zencodec. A registry-only
+# HDR/JPEG dependencies. CI checks out 27cc94e3 at .zencodec. A registry-only
 # patch cannot replace those git edges; do not copy shared metadata types.
 # Downstream consumers supply their own root patches until these APIs release.
 [patch."https://github.com/imazen/zencodec"]
@@ -149,7 +149,7 @@ backtrace = "0.3.76"
 # [patch.crates-io] `zencodec` entry above, so both resolve to one zencodec
 # crate; swap both for the released tag (v0.1.26 before) or crates.io versions
 # before merge.
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "1f46337b9d4fae225a007dacd56a7a2298a4bf34" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "27cc94e395458e33d13888e728d9e6701ca3f4e9" }
 # Concrete `enough::Stop` token for the README cancellation example
 # (tests/readme_examples.rs compiles the documented snippets).
 almost-enough = "0.4.4"

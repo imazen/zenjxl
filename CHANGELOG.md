@@ -4,12 +4,14 @@
 
 ### Checked image collections
 
-- Add `JxlCollectionConfig::with_output_storage(StorageBudget)`. Color and
+- Honor shared `OpenRequest::with_output_storage(StorageBudget)`. Color and
   auxiliary payloads are admitted before native writes; the shared owner keeps
   charges through publication and the last image clone. Refusal is recoverable
   after held outputs drop, without an unaccounted fallback. Native workspace,
   input, metadata and owner allocations remain outside this payload budget.
   Both allocation modes use word-aligned backing storage for F32 mappings.
+  Each request supplies its own pool through one immutable registry; cloned
+  requests share admission without retaining codec-specific storage settings.
 - Enforce `max_input_bytes` on the actual immutable resident slice before
   parsing either view. Retain typed/traced `InputSize` refusal and exclude this
   handled field from mixed unsupported-configuration reports. Native workspace
@@ -113,8 +115,10 @@
 
 
 ### QUEUED BREAKING CHANGES
-- Review-only `JxlCollectionConfig` retains a shared output storage handle and
-  is `Clone` rather than `Copy`. Cloning intentionally shares the allowance.
+- Review-only `JxlCollectionConfig::with_output_storage`, introduced in
+  `7fc16265`, moves to shared `OpenRequest::with_output_storage`. The native
+  factory implements `open_with(CollectionOpenContext)`; its configuration
+  is `Copy` again and contains only codec-specific discovery limits.
 - zencodec trait impls' associated `Error` type changed from `At<JxlError>`
   to `At<zencodec::CodecError>` (the envelope, Pattern B) — breaking for code
   that names the trait impls' associated `Error` type. See *Changed* below

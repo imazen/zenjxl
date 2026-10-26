@@ -31,8 +31,8 @@ use core::{error::Error, fmt};
 use zencodec::{
     At, ImageFormat, ResourceLimits, StopToken,
     collection::{
-        Cause, CollectionError, CollectionFactory, CollectionOpenError, Composition,
-        ErasedCollection, SelectionError,
+        Cause, CollectionError, CollectionFactory, CollectionOpenContext, CollectionOpenError,
+        Composition, ErasedCollection, SelectionError,
     },
     decode::DecodePolicy,
     enough::Stop,
@@ -46,10 +46,9 @@ use zencodec::{
 /// applied to each decoder, including discovery and replay; it is not a shared
 /// charge across arbitrary repeated selections. Use the shared operation's
 /// discovery allowance to bound caller-driven discovery attempts as well.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct JxlCollectionConfig {
     limits: presentations::Limits,
-    output_storage: Option<StorageBudget>,
 }
 
 impl JxlCollectionConfig {
@@ -65,23 +64,7 @@ impl JxlCollectionConfig {
                 images: max_images,
                 frame_headers: max_frame_headers,
             },
-            output_storage: None,
         }
-    }
-
-    /// Admit packed color and auxiliary output allocations before native writes.
-    ///
-    /// Clones and opened collections share this allowance. Charges remain with
-    /// returned images until their last clone drops, even after the registry or
-    /// decoder is gone. Failure retains a typed `StorageError`; no unaccounted
-    /// fallback is attempted. Omitting this setting keeps ordinary allocation.
-    ///
-    /// This bounds output payloads including padding. It excludes native work
-    /// buffers, source bytes, discovery, ICC/metadata and small owner allocations;
-    /// it does not satisfy the shared whole-memory requirement.
-    pub fn with_output_storage(mut self, storage: StorageBudget) -> Self {
-        self.output_storage = Some(storage);
-        self
     }
 }
 
@@ -90,15 +73,20 @@ impl CollectionFactory for JxlCollectionConfig {
         &[ImageFormat::Jxl]
     }
 
-    fn open<'a>(
+    fn open_with<'a>(
         &self,
         source: &'a mut dyn DynReadAt,
-        format: ImageFormat,
-        view: Composition,
-        limits: Option<ResourceLimits>,
-        policy: Option<DecodePolicy>,
-        stop: StopToken,
+        context: CollectionOpenContext,
     ) -> Result<ErasedCollection<'a>, Cause> {
+        let CollectionOpenContext {
+            format,
+            view,
+            limits,
+            policy,
+            stop,
+            output_storage,
+            ..
+        } = context;
         require_configuration(format, limits, policy)?;
         stop.check()
             .map_err(|reason| At::wrap(zencodec::CodecError::new(None, reason.into())))?;
@@ -111,7 +99,7 @@ impl CollectionFactory for JxlCollectionConfig {
                 .check_input_size(u64::try_from(bytes.len())?)
                 .map_err(At::wrap)?;
         }
-        let control = Control::new(stop, self.output_storage.clone());
+        let control = Control::new(stop, output_storage);
         match view {
             Composition::Composited => Ok(ErasedCollection::new(
                 presentations::JxlItems::open_controlled(bytes, view, self.limits, control)?,

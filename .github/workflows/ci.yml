@@ -30,7 +30,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-11-arm]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -50,12 +50,12 @@ jobs:
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest, windows-11-arm]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Check out the shared contract revision
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: imazen/zencodec
-          ref: 1f46337b9d4fae225a007dacd56a7a2298a4bf34
+          ref: 27cc94e395458e33d13888e728d9e6701ca3f4e9
           path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
@@ -92,15 +92,15 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Clone zenjxl-decoder (test resources)
         shell: bash
         run: git clone --depth 1 https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
       - name: Check out the shared contract revision
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: imazen/zencodec
-          ref: 1f46337b9d4fae225a007dacd56a7a2298a4bf34
+          ref: 27cc94e395458e33d13888e728d9e6701ca3f4e9
           path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
@@ -130,12 +130,12 @@ jobs:
     name: Test (i686 cross)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Check out the shared contract revision
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: imazen/zencodec
-          ref: 1f46337b9d4fae225a007dacd56a7a2298a4bf34
+          ref: 27cc94e395458e33d13888e728d9e6701ca3f4e9
           path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
@@ -175,12 +175,12 @@ jobs:
     name: WASM
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Check out the shared contract revision
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: imazen/zencodec
-          ref: 1f46337b9d4fae225a007dacd56a7a2298a4bf34
+          ref: 27cc94e395458e33d13888e728d9e6701ca3f4e9
           path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
@@ -201,12 +201,12 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Check out the shared contract revision
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: imazen/zencodec
-          ref: 1f46337b9d4fae225a007dacd56a7a2298a4bf34
+          ref: 27cc94e395458e33d13888e728d9e6701ca3f4e9
           path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
@@ -238,7 +238,7 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -249,12 +249,12 @@ jobs:
     name: MSRV
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Check out the shared contract revision
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: imazen/zencodec
-          ref: 1f46337b9d4fae225a007dacd56a7a2298a4bf34
+          ref: 27cc94e395458e33d13888e728d9e6701ca3f4e9
           path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
@@ -276,14 +276,14 @@ jobs:
     name: Coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Clone zenjxl-decoder (test resources)
         run: git clone --depth 1 https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
       - name: Check out the shared contract revision
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: imazen/zencodec
-          ref: 1f46337b9d4fae225a007dacd56a7a2298a4bf34
+          ref: 27cc94e395458e33d13888e728d9e6701ca3f4e9
           path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash

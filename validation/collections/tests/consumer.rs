@@ -696,8 +696,8 @@ fn output_storage_follows_last_clone_across_registry_drop_and_new_operations() {
             let expected = ordinary_first(&bytes, view);
             let (size, objects) = output_storage_size(&expected);
             let storage = StorageBudget::new(size, objects);
-            let config = JxlCollectionConfig::new(64, 64).with_output_storage(storage.clone());
-            let registry = CodecSet::new().with_collection(config.clone());
+            let config = JxlCollectionConfig::new(64, 64);
+            let registry = CodecSet::new().with_collection(config);
             let mut source = ReadAtShim(SliceReadAt::new(&bytes));
             let address = Cell::new(0usize);
             let resolver = |question: Question<'_>| -> Result<Decision, At<Infallible>> {
@@ -720,7 +720,7 @@ fn output_storage_follows_last_clone_across_registry_drop_and_new_operations() {
                 .open_collection(
                     ImageFormat::Jxl,
                     &mut source,
-                    request(view),
+                    request(view).with_output_storage(storage.clone()),
                     resolver,
                     stop(),
                 )
@@ -752,7 +752,7 @@ fn output_storage_follows_last_clone_across_registry_drop_and_new_operations() {
                 .open_collection(
                     ImageFormat::Jxl,
                     &mut other_source,
-                    request(view),
+                    request(view).with_output_storage(storage.clone()),
                     PolicySet::new(),
                     stop(),
                 )
@@ -801,9 +801,7 @@ fn output_storage_partial_admission_refuses_without_unaccounted_fallback() {
             (size, objects - 1),
         ] {
             let storage = StorageBudget::new(byte_limit, object_limit);
-            let registry = CodecSet::new().with_collection(
-                JxlCollectionConfig::new(64, 64).with_output_storage(storage.clone()),
-            );
+            let registry = CodecSet::new().with_collection(JxlCollectionConfig::new(64, 64));
             let calls = Cell::new(0usize);
             let resolver = |_: Question<'_>| -> Result<Decision, At<Infallible>> {
                 calls.set(calls.get() + 1);
@@ -814,7 +812,7 @@ fn output_storage_partial_admission_refuses_without_unaccounted_fallback() {
                 .open_collection(
                     ImageFormat::Jxl,
                     &mut source,
-                    request(view),
+                    request(view).with_output_storage(storage.clone()),
                     resolver,
                     stop(),
                 )
@@ -858,8 +856,7 @@ fn output_storage_releases_unpublished_samples_on_stop_decline_error_and_unwind(
         let expected = ordinary_first(&bytes, view);
         let (size, objects) = output_storage_size(&expected);
         let storage = StorageBudget::new(size, objects);
-        let registry = CodecSet::new()
-            .with_collection(JxlCollectionConfig::new(64, 64).with_output_storage(storage.clone()));
+        let registry = CodecSet::new().with_collection(JxlCollectionConfig::new(64, 64));
         let observed = Arc::new(AtomicUsize::new(0));
         let token = StopToken::new(StopAfterOutput {
             storage: storage.clone(),
@@ -870,7 +867,7 @@ fn output_storage_releases_unpublished_samples_on_stop_decline_error_and_unwind(
             .open_collection(
                 ImageFormat::Jxl,
                 &mut source,
-                request(view),
+                request(view).with_output_storage(storage.clone()),
                 PolicySet::new(),
                 token,
             )
@@ -901,7 +898,7 @@ fn output_storage_releases_unpublished_samples_on_stop_decline_error_and_unwind(
                 .open_collection(
                     ImageFormat::Jxl,
                     &mut source,
-                    request(view),
+                    request(view).with_output_storage(storage.clone()),
                     resolver,
                     stop(),
                 )
@@ -927,4 +924,89 @@ fn output_storage_releases_unpublished_samples_on_stop_decline_error_and_unwind(
             );
         }
     }
+}
+
+#[test]
+fn operation_output_pools_are_independent_through_one_registry() {
+    use zencodec::storage::{StorageBudget, StorageError};
+    let bytes = fixture("conformance_test_images/cmyk_layers.jxl");
+    for view in [Composition::Composited, Composition::Uncomposited] {
+        let registry = codecs();
+        let expected = ordinary_first(&bytes, view);
+        let (size, objects) = output_storage_size(&expected);
+        let first_pool = StorageBudget::new(size, objects);
+        let second_pool = StorageBudget::new(size, objects);
+        let required = request(view).with_output_storage(first_pool.clone());
+        let decode = |request| {
+            let mut source = ReadAtShim(SliceReadAt::new(&bytes));
+            registry
+                .open_collection(
+                    ImageFormat::Jxl,
+                    &mut source,
+                    request,
+                    PolicySet::new(),
+                    stop(),
+                )
+                .unwrap()
+                .first_image(&ImageRequest::new())
+        };
+        let first = decode(required.clone()).unwrap().unwrap();
+        let full = decode(required).unwrap_err();
+        assert!(zencodec::find_cause::<StorageError>(&full).is_some());
+        let second = decode(request(view).with_output_storage(second_pool.clone()))
+            .unwrap()
+            .unwrap();
+        // A request without a pool keeps ordinary allocation. Opening does not
+        // mutate the shared registry or transfer another request's reservation.
+        let ordinary = decode(request(view)).unwrap().unwrap();
+        for image in [&first, &second, &ordinary] {
+            assert_eq!(samples(image), samples(&expected));
+        }
+        assert_eq!(first_pool.reserved_bytes(), size);
+        assert_eq!(second_pool.reserved_bytes(), size);
+        drop(first);
+        assert_eq!(
+            (first_pool.reserved_bytes(), first_pool.reserved_objects()),
+            (0, 0)
+        );
+        assert_eq!(second_pool.reserved_bytes(), size);
+        drop(second);
+        assert_eq!(
+            (second_pool.reserved_bytes(), second_pool.reserved_objects()),
+            (0, 0)
+        );
+        assert_eq!(samples(&ordinary), samples(&expected));
+    }
+}
+
+#[test]
+fn output_pool_does_not_satisfy_native_workspace_requirement() {
+    use zencodec::storage::StorageBudget;
+    let storage = StorageBudget::new(1024, 4);
+    let limits = ResourceLimits::none().with_max_memory(1024);
+    let mut source = Resident {
+        bytes: b"not a JPEG XL stream",
+        hint: None,
+    };
+    let error = codecs()
+        .with_limits(limits)
+        .open_collection(
+            ImageFormat::Jxl,
+            &mut source,
+            request(Composition::Composited).with_output_storage(storage.clone()),
+            PolicySet::new(),
+            stop(),
+        )
+        .err()
+        .expect("payload pool was mistaken for workspace admission");
+    assert_eq!(
+        zencodec::find_cause::<CollectionOpenError>(&error),
+        Some(&CollectionOpenError::UnsupportedLimits {
+            unsupported: limits
+        })
+    );
+    assert_eq!(
+        (storage.reserved_bytes(), storage.reserved_objects()),
+        (0, 0)
+    );
 }

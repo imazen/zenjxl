@@ -7,7 +7,7 @@ and F32 layer path from [decoder PR68](https://github.com/imazen/zenjxl-decoder/
 and explicit CMYK polarity from [zenpixels PR93](https://github.com/imazen/zenpixels/pull/93).
 
 The root integration build also needs zencodec revision
-`1f46337b9d4fae225a007dacd56a7a2298a4bf34` checked out at `.zencodec`.
+`27cc94e395458e33d13888e728d9e6701ca3f4e9` checked out at `.zencodec`.
 Its root patches replace both registry and Git dependencies with that checkout.
 This keeps HDR reconstruction, JPEG metadata and the collection adapter on one
 shared type identity without changing codec math. `just contract-identity`
@@ -19,7 +19,9 @@ The [earlier integration receipt](../benchmarks/collection_integration_2026-10-2
 records strict all-feature lint and the existing gain-map, JPEG-lossy, lossless
 round-trip and alpha-mode regression results with its recorded graph. The
 [current output-storage receipt](../benchmarks/collection_output_storage_2026-10-26.json)
-records the updated pin, aligned allocation controls and final integration lint.
+records the earlier codec-configured path. The [operation-level receipt](../benchmarks/collection_operation_storage_2026-10-26.json)
+retains those controls while moving storage into the shared request, and checks
+independent pools through one registry plus workspace-limit refusal.
 
 ```rust
 use zenjxl::collection::JxlCollectionConfig;
@@ -51,14 +53,15 @@ The shared allowance in `OpenRequest` bounds discovery calls, including cached
 calls. None is a byte budget or a guarantee about repeated decode cost.
 
 To bound retained output payloads, share a `zencodec::storage::StorageBudget`
-with `JxlCollectionConfig::with_output_storage(storage.clone())`. Each selected
+with `OpenRequest::with_output_storage(storage.clone())` when opening. Each selected
 decode admits color and auxiliary buffers, including padding, before native
 reconstruction writes them. F32 backing storage is word-aligned in both
 allocation modes; mapping does not rely on incidental byte-vector alignment.
 The returned `ImageOutput` owns those same buffers;
 its last clone releases the charge even if the registry and collection have
-already dropped. Cloned factory configs and separately opened operations share
-the allowance. A `StorageError` is recoverable once enough held images drop;
+already dropped. Cloned requests and operations explicitly given the same pool
+share the allowance. Separate requests can use independent pools through one
+immutable registry; no codec-specific storage setter or capability query is needed. A `StorageError` is recoverable once enough held images drop;
 the adapter does not retry with unaccounted storage.
 
 This setting has a narrow scope: output payloads. It does not admit native
