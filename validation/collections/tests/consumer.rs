@@ -304,6 +304,141 @@ fn unhandled_requirements_refuse_before_io_with_typed_located_causes() {
     );
 }
 
+struct Resident<'a> {
+    bytes: &'a [u8],
+    hint: Option<u64>,
+}
+impl DynReadAt for Resident<'_> {
+    fn read_exact_at(&mut self, _: u64, _: &mut [u8]) -> Result<(), zencodec::collection::Cause> {
+        panic!("resident input must not be read again")
+    }
+    fn len(&mut self) -> Result<u64, zencodec::collection::Cause> {
+        panic!("resident admission must not query another length")
+    }
+    fn len_hint(&self) -> Option<u64> {
+        self.hint
+    }
+    fn read_at(&mut self, _: u64, _: &mut [u8]) -> Result<usize, zencodec::collection::Cause> {
+        panic!("resident input must not be read again")
+    }
+    fn as_slice(&self) -> Option<&[u8]> {
+        Some(self.bytes)
+    }
+}
+
+#[test]
+fn resident_input_limit_uses_actual_bytes_before_native_parsing() {
+    use zencodec::LimitExceeded;
+    for view in [Composition::Composited, Composition::Uncomposited] {
+        for hint in [None, Some(0), Some(u64::MAX)] {
+            // A native parse would fail for a different reason. The input-size
+            // refusal must win before the decoder inspects these bytes.
+            for max in [0, 1, 2] {
+                let mut source = Resident {
+                    bytes: b"bad",
+                    hint,
+                };
+                let error = codecs()
+                    .with_limits(ResourceLimits::none().with_max_input_bytes(max))
+                    .open_collection(
+                        ImageFormat::Jxl,
+                        &mut source,
+                        request(view),
+                        PolicySet::new(),
+                        stop(),
+                    )
+                    .err()
+                    .expect("oversize resident input was admitted");
+                assert_eq!(
+                    zencodec::find_cause::<LimitExceeded>(&error),
+                    Some(&LimitExceeded::InputSize { actual: 3, max })
+                );
+                assert!(zencodec::find_cause::<At<LimitExceeded>>(&error).is_some());
+                assert_eq!(error.error().stage, CollectionStage::Open);
+            }
+        }
+    }
+    // Known fields are excluded from an unhandled-configuration report; mixing
+    // in an unqualified requirement still refuses without touching the source.
+    let unsupported = ResourceLimits::none().with_max_memory(1);
+    let error = codecs()
+        .with_limits(unsupported.with_max_input_bytes(0))
+        .open_collection(
+            ImageFormat::Jxl,
+            &mut NoRead,
+            request(Composition::Composited),
+            PolicySet::new(),
+            stop(),
+        )
+        .err()
+        .unwrap();
+    assert_eq!(
+        zencodec::find_cause::<CollectionOpenError>(&error),
+        Some(&CollectionOpenError::UnsupportedLimits { unsupported })
+    );
+    let error = codecs()
+        .with_limits(ResourceLimits::none().with_max_input_bytes(1))
+        .open_collection(
+            ImageFormat::Jxl,
+            &mut NoRead,
+            request(Composition::Composited),
+            PolicySet::new(),
+            stop(),
+        )
+        .err()
+        .unwrap();
+    assert_eq!(
+        zencodec::find_cause::<CollectionOpenError>(&error),
+        Some(&CollectionOpenError::ResidentInputRequired)
+    );
+}
+
+#[test]
+fn resident_input_limit_boundary_preserves_both_views_and_native_samples() {
+    let bytes = fixture("named_frame_test.jxl");
+    for view in [Composition::Composited, Composition::Uncomposited] {
+        let mut source = ReadAtShim(SliceReadAt::new(&bytes));
+        let mut original = codecs()
+            .open_collection(
+                ImageFormat::Jxl,
+                &mut source,
+                request(view),
+                PolicySet::new(),
+                stop(),
+            )
+            .unwrap();
+        let expected = original.first_image(&ImageRequest::new()).unwrap().unwrap();
+        for hint in [Some(0), Some(u64::MAX)] {
+            for allowance in [bytes.len() as u64, bytes.len() as u64 + 1] {
+                let mut source = Resident {
+                    bytes: &bytes,
+                    hint,
+                };
+                let mut images = codecs()
+                    .with_limits(ResourceLimits::none().with_max_input_bytes(allowance))
+                    .open_collection(
+                        ImageFormat::Jxl,
+                        &mut source,
+                        request(view),
+                        PolicySet::new(),
+                        stop(),
+                    )
+                    .unwrap();
+                let output = images.first_image(&ImageRequest::new()).unwrap().unwrap();
+                assert_eq!(samples(&output), samples(&expected));
+                assert_eq!(
+                    output.interpretation().geometry,
+                    expected.interpretation().geometry
+                );
+                assert_eq!(
+                    output.interpretation().placement,
+                    expected.interpretation().placement
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn foreign_id_child_and_region_refusals_leave_valid_selection_available() {
     let bytes = fixture("conformance_test_images/cmyk_layers.jxl");

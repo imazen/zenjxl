@@ -4,6 +4,10 @@
 
 ### Checked image collections
 
+- Enforce `max_input_bytes` on the actual immutable resident slice before
+  parsing either view. Retain typed/traced `InputSize` refusal and exclude this
+  handled field from mixed unsupported-configuration reports. Native workspace
+  and the other shared decode caps remain unqualified.
 - Root integration builds use one pinned checkout for registry and Git shared
   contract edges; CI rejects duplicate contract identities. This keeps existing
   HDR reconstruction compatible with the collection feature. Pixel ownership

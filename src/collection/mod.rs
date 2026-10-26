@@ -12,6 +12,8 @@
 //! refused. Raw layer selection replays dependencies from the start.
 //!
 //! The two native discovery allowances below are not a total memory budget.
+//! The shared input-byte cap is checked against the resident slice before parsing;
+//! it does not admit or allocate that caller-owned storage.
 //! Shared decode resource requirements and policy flags that have not been
 //! qualified are refused before native work. Inspect the retained
 //! [`zencodec::collection::CollectionOpenError`] cause for the unhandled fields.
@@ -84,6 +86,13 @@ impl CollectionFactory for JxlCollectionConfig {
             .map_err(|reason| At::wrap(zencodec::CodecError::new(None, reason.into())))?;
         let bytes = DynReadAt::as_slice(source)
             .ok_or_else(|| At::wrap(CollectionOpenError::ResidentInputRequired))?;
+        if let Some(limits) = limits {
+            // The immutable resident span is authoritative. A source length
+            // hint cannot admit a larger payload or reject a smaller one.
+            limits
+                .check_input_size(u64::try_from(bytes.len())?)
+                .map_err(At::wrap)?;
+        }
         match view {
             Composition::Composited => Ok(ErasedCollection::new(
                 presentations::JxlItems::open_with_stop(bytes, view, self.limits, stop)?,
@@ -110,6 +119,8 @@ fn require_configuration(
     if let Some(mut unsupported) = limits {
         // Explicitly encode-only; opening a collection performs no encode.
         unsupported.max_output_bytes = None;
+        // Checked against the actual resident slice before native parsing.
+        unsupported.max_input_bytes = None;
         if unsupported != ResourceLimits::none() {
             return Err(At::wrap(CollectionOpenError::UnsupportedLimits { unsupported }).into());
         }

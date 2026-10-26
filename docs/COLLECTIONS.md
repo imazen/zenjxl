@@ -72,8 +72,15 @@ Current limits are explicit:
 - Only resident input is accepted. A positioned source is not silently staged.
 - Regions and children return unsupported errors, never a full-image fallback
   or successful empty result.
-- No nontrivial shared decode resource cap or `DecodePolicy` flag is qualified
-  on this route. They fail before source I/O. No-op defaults are accepted;
+- `max_input_bytes` is checked against the actual immutable resident span before
+  native parsing. Length hints neither admit an oversized slice nor reject an
+  admitted one. This bounds input accepted by the parser; the caller already
+  owns that storage, so it is not a memory-admission guarantee.
+  [The input-limit receipt](../benchmarks/collection_input_limit_2026-10-26.json)
+  covers exact boundaries in both views, misleading hints, typed refusals,
+  unsupported mixed requests and unchanged native samples.
+- Other nontrivial shared decode resource caps and all `DecodePolicy` flags
+  remain unqualified and fail before source I/O. No-op defaults are accepted;
   `max_output_bytes` is encode-only and does not apply to opening a decoder.
 - Native decoder defaults remain in force, but do not jointly bound retained
   discovery state, replay workspace and independently retained image owners.
