@@ -265,7 +265,7 @@ fn encode_layout(cfg: &BuiltConfig, px: &[u8], w: u32, h: u32, layout: PixelLayo
 fn decode_rgba8(jxl: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     let out = zenjxl::decode(jxl, None, &[zenpixels::PixelDescriptor::RGBA8]).ok()?;
     let (w, h) = (out.info.width, out.info.height);
-    let px = out.pixels.into_vec();
+    let px = out.pixels.into_parts().data;
     (px.len() == (w as usize) * (h as usize) * 4).then_some((px, w, h))
 }
 
@@ -660,7 +660,7 @@ const ALPHA_LABELS: [&str; 6] = ["ad2", "ad10", "asq2", "asq10", "keepinv", "zer
 fn decode_rgb8(jxl: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     let out = zenjxl::decode(jxl, None, &[zenpixels::PixelDescriptor::RGB8]).ok()?;
     let (w, h) = (out.info.width, out.info.height);
-    Some((out.pixels.into_vec(), w, h))
+    Some((out.pixels.into_parts().data, w, h))
 }
 
 fn ssim2(orig: &RgbImage, jxl: &[u8]) -> f64 {

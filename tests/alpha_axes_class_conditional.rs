@@ -101,7 +101,7 @@ fn encode_cell(id: &str, px: &[u8], layout: PixelLayout) -> Vec<u8> {
 fn decode_rgba8(jxl: &[u8]) -> Vec<u8> {
     let out = zenjxl::decode(jxl, None, &[zenpixels::PixelDescriptor::RGBA8]).expect("decode");
     assert_eq!((out.info.width, out.info.height), (W as u32, H as u32));
-    let px = out.pixels.into_vec();
+    let px = out.pixels.into_parts().data;
     assert_eq!(
         px.len(),
         W * H * 4,

@@ -3686,7 +3686,7 @@ mod tests {
             };
             assert_eq!(*rendering_intent as u8, 1, "Relative intent for {cicp:?}");
             let decoded = crate::decode(output.data(), None, &[]).unwrap();
-            assert_eq!(decoded.pixels.into_vec(), [17u8, 93, 211].repeat(4));
+            assert_eq!(decoded.pixels.into_parts().data, [17u8, 93, 211].repeat(4));
         }
     }
 

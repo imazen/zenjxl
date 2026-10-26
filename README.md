@@ -55,9 +55,9 @@ let rgba: Vec<u8> = output.pixels.to_rgba8().copy_to_contiguous_bytes(); // w*h*
 // (e.g. RGB8 vs RGBA8); `width()`/`height()` give the dimensions.
 let (w, h) = (output.pixels.width(), output.pixels.height());
 let desc = output.pixels.descriptor();              // PixelDescriptor: channels + bit depth
-let native: Vec<u8> = output.pixels.into_vec();      // owned, tightly packed, w*h*desc.bytes_per_pixel()
+let native = output.pixels.into_parts();           // owns data, offset, stride and color context
 // (use `output.pixels.as_contiguous_bytes()` — `Option<&[u8]>`, `Some` only when rows
-// are unpadded — to borrow instead of taking an owned Vec.)
+// are unpadded — to borrow instead of taking ownership.)
 ```
 
 **Limits.** `max_pixels` and `max_memory_bytes` both gate up front: before any
