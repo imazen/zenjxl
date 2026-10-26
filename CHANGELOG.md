@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Checked image collections
+
+- Add optional `collections` support through `collection::JxlCollectionConfig`
+  and the shared `CodecSet`. The composition view is fixed at open: rendered
+  presentations or raw layers with signed placement, blend/reference facts,
+  auxiliary channels, native timing and explicit reversed CMYK polarity.
+- Preserve actual F32 sample/color ownership through publication policy.
+  Resident input is required; child discovery, regions and unqualified shared
+  resource/policy requirements return typed refusals. Native discovery and
+  replay have separate image-count and frame-header allowances. This is not a
+  global memory-admission or progressive-input implementation.
+- Add an isolated consumer graph with pinned contracts and native decoder.
+  Decode-only compilation no longer includes unused encode validation helpers.
+  See [the collection contract](docs/COLLECTIONS.md).
+
 ### Dependency integration
 
 - Reconstruct HDR with ultrahdr-core 0.6, enabling its explicit f16 output feature. The six gain-map rendering tests pass against the pinned current-main implementation.

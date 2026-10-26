@@ -22,6 +22,25 @@ env:
   CI: true
 
 jobs:
+  collections:
+    name: Collections (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-11-arm]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: validation/collections
+          key: collections
+      - name: Consumer contracts from the independent pinned graph
+        run: cargo test --manifest-path validation/collections/Cargo.toml
+      - name: Collection adapter lint
+        run: cargo clippy --manifest-path validation/collections/Cargo.toml -p zenjxl --lib -- -D warnings
+
   # Base tests (no-default-features, zencodec) — run on all platforms.
   test-base:
     name: Base (${{ matrix.os }})
@@ -125,6 +144,13 @@ jobs:
           ZENJXL_DECODER_DIR: ${{ github.workspace }}/../zenjxl-decoder
           BUTTERAUGLI_DIR: ${{ github.workspace }}/../../butteraugli
         run: cross test --target i686-unknown-linux-gnu --no-default-features --features inventory --test inventory_feature --test fuzz_regression
+      - name: Checked collection consumer (i686 cross)
+        env:
+          JXL_ENCODER_DIR: ${{ github.workspace }}/../jxl-encoder
+          ZENJPEG_DIR: ${{ github.workspace }}/../zenjpeg
+          ZENJXL_DECODER_DIR: ${{ github.workspace }}/../zenjxl-decoder
+          BUTTERAUGLI_DIR: ${{ github.workspace }}/../../butteraugli
+        run: cross test --manifest-path validation/collections/Cargo.toml --target i686-unknown-linux-gnu --test consumer
 
   wasm:
     name: WASM

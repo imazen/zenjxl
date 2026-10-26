@@ -7,9 +7,12 @@ publish = false
 [workspace]
 
 [dependencies]
-zenjxl = { path = "../..", default-features = false, features = ["decode", "zencodec"] }
+zenjxl = { path = "../..", default-features = false, features = ["collections"] }
 zencodec = { version = ">=0.1.27, <0.3.0", features = ["std"] }
 zenpixels = ">=0.2.17, <0.4.0"
+
+[dev-dependencies]
+codec-corpus = "1.1.0"
 
 [patch.crates-io]
 zencodec = { git = "https://github.com/imazen/zencodec", rev = "ffedb4f0d4e2bc89fa450e947251945a15d61c18" }

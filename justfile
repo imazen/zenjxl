@@ -17,6 +17,27 @@ collection-validation-sync destination:
 collection-validation:
     cargo test --manifest-path validation/collections/Cargo.toml
     cargo clippy --manifest-path validation/collections/Cargo.toml --all-targets -- -D warnings
+    cargo clippy --manifest-path validation/collections/Cargo.toml -p zenjxl --lib -- -D warnings
+
+collection-portability:
+    cargo check --manifest-path validation/collections/Cargo.toml --lib --target wasm32-wasip1
+    cargo check --manifest-path validation/collections/Cargo.toml --lib --target i686-unknown-linux-gnu
+
+collection-i686-validation:
+    cargo test --manifest-path validation/collections/Cargo.toml --target i686-unknown-linux-gnu --test consumer
+
+# Caller supplies a disk-backed scratch and corpus cache; no sibling source mounts.
+collection-cross-validation:
+    CROSS_CONFIG="$PWD/validation/collections/Cross.toml" cross test --manifest-path validation/collections/Cargo.toml --target i686-unknown-linux-gnu --test consumer
+
+collection-doc:
+    RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path validation/collections/Cargo.toml --no-deps -p zenjxl
+
+# Source-derived review surface for the optional collection feature.
+collection-api output:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo public-api --manifest-path validation/collections/Cargo.toml -p zenjxl -sss --color never | rg 'zenjxl::collection' > "{{output}}"
 
 # Run tests (default features: encode + decode)
 test:
