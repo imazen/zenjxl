@@ -78,6 +78,14 @@ The [standalone consumer](../validation/collections) builds away from local
 workspace patches and pins the same contract versions used by native spatial
 qualification. `just collection-validation` runs caller-facing checks and
 strict linting; `just collection-portability` checks WASI and i686 compilation.
+`just collection-cross-validation` executes the consumer on i686 using `cross`.
+Run it from the isolated export with `ZENJXL_COLLECTION_SCRATCH` and `TMPDIR`
+pointing at the same disk-backed directory, and `CODEC_CORPUS_CACHE` pointing
+at the base cache directory. The latter contains `codec-corpus/v1`. Both paths
+are mounted by `validation/collections/Cross.toml`. Running from this nested
+workspace avoids a duplicate project mount. The seven consumer cases passed
+on i686; [the validation receipt](../benchmarks/collection_portability_2026-10-26.json)
+records the exact configuration and limits of resource measurement.
 Native/reference cross-path and independent libjxl validation live in
 [zencodec's spatial harness](https://github.com/imazen/zencodec/tree/ideal-api/perf/spatial-validation).
 No performance improvement is claimed by this packaging change.

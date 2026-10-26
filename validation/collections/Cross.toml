@@ -1,3 +1,3 @@
 [build.env]
-passthrough = ["TMPDIR", "CODEC_CORPUS_DIR"]
-volumes = ["ZENJXL_COLLECTION_SCRATCH", "CODEC_CORPUS_DIR"]
+passthrough = ["TMPDIR", "CODEC_CORPUS_CACHE"]
+volumes = ["ZENJXL_COLLECTION_SCRATCH", "CODEC_CORPUS_CACHE"]

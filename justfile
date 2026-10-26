@@ -28,7 +28,7 @@ collection-i686-validation:
 
 # Caller supplies a disk-backed scratch and corpus cache; no sibling source mounts.
 collection-cross-validation:
-    CROSS_CONFIG="$PWD/validation/collections/Cross.toml" cross test --manifest-path validation/collections/Cargo.toml --target i686-unknown-linux-gnu --test consumer
+    cd validation/collections && CROSS_CONFIG="$PWD/Cross.toml" cross test --target i686-unknown-linux-gnu --test consumer
 
 collection-doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path validation/collections/Cargo.toml --no-deps -p zenjxl

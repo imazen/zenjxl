@@ -145,12 +145,13 @@ jobs:
           BUTTERAUGLI_DIR: ${{ github.workspace }}/../../butteraugli
         run: cross test --target i686-unknown-linux-gnu --no-default-features --features inventory --test inventory_feature --test fuzz_regression
       - name: Checked collection consumer (i686 cross)
-        env:
-          JXL_ENCODER_DIR: ${{ github.workspace }}/../jxl-encoder
-          ZENJPEG_DIR: ${{ github.workspace }}/../zenjpeg
-          ZENJXL_DECODER_DIR: ${{ github.workspace }}/../zenjxl-decoder
-          BUTTERAUGLI_DIR: ${{ github.workspace }}/../../butteraugli
-        run: cross test --manifest-path validation/collections/Cargo.toml --target i686-unknown-linux-gnu --test consumer
+        working-directory: validation/collections
+        run: |
+          export ZENJXL_COLLECTION_SCRATCH="$HOME/tmp/zenjxl-collections"
+          export TMPDIR="$ZENJXL_COLLECTION_SCRATCH"
+          export CODEC_CORPUS_CACHE="$HOME/.cache"
+          mkdir -p "$TMPDIR" "$CODEC_CORPUS_CACHE"
+          cross test --target i686-unknown-linux-gnu --test consumer
 
   wasm:
     name: WASM
