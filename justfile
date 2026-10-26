@@ -4,6 +4,20 @@
 default:
     @just --list
 
+# Export only this package and its standalone consumer, away from workspace patches.
+collection-validation-sync destination:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "{{destination}}/src" "{{destination}}/examples" "{{destination}}/validation/collections"
+    cp Cargo.toml "{{destination}}/"
+    rsync -a src/ "{{destination}}/src/"
+    rsync -a examples/ "{{destination}}/examples/"
+    rsync -a --exclude target validation/collections/ "{{destination}}/validation/collections/"
+
+collection-validation:
+    cargo test --manifest-path validation/collections/Cargo.toml
+    cargo clippy --manifest-path validation/collections/Cargo.toml --all-targets -- -D warnings
+
 # Run tests (default features: encode + decode)
 test:
     cargo test

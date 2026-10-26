@@ -1,0 +1,18 @@
+[package]
+name = "zenjxl-collection-validation"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+zenjxl = { path = "../..", default-features = false, features = ["decode", "zencodec"] }
+zencodec = { version = ">=0.1.27, <0.3.0", features = ["std"] }
+zenpixels = ">=0.2.17, <0.4.0"
+
+[patch.crates-io]
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "ffedb4f0d4e2bc89fa450e947251945a15d61c18" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "284a0598abf441dc886755b1e65c34dbdf6ce94d" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "284a0598abf441dc886755b1e65c34dbdf6ce94d" }
+zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "fe819360581acb3796ea2925f2a81f44f0a430e6" }
