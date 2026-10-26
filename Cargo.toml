@@ -19,7 +19,7 @@ include = [
 ]
 
 [dependencies]
-zenmeta = { git = "https://github.com/imazen/zencodec", rev = "d327434b0826a3e39633665c76f5081c0ceb34cc", default-features = false, features = ["rewrite"], optional = true }
+zenmeta = { git = "https://github.com/imazen/zencodec", rev = "ffedb4f0d4e2bc89fa450e947251945a15d61c18", default-features = false, features = ["rewrite"], optional = true }
 thiserror = { version = "2.0.18", default-features = false }
 whereat = { version = "0.1.5"}
 rgb = { version = "0.8.53", default-features = false, features = ["as-bytes"] }
@@ -69,10 +69,13 @@ ultrahdr-core = { version = "0.6.0", optional = true, default-features = false, 
 # consumes — is now published, so its path-patch was dropped and the `jxl`
 # dep above bumped to 0.3.10.)
 [patch.crates-io]
+# Collection sample ownership and explicit native CMYK polarity (zenpixels PR93).
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "284a0598abf441dc886755b1e65c34dbdf6ce94d" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "284a0598abf441dc886755b1e65c34dbdf6ce94d" }
 ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "a834b2ccedc2b99b1fec3200365f00127a6baea6" }
 # Unpublished metadata contract: one exact source for zencodec and testkit.
 # Replace both pins with the compatible published contract at release.
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "d327434b0826a3e39633665c76f5081c0ceb34cc" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "ffedb4f0d4e2bc89fa450e947251945a15d61c18" }
 jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../zenjpeg/zenjpeg" }
 # zenjxl-decoder 0.4.0 (the `reject_progressive` decode-time gate, the
@@ -83,9 +86,9 @@ zenjpeg = { path = "../zenjpeg/zenjpeg" }
 # the registry 0.3.10 and the lib fails to compile (`ErrorClass` missing;
 # that was CI's red state 2026-08-14..27). Drop this patch when
 # zenjxl-decoder 0.4.0 publishes.
-# Decoder PR62 supplies the lean header scan and codestream_length.
+# Decoder PR68 includes lean header scanning and native raw-layer output.
 # Exact pin keeps CI and local inventory behavior aligned.
-zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "f27c5c6fb56b76c952d88aa7d5231a06f7e49b51" }
+zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "fe819360581acb3796ea2925f2a81f44f0a430e6" }
 # jxl-encoder main needs butteraugli 0.9.4 (`ButteraugliReference::
 # estimated_reference_bytes`, the alloc-budget precompute API), which is not
 # on crates.io yet (latest published: 0.9.3). jxl-encoder's own workspace
@@ -135,7 +138,7 @@ backtrace = "0.3.76"
 # [patch.crates-io] `zencodec` entry above, so both resolve to one zencodec
 # crate; swap both for the released tag (v0.1.26 before) or crates.io versions
 # before merge.
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "d327434b0826a3e39633665c76f5081c0ceb34cc" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "ffedb4f0d4e2bc89fa450e947251945a15d61c18" }
 # Concrete `enough::Stop` token for the README cancellation example
 # (tests/readme_examples.rs compiles the documented snippets).
 almost-enough = "0.4.4"
@@ -161,6 +164,8 @@ fast-ssim2 = "0.8.2"
 zenjpeg-bench-utils = { path = "../zenjpeg/zenjpeg-bench-utils", default-features = false }
 
 [features]
+# Checked image collections; separate from metadata inventory and legacy decode jobs.
+collections = ["decode", "zencodec"]
 # Metadata rewriting does not require pixel decoding, encoding, or inventory.
 metadata-rewrite = ["dep:zenmeta"]
 default = ["encode", "decode"]
