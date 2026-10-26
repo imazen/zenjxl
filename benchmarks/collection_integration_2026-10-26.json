@@ -1,0 +1,20 @@
+{
+  "kind": "correctness validation, not a performance benchmark",
+  "source_commit": "e85000f44160f625c0c19091e62376657e67f52a19",
+  "host": "r7900x",
+  "command": "just integration-validation",
+  "export": "isolated root with immutable JXL encoder 0255e5a9, JPEG 4535ec49, butteraugli d2466a4e; shared contract ffedb4f0",
+  "checks": {
+    "all_feature_all_target_clippy": "passed with warnings denied",
+    "alpha_axes": 1,
+    "gain_map_render": 6,
+    "jpeg_lossy": 12,
+    "lossless_verify": 4,
+    "readme_examples": "compiled; this target has no runtime tests",
+    "shared_contract_identity": "one each: zencodec, zenmeta, zencodec-testkit, zenpixels, zenpixels-convert"
+  },
+  "exit_code": 0,
+  "run_heavy": "done rc=0 283s | peak-RSS 1.11GiB | min-avail 11955MiB | peak-load 1.39",
+  "measurement_limit": "Whole build/test process-tree resource observation, not decoder RAM or accepted codec timing.",
+  "log": "~/tmp/zenjxl-full-integration-20261026.log"
+}

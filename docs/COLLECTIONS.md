@@ -15,6 +15,9 @@ checks the resolved graph. Cargo applies patches only at the consuming workspace
 root, so another application must carry its own temporary overrides until these
 dependencies are released. The standalone collection consumer has its own pins
 and does not need this checkout.
+The [integration receipt](../benchmarks/collection_integration_2026-10-26.json)
+records strict all-feature lint and the existing gain-map, JPEG-lossy, lossless
+round-trip and alpha-mode regression results with this graph.
 
 ```rust
 use zenjxl::collection::JxlCollectionConfig;
