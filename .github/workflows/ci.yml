@@ -55,7 +55,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: imazen/zencodec
-          ref: 27cc94e395458e33d13888e728d9e6701ca3f4e9
+          ref: b2d8244eb2378093c541d141a85cfabb7bbafdf5
           path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
@@ -100,7 +100,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: imazen/zencodec
-          ref: 27cc94e395458e33d13888e728d9e6701ca3f4e9
+          ref: b2d8244eb2378093c541d141a85cfabb7bbafdf5
           path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
@@ -135,7 +135,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: imazen/zencodec
-          ref: 27cc94e395458e33d13888e728d9e6701ca3f4e9
+          ref: b2d8244eb2378093c541d141a85cfabb7bbafdf5
           path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
@@ -180,7 +180,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: imazen/zencodec
-          ref: 27cc94e395458e33d13888e728d9e6701ca3f4e9
+          ref: b2d8244eb2378093c541d141a85cfabb7bbafdf5
           path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
@@ -206,7 +206,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: imazen/zencodec
-          ref: 27cc94e395458e33d13888e728d9e6701ca3f4e9
+          ref: b2d8244eb2378093c541d141a85cfabb7bbafdf5
           path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
@@ -254,7 +254,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: imazen/zencodec
-          ref: 27cc94e395458e33d13888e728d9e6701ca3f4e9
+          ref: b2d8244eb2378093c541d141a85cfabb7bbafdf5
           path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
@@ -283,7 +283,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: imazen/zencodec
-          ref: 27cc94e395458e33d13888e728d9e6701ca3f4e9
+          ref: b2d8244eb2378093c541d141a85cfabb7bbafdf5
           path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash

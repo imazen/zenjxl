@@ -7,7 +7,7 @@ and F32 layer path from [decoder PR68](https://github.com/imazen/zenjxl-decoder/
 and explicit CMYK polarity from [zenpixels PR93](https://github.com/imazen/zenpixels/pull/93).
 
 The root integration build also needs zencodec revision
-`27cc94e395458e33d13888e728d9e6701ca3f4e9` checked out at `.zencodec`.
+`b2d8244eb2378093c541d141a85cfabb7bbafdf5` checked out at `.zencodec`.
 Its root patches replace both registry and Git dependencies with that checkout.
 This keeps HDR reconstruction, JPEG metadata and the collection adapter on one
 shared type identity without changing codec math. `just contract-identity`
@@ -63,6 +63,15 @@ already dropped. Cloned requests and operations explicitly given the same pool
 share the allowance. Separate requests can use independent pools through one
 immutable registry; no codec-specific storage setter or capability query is needed. A `StorageError` is recoverable once enough held images drop;
 the adapter does not retry with unaccounted storage.
+
+Replacing packed color now retains JXL auxiliary allocations independently.
+`ImageOutput::replace_packed_color` calls the optional owner mechanism; the
+consumer needs no additional coordination. The old native color allocation
+releases after the last original image clone drops, while auxiliary addresses,
+samples and charges remain unchanged. The replacement does not copy auxiliary
+planes. Other backends can keep inseparable storage through the same API. Both
+source and destination still coexist during conversion, and workspace admission
+remains separate.
 
 This setting has a narrow scope: output payloads. It does not admit native
 reference/work buffers, source bytes, discovery, profiles, metadata or small

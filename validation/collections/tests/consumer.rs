@@ -58,6 +58,144 @@ fn samples(image: &ImageOutput) -> Vec<Vec<u8>> {
 }
 
 #[test]
+fn replacement_releases_native_color_and_keeps_exact_independent_auxiliary_owners() {
+    use zencodec::{
+        image::PackedImageOwner,
+        storage::{SharedStorage, StorageBudget},
+    };
+    struct Color {
+        data: SharedStorage<u32>,
+        width: u32,
+        rows: u32,
+        stride: usize,
+        descriptor: zenpixels::PixelDescriptor,
+        context: Option<Arc<zenpixels::ColorContext>>,
+    }
+    impl PackedImageOwner for Color {
+        fn pixels(&self) -> Result<zenpixels::PixelSlice<'_>, At<zencodec::image::OutputError>> {
+            let pixels = zenpixels::PixelSlice::new(
+                bytemuck::cast_slice(self.data.as_slice()),
+                self.width,
+                self.rows,
+                self.stride,
+                self.descriptor,
+            )
+            .unwrap();
+            Ok(if let Some(context) = &self.context {
+                pixels.with_color_context(context.clone())
+            } else {
+                pixels
+            })
+        }
+    }
+    for (name, view) in [
+        (
+            "conformance_test_images/cmyk_layers.jxl",
+            Composition::Uncomposited,
+        ),
+        (
+            "multiple_layers_noise_spline.jxl",
+            Composition::Uncomposited,
+        ),
+        ("conformance_test_images/spot.jxl", Composition::Composited),
+        ("extra_channels.jxl", Composition::Composited),
+    ] {
+        let bytes = fixture(name);
+        let ordinary = ordinary_first(&bytes, view);
+        let (size, objects) = output_storage_size(&ordinary);
+        let expected = samples(&ordinary);
+        drop(ordinary);
+        let storage = StorageBudget::new(size, objects);
+        let destination = StorageBudget::new(size, 1);
+        let mut source = ReadAtShim(SliceReadAt::new(&bytes));
+        let mut opened = codecs()
+            .open_collection(
+                ImageFormat::Jxl,
+                &mut source,
+                request(view).with_output_storage(storage.clone()),
+                PolicySet::new(),
+                stop(),
+            )
+            .unwrap();
+        let image = opened
+            .first_image(&ImageRequest::new())
+            .unwrap()
+            .unwrap()
+            .into_output();
+        drop(opened);
+        let color = image
+            .with_pixels(|pixels| {
+                let stride = pixels.stride();
+                let mut data = destination
+                    .filled(stride * pixels.rows() as usize / 4, 0xa5a5_a5a5u32)
+                    .unwrap();
+                let output: &mut [u8] = bytemuck::cast_slice_mut(data.as_mut_slice());
+                for y in 0..pixels.rows() {
+                    let row = pixels.row(y);
+                    output[y as usize * stride..y as usize * stride + row.len()]
+                        .copy_from_slice(row);
+                }
+                Color {
+                    data: data.freeze(),
+                    width: pixels.width(),
+                    rows: pixels.rows(),
+                    stride,
+                    descriptor: pixels.descriptor(),
+                    context: pixels.color_context().cloned(),
+                }
+            })
+            .unwrap();
+        let color_bytes = color.data.charged_bytes();
+        let addresses = {
+            let map = image.map().unwrap();
+            (1..map.plane_count())
+                .map(|index| {
+                    let plane = map.plane(index).unwrap().unwrap();
+                    let Row::Bytes(row) = plane.samples.row(0).unwrap() else {
+                        panic!()
+                    };
+                    row.as_ptr() as usize
+                })
+                .collect::<Vec<_>>()
+        };
+        let original = image.clone();
+        let replaced = image.replace_packed_color(color).unwrap();
+        assert_eq!(
+            (storage.reserved_bytes(), storage.reserved_objects()),
+            (size, objects)
+        );
+        drop(original);
+        assert_eq!(
+            (storage.reserved_bytes(), storage.reserved_objects()),
+            (size - color_bytes, objects - 1)
+        );
+        assert_eq!(samples(&replaced), expected);
+        {
+            let map = replaced.map().unwrap();
+            for (offset, address) in addresses.iter().enumerate() {
+                let plane = map.plane(offset + 1).unwrap().unwrap();
+                let Row::Bytes(row) = plane.samples.row(0).unwrap() else {
+                    panic!()
+                };
+                assert_eq!(row.as_ptr() as usize, *address);
+            }
+        }
+        let held = replaced.clone();
+        drop(replaced);
+        assert_eq!(destination.reserved_bytes(), color_bytes);
+        drop(held);
+        assert_eq!(
+            (storage.reserved_bytes(), storage.reserved_objects()),
+            (0, 0)
+        );
+        assert_eq!(
+            (destination.reserved_bytes(), destination.reserved_objects()),
+            (0, 0)
+        );
+    }
+}
+
+#[test]
 fn public_collection_retains_views_interpretation_and_owned_samples() {
     for (name, view, count) in [
         (

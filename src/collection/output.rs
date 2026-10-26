@@ -8,8 +8,9 @@ use jxl::api::{
 };
 use zencodec::collection::ImageId;
 use zencodec::image::{
-    Auxiliary, AuxiliaryKind, ColorContribution, ImageGeometry, ImageInterpretation, ImageOutput,
-    OutputError, PackedImageOwner, Rect, SourcePrecision, ValueSlice,
+    Auxiliary, AuxiliaryImageOwner, AuxiliaryKind, ColorContribution, ImageGeometry,
+    ImageInterpretation, ImageOutput, OutputError, PackedImageOwner, Rect, SourcePrecision,
+    ValueSlice,
 };
 use zenpixels::{
     AlphaMode, ChannelLayout, ChannelType, ColorContext, ColorPrimaries, Orientation,
@@ -199,7 +200,7 @@ pub(super) fn adopt(
     ImageOutput::from_packed_owner(
         Packed {
             color,
-            extras: extra_planes,
+            extras: Arc::new(Extras(extra_planes)),
             descriptor,
             context,
         },
@@ -213,7 +214,7 @@ pub(super) fn adopt(
 // Vec extraction/copy between native reconstruction and shared publication.
 struct Packed {
     color: Plane,
-    extras: Vec<Plane>,
+    extras: Arc<Extras>,
     descriptor: PixelDescriptor,
     context: Arc<ColorContext>,
 }
@@ -234,7 +235,18 @@ impl PackedImageOwner for Packed {
         })
     }
     fn auxiliary(&self, index: usize) -> Result<Option<ValueSlice<'_>>, zencodec::At<OutputError>> {
-        self.extras
+        self.extras.auxiliary(index)
+    }
+    fn retain_auxiliaries(
+        &self,
+    ) -> Result<Option<Arc<dyn AuxiliaryImageOwner>>, zencodec::At<OutputError>> {
+        Ok(Some(self.extras.clone()))
+    }
+}
+struct Extras(Vec<Plane>);
+impl AuxiliaryImageOwner for Extras {
+    fn auxiliary(&self, index: usize) -> Result<Option<ValueSlice<'_>>, zencodec::At<OutputError>> {
+        self.0
             .get(index)
             .map(|plane| {
                 ValueSlice::new(

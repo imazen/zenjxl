@@ -4,6 +4,10 @@
 
 ### Checked image collections
 
+- Retain native auxiliary allocations independently when shared image output
+  replaces packed color. The old color charge releases after original clones
+  drop; auxiliary samples, addresses, interpretation and charges stay intact.
+
 - Honor shared `OpenRequest::with_output_storage(StorageBudget)`. Color and
   auxiliary payloads are admitted before native writes; the shared owner keeps
   charges through publication and the last image clone. Refusal is recoverable

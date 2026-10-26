@@ -19,7 +19,7 @@ include = [
 ]
 
 [dependencies]
-zenmeta = { git = "https://github.com/imazen/zencodec", rev = "27cc94e395458e33d13888e728d9e6701ca3f4e9", default-features = false, features = ["rewrite"], optional = true }
+zenmeta = { git = "https://github.com/imazen/zencodec", rev = "b2d8244eb2378093c541d141a85cfabb7bbafdf5", default-features = false, features = ["rewrite"], optional = true }
 thiserror = { version = "2.0.18", default-features = false }
 whereat = { version = "0.1.5"}
 rgb = { version = "0.8.53", default-features = false, features = ["as-bytes"] }
@@ -149,7 +149,7 @@ backtrace = "0.3.76"
 # [patch.crates-io] `zencodec` entry above, so both resolve to one zencodec
 # crate; swap both for the released tag (v0.1.26 before) or crates.io versions
 # before merge.
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "27cc94e395458e33d13888e728d9e6701ca3f4e9" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "b2d8244eb2378093c541d141a85cfabb7bbafdf5" }
 # Concrete `enough::Stop` token for the README cancellation example
 # (tests/readme_examples.rs compiles the documented snippets).
 almost-enough = "0.4.4"

@@ -13,9 +13,10 @@ zenpixels = ">=0.2.17, <0.4.0"
 
 [dev-dependencies]
 codec-corpus = "1.1.0"
+bytemuck = { version = "1.25.2", default-features = false }
 
 [patch.crates-io]
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "27cc94e395458e33d13888e728d9e6701ca3f4e9" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "b2d8244eb2378093c541d141a85cfabb7bbafdf5" }
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "284a0598abf441dc886755b1e65c34dbdf6ce94d" }
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "284a0598abf441dc886755b1e65c34dbdf6ce94d" }
 zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "fe819360581acb3796ea2925f2a81f44f0a430e6" }
