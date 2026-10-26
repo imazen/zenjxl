@@ -4,6 +4,11 @@
 
 ### Checked image collections
 
+- Root integration builds use one pinned checkout for registry and Git shared
+  contract edges; CI rejects duplicate contract identities. This keeps existing
+  HDR reconstruction compatible with the collection feature. Pixel ownership
+  examples retain layout/context; the JPEG scoring helper explicitly removes
+  stride padding and alignment prefixes when extracting packed RGB8 bytes.
 - Add optional `collections` support through `collection::JxlCollectionConfig`
   and the shared `CodecSet`. The composition view is fixed at open: rendered
   presentations or raw layers with signed placement, blend/reference facts,

@@ -33,7 +33,7 @@ enough = "0.4.3"
 # that patch entry's comment for why the patch remains despite 0.1.26 being
 # published.
 zencodec = { version = ">=0.1.26, <0.3.0" }
-zenpixels = { version = ">=0.2.11, <0.4.0", default-features = false, features = ["rgb"] }
+zenpixels = { version = ">=0.2.17, <0.4.0", default-features = false, features = ["rgb"] }
 # Pixel-exact orientation baking (`orient::apply_orientation`) for the zencodec
 # decode adapter's OrientationHint handling. Only the `orient` module is used
 # (no CMS / ICC db); `rgb` matches the zenpixels feature already enabled above.
@@ -75,7 +75,7 @@ zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "284a05
 ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "a834b2ccedc2b99b1fec3200365f00127a6baea6" }
 # Unpublished metadata contract: one exact source for zencodec and testkit.
 # Replace both pins with the compatible published contract at release.
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "ffedb4f0d4e2bc89fa450e947251945a15d61c18" }
+zencodec = { path = ".zencodec" }
 jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../zenjpeg/zenjpeg" }
 # zenjxl-decoder 0.4.0 (the `reject_progressive` decode-time gate, the
@@ -125,6 +125,15 @@ butteraugli = { path = "../../butteraugli/butteraugli" }
 # types in one graph — the exact breakage zenjpeg 147444fe went registry+patch
 # to end.
 zenanalyze = { git = "https://github.com/imazen/zenanalyze" }
+
+# Root integration build: unify registry edges and older direct git edges from
+# HDR/JPEG dependencies. CI checks out ffedb4f0 at .zencodec. A registry-only
+# patch cannot replace those git edges; do not copy shared metadata types.
+# Downstream consumers supply their own root patches until these APIs release.
+[patch."https://github.com/imazen/zencodec"]
+zencodec = { path = ".zencodec" }
+zenmeta = { path = ".zencodec/zenmeta" }
+zencodec-testkit = { path = ".zencodec/zencodec-testkit" }
 
 [dev-dependencies]
 # Raw-frame capture + lazy symbolization for the per-site allocation profiler

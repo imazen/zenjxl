@@ -6,6 +6,16 @@ This is review code, not a released API. It uses the qualified native selection
 and F32 layer path from [decoder PR68](https://github.com/imazen/zenjxl-decoder/pull/68)
 and explicit CMYK polarity from [zenpixels PR93](https://github.com/imazen/zenpixels/pull/93).
 
+The root integration build also needs zencodec revision
+`ffedb4f0d4e2bc89fa450e947251945a15d61c18` checked out at `.zencodec`.
+Its root patches replace both registry and Git dependencies with that checkout.
+This keeps HDR reconstruction, JPEG metadata and the collection adapter on one
+shared type identity without changing codec math. `just contract-identity`
+checks the resolved graph. Cargo applies patches only at the consuming workspace
+root, so another application must carry its own temporary overrides until these
+dependencies are released. The standalone collection consumer has its own pins
+and does not need this checkout.
+
 ```rust
 use zenjxl::collection::JxlCollectionConfig;
 use zencodec::{CodecSet, ImageFormat, StopToken, Unstoppable};

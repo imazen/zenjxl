@@ -39,6 +39,24 @@ collection-api output:
     set -euo pipefail
     cargo public-api --manifest-path validation/collections/Cargo.toml -p zenjxl -sss --color never | rg 'zenjxl::collection' > "{{output}}"
 
+# Refresh our root build export without reading live sibling worktrees.
+# Caller prepares immutable dependency checkouts at the manifest's paths.
+integration-validation-sync destination:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "{{destination}}"
+    rsync -a --exclude .git --exclude .jj --exclude .workongoing --exclude target --exclude .zencodec --exclude Cargo.lock ./ "{{destination}}/"
+
+integration-validation:
+    just contract-identity
+    cargo clippy --all-features --all-targets -- -D warnings
+    cargo test --all-features --test gain_map_render --test readme_examples --test lossless_verify --test alpha_axes_class_conditional --test jpeg_lossy
+
+contract-identity:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo metadata --format-version 1 --all-features | python3 scripts/check-contract-graph.py
+
 # Run tests (default features: encode + decode)
 test:
     cargo test

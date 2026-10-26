@@ -62,3 +62,6 @@ fuzz-*.log
 .workongoing
 .cargo/config.toml
 .jj/
+
+# Exact shared-contract checkout for the root integration build.
+.zencodec/
