@@ -113,7 +113,7 @@ fn rewrite_preserves_encoded_image_and_decoded_metadata() {
     let clean = input.clone();
     add_box(&mut input, b"xml ", b"<private>SECRET</private>");
     tk::check_metadata_rewrite(
-        zencodec::metadata_rewrite::Request::new(&input),
+        zencodec::metadata_rewrite::RewriteRequest::new(&input),
         zenjxl::metadata::rewrite,
         |out| {
             assert_eq!(out, clean, "image carrier bytes must not change");
@@ -129,7 +129,8 @@ fn rewrite_preserves_encoded_image_and_decoded_metadata() {
     )
     .unwrap();
     tk::check_metadata_rewrite(
-        zencodec::metadata_rewrite::Request::new(&input).with_policy(MetadataPolicy::PreserveExact),
+        zencodec::metadata_rewrite::RewriteRequest::new(&input)
+            .with_policy(MetadataPolicy::PreserveExact),
         zenjxl::metadata::rewrite,
         |out| {
             assert_eq!(out, input);

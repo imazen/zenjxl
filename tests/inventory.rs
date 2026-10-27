@@ -468,6 +468,7 @@ fn only_the_last_exif_box_wins() {
 }
 
 #[test]
+#[allow(deprecated)] // Exercises the legacy best-effort `with_policy` setter.
 fn policy_and_gain_map_settings_change_dispositions() {
     use zencodec::decode::DecodePolicy;
     let (bytes, _) = kitchen_sink();

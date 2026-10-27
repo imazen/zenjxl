@@ -17,7 +17,7 @@ and F32 layer path from [decoder PR68](https://github.com/imazen/zenjxl-decoder/
 and explicit CMYK polarity from [zenpixels PR93](https://github.com/imazen/zenpixels/pull/93).
 
 The root integration build also needs zencodec revision
-`fd014a1890764dbe462c2be36789294acfb3188a` checked out at `.zencodec`.
+`f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54` checked out at `.zencodec`.
 Its root patches replace both registry and Git dependencies with that checkout.
 This keeps HDR reconstruction, JPEG metadata and the collection adapter on one
 shared type identity without changing codec math. `just contract-identity`

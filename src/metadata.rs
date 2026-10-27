@@ -2,14 +2,16 @@
 // Container planner migrated from zencodecs at aa21cba0.
 use alloc::{borrow::Cow, vec::Vec};
 use core::ops::Range;
-use zencodec::metadata_rewrite::{Action, Compression, Error, Request};
+use zencodec::metadata_rewrite::{Action, Compression, Error, RewriteRequest};
 use zenmeta::rewrite::{Context as ScrubRequest, PlanBuilder as Plan};
 
 /// Plan a metadata rewrite while borrowing unchanged image data.
 ///
 /// Requires the default-off `metadata-rewrite` feature. Codestream color and
 /// HDR signaling remain opaque; unsupported transformations return an error.
-pub fn rewrite<'a>(request: &Request<'a>) -> Result<zencodec::metadata_rewrite::Plan<'a>, Error> {
+pub fn rewrite<'a>(
+    request: &RewriteRequest<'a>,
+) -> Result<zencodec::metadata_rewrite::Plan<'a>, Error> {
     let context = ScrubRequest::new(request)?;
     if !request.input().starts_with(b"\xff\x0a")
         && !request.input().starts_with(b"\0\0\0\x0cJXL \r\n\x87\n")

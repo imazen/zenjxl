@@ -1,6 +1,6 @@
 //! Generate an encoded/rewritten pair for independent libjxl comparison.
 use std::path::PathBuf;
-use zencodec::metadata_rewrite::Request;
+use zencodec::metadata_rewrite::RewriteRequest;
 
 fn main() {
     let directory = PathBuf::from(std::env::args_os().nth(1).expect("output directory"));
@@ -21,7 +21,7 @@ fn main() {
         encoded
     };
     add_box(&mut input, b"xml ", b"<private>SECRET</private>");
-    let output = zenjxl::metadata::rewrite(&Request::new(&input))
+    let output = zenjxl::metadata::rewrite(&RewriteRequest::new(&input))
         .unwrap()
         .to_vec()
         .unwrap();

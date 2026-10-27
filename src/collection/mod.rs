@@ -29,7 +29,7 @@ pub use output::{JxlRawLayer, JxlSourceFacts};
 use alloc::{boxed::Box, sync::Arc};
 use core::{error::Error, fmt};
 use zencodec::{
-    At, ImageFormat, ResourceLimits, StopToken,
+    At, ImageFormat, ResourceLimits, SharedPulse,
     collection::{
         Cause, CollectionError, CollectionFactory, CollectionOpenContext, CollectionOpenError,
         Composition, ErasedCollection, SelectionError,
@@ -83,12 +83,13 @@ impl CollectionFactory for JxlCollectionConfig {
             view,
             limits,
             policy,
-            stop,
+            pulse,
             output_storage,
             ..
         } = context;
         require_configuration(format, limits, policy)?;
-        stop.check()
+        pulse
+            .check()
             .map_err(|reason| At::wrap(zencodec::CodecError::new(None, reason.into())))?;
         let bytes = DynReadAt::as_slice(source)
             .ok_or_else(|| At::wrap(CollectionOpenError::ResidentInputRequired))?;
@@ -99,7 +100,7 @@ impl CollectionFactory for JxlCollectionConfig {
                 .check_input_size(u64::try_from(bytes.len())?)
                 .map_err(At::wrap)?;
         }
-        let control = Control::new(stop, output_storage);
+        let control = Control::new(pulse, output_storage);
         match view {
             Composition::Composited => Ok(ErasedCollection::new(
                 presentations::JxlItems::open_controlled(bytes, view, self.limits, control)?,
@@ -164,24 +165,26 @@ impl fmt::Display for NativeState {
 }
 impl Error for NativeState {}
 
+/// The opened operation's latched pulse, retained whole for every selection.
 #[derive(Clone)]
 struct Control {
-    stop: StopToken,
+    pulse: SharedPulse,
     output_storage: Option<StorageBudget>,
 }
 impl Control {
-    fn new(stop: StopToken, output_storage: Option<StorageBudget>) -> Self {
+    fn new(pulse: SharedPulse, output_storage: Option<StorageBudget>) -> Self {
         Self {
-            stop,
+            pulse,
             output_storage,
         }
     }
     fn check(&self) -> Result<(), Cause> {
-        self.stop
+        self.pulse
             .check()
             .map_err(|reason| At::wrap(zencodec::CodecError::new(None, reason.into())).into())
     }
+    /// The native decoder polls this owned view of the same latched pulse.
     fn token(&self) -> Arc<dyn Stop> {
-        Arc::new(self.stop.clone())
+        Arc::new(self.pulse.clone())
     }
 }

@@ -1,6 +1,6 @@
 #![cfg(feature = "metadata-rewrite")]
 // Reused unchanged expectations from zencodecs at aa21cba0.
-use zencodec::metadata_rewrite::{Action, Error, Request as ScrubRequest};
+use zencodec::metadata_rewrite::{Action, Error, RewriteRequest as ScrubRequest};
 trait PlanRequest<'a> {
     fn plan(&self) -> Result<zencodec::metadata_rewrite::Plan<'a>, Error>;
 }
@@ -88,7 +88,7 @@ fn cancellation_is_observed_before_parsing() {
     }
     assert_eq!(
         ScrubRequest::new(b"data")
-            .with_stop(&Stop)
+            .with_pulse(&zencodec::how_far::StopOnly::borrowed(&Stop))
             .plan()
             .unwrap_err(),
         Error::Cancelled

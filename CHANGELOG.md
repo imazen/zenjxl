@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### zencodec Pulse controls
+
+- Adopt zencodec's Pulse controls at review revision `f73a7e0e` (the
+  `.zencodec` checkout, zenmeta and the testkit). Encode and decode jobs keep
+  the `SharedPulse` from `with_pulse`; the animation traits take
+  `Option<&dyn zencodec::Pulse>`. Checked collections retain the opened
+  operation's latched `SharedPulse` from `CollectionOpenContext::pulse` for
+  every selection; native decoders poll an owned view of that same pulse.
+  Metadata rewriting names `RewriteRequest`. No stage reports progress yet.
+
 ### Checked image collections
 
 - Declare reconstructed auxiliary samples on the emitted color sample grid.
