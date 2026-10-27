@@ -4,6 +4,10 @@
 
 ### Checked image collections
 
+- Declare reconstructed auxiliary samples on the emitted color sample grid.
+  Keep source reduction factors separate; the shared output contract checks
+  dimensions and freezes registration through mapping and color replacement.
+
 - Retain native auxiliary allocations independently when shared image output
   replaces packed color. The old color charge releases after original clones
   drop; auxiliary samples, addresses, interpretation and charges stay intact.

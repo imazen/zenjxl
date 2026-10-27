@@ -45,6 +45,9 @@ fn samples(image: &ImageOutput) -> Vec<Vec<u8>> {
     (0..mapped.plane_count())
         .map(|index| {
             let plane = mapped.plane(index).unwrap().unwrap();
+            if let zencodec::image::Samples::Values(values) = &plane.samples {
+                assert_eq!(values.grid(), zencodec::image::AuxiliaryGrid::ColorSamples);
+            }
             (0..plane.samples.dimensions().1)
                 .flat_map(|y| {
                     let Row::Bytes(row) = plane.samples.row(y).unwrap() else {

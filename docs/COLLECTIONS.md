@@ -1,5 +1,15 @@
 # JPEG XL collections
 
+Emitted auxiliary planes now explicitly carry
+`zencodec::image::AuxiliaryGrid::ColorSamples`: their sample centers match the
+reconstructed color plane. Source `dim_shift` is retained separately and does
+not describe the emitted grid. Shared adoption validates dimensions, and the
+declaration survives retained owners and color replacement. This does not
+authorize auxiliary color conversion or establish a general resampling method.
+The [qualification receipt](../benchmarks/collection_auxiliary_registration_2026-10-27.json)
+records native owner/replacement checks, the shared dependency identity, existing
+alpha/HDR/JPEG/lossless regressions and WASI/i686 compilation.
+
 The optional `collections` feature implements the shared image-collection
 contract from [zencodec PR168](https://github.com/imazen/zencodec/pull/168).
 This is review code, not a released API. It uses the qualified native selection
@@ -7,7 +17,7 @@ and F32 layer path from [decoder PR68](https://github.com/imazen/zenjxl-decoder/
 and explicit CMYK polarity from [zenpixels PR93](https://github.com/imazen/zenpixels/pull/93).
 
 The root integration build also needs zencodec revision
-`b2d8244eb2378093c541d141a85cfabb7bbafdf5` checked out at `.zencodec`.
+`fd014a1890764dbe462c2be36789294acfb3188a` checked out at `.zencodec`.
 Its root patches replace both registry and Git dependencies with that checkout.
 This keeps HDR reconstruction, JPEG metadata and the collection adapter on one
 shared type identity without changing codec math. `just contract-identity`

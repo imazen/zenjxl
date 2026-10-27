@@ -8,7 +8,7 @@ use jxl::api::{
 };
 use zencodec::collection::ImageId;
 use zencodec::image::{
-    Auxiliary, AuxiliaryImageOwner, AuxiliaryKind, ColorContribution, ImageGeometry,
+    Auxiliary, AuxiliaryGrid, AuxiliaryImageOwner, AuxiliaryKind, ColorContribution, ImageGeometry,
     ImageInterpretation, ImageOutput, OutputError, PackedImageOwner, Rect, SourcePrecision,
     ValueSlice,
 };
@@ -256,6 +256,11 @@ impl AuxiliaryImageOwner for Extras {
                     plane.stride,
                     ChannelType::F32,
                 )
+                // The native requested output planes are reconstructed on the
+                // color grid, including source extra-channel upsampling. Shared
+                // adoption checks the emitted dimensions; dim_shift stays a
+                // separate source fact and is never used to infer this claim.
+                .map(|values| values.with_grid(AuxiliaryGrid::ColorSamples))
             })
             .transpose()
     }
