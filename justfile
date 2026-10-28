@@ -4,6 +4,74 @@
 default:
     @just --list
 
+# Export only this package and its standalone consumer, away from workspace patches.
+collection-validation-sync destination:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "{{destination}}/src" "{{destination}}/examples" "{{destination}}/validation/collections"
+    cp Cargo.toml "{{destination}}/"
+    rsync -a src/ "{{destination}}/src/"
+    rsync -a examples/ "{{destination}}/examples/"
+    rsync -a --exclude target validation/collections/ "{{destination}}/validation/collections/"
+
+collection-validation:
+    cargo test --manifest-path validation/collections/Cargo.toml
+    cargo clippy --manifest-path validation/collections/Cargo.toml --all-targets -- -D warnings
+    cargo clippy --manifest-path validation/collections/Cargo.toml -p zenjxl --lib -- -D warnings
+
+collection-portability:
+    cargo check --manifest-path validation/collections/Cargo.toml --lib --target wasm32-wasip1
+    cargo check --manifest-path validation/collections/Cargo.toml --lib --target i686-unknown-linux-gnu
+
+collection-i686-validation:
+    cargo test --manifest-path validation/collections/Cargo.toml --target i686-unknown-linux-gnu --test consumer
+
+# Caller supplies a disk-backed scratch and corpus cache; no sibling source mounts.
+collection-cross-validation:
+    cd validation/collections && CROSS_CONFIG="$PWD/Cross.toml" cross test --target i686-unknown-linux-gnu --test consumer
+
+collection-doc:
+    RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path validation/collections/Cargo.toml --no-deps -p zenjxl
+
+collection-owner-contract-check:
+    just collection-portability
+    just collection-doc
+    just collection-api docs/public-api/zenjxl.collections.txt
+    cargo fmt --manifest-path validation/collections/Cargo.toml -p zenjxl-collection-validation -- --check
+
+collection-context-check:
+    rustfmt --edition 2024 src/collection/mod.rs
+    cargo fmt --manifest-path validation/collections/Cargo.toml -p zenjxl-collection-validation
+    just collection-validation
+    just collection-owner-contract-check
+
+# Source-derived review surface for the optional collection feature.
+collection-api output:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo public-api --manifest-path validation/collections/Cargo.toml -p zenjxl -sss --color never | rg 'zenjxl::collection' > "{{output}}"
+
+# Refresh our root build export without reading live sibling worktrees.
+# Caller prepares immutable dependency checkouts at the manifest's paths.
+integration-validation-sync destination:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "{{destination}}"
+    rsync -a --exclude .git --exclude .jj --exclude .workongoing --exclude target --exclude .zencodec --exclude Cargo.lock ./ "{{destination}}/"
+
+integration-validation:
+    just integration-check
+    cargo test --all-features --test gain_map_render --test readme_examples --test lossless_verify --test alpha_axes_class_conditional --test jpeg_lossy
+
+integration-check:
+    just contract-identity
+    cargo clippy --all-features --all-targets -- -D warnings
+
+contract-identity:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo metadata --format-version 1 --all-features | python3 scripts/check-contract-graph.py
+
 # Run tests (default features: encode + decode)
 test:
     cargo test

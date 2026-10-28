@@ -17,7 +17,7 @@ use zenjxl::sweep::{BuiltConfig, variant_from_cell_id};
 fn decode_rgb8(cs: &[u8]) -> (Vec<Rgb<u8>>, u32, u32) {
     let out = zenjxl::decode(cs, None, &[zenpixels::PixelDescriptor::RGB8])
         .expect("decode verified-lossless output");
-    let raw = out.pixels.into_vec();
+    let raw = out.pixels.into_parts().data;
     let pixels: Vec<Rgb<u8>> = raw
         .as_chunks::<3>()
         .0

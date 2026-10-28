@@ -1,0 +1,53 @@
+{
+  "kind": "native operation output storage qualification; no performance claim",
+  "base_commit": "7fc162650b9d104d51ca2ae04fa9c292a2b4e941",
+  "core_commit": "27cc94e395458e33d13888e728d9e6701ca3f4e9",
+  "native_commit": "fe819360581acb3796ea2925f2a81f44f0a430e6",
+  "source_sha256": {
+    "src/collection/mod.rs": "1530a3cfdc3edbeb3d623ba8417b46f20b620f237e82bfac6941f32867aab386",
+    "validation/collections/tests/consumer.rs": "786db1e824bbfa01198600eb7aa3e07f55479fbe8d8f4a56c3c23427b6fffea4",
+    "Cargo.toml": "2dd2b9cb14188222304ee778e496683c4f8858ce7ec7a5cee35e118faa2c388e",
+    "validation/collections/Cargo.toml": "c4439067ed72626e07ffeb63cf3dca6726789107af14937a03c406060a35f568"
+  },
+  "commands": [
+    "just collection-context-check",
+    "just integration-check"
+  ],
+  "checks": {
+    "consumer": {
+      "passed": 14,
+      "failed": 0,
+      "ignored": 0
+    },
+    "new": "shared request pool; independent pools and ordinary allocation through one immutable registry; cloned requests share contention; payload admission does not satisfy a native-workspace requirement",
+    "retained": "ordinary/admitted samples in both views, alignment, cross-operation retention/recovery, partial admission, policy/stop/unwind release, original traced errors and all existing consumer controls",
+    "portability": "WASI and i686 compilation passed; execution not claimed for the new revision",
+    "lint": "consumer, adapter, root all-feature/all-target passed",
+    "documentation": "strict Rustdoc, API snapshot and source formatting passed",
+    "identity": "one shared core/metadata/pixel identity in root integration graph"
+  },
+  "initial_failure": "cargo fmt named the path dependency as a nested workspace member; the recipe now formats the owned native module and nested consumer separately. No test expectation changed.",
+  "runs": [
+    {
+      "file": "zenjxl-operation-storage-20261026.log",
+      "result": "run-heavy: done rc=1 1s | peak-RSS 0.02GiB | min-avail 13536MiB | peak-load 0.37",
+      "sha256": "50579a840d10d63bbc6ec726fe6653a89a41322bb1efcee14e013ae2856ba358"
+    },
+    {
+      "file": "zenjxl-operation-storage-2-20261026.log",
+      "result": "run-heavy: done rc=0 38s | peak-RSS 0.30GiB | min-avail 13117MiB | peak-load 0.94",
+      "sha256": "701688a7ed36b4b363e391ab365aa5c2453b361aa14ae3397a55f63cc9e2114c"
+    },
+    {
+      "file": "zenjxl-operation-storage-root-20261026.log",
+      "result": "run-heavy: done rc=0 7s | peak-RSS 0.70GiB | min-avail 13066MiB | peak-load 0.57",
+      "sha256": "9706b6dcb2fd4e6482635f0479aa5c820b45765985495885a85935e55cf46933"
+    }
+  ],
+  "artifact_directory": "/mnt/v/output/zencodec/platform-regions-20261026-run/packaged-operation-storage-1",
+  "limits": [
+    "native references/workspace, input, discovery, metadata and owner headers excluded from payload admission",
+    "run-heavy reports whole validation/build process tree, not native working memory",
+    "earlier codec-configured matrix remains a historical result; request-level full selection matrix follows in zencodec"
+  ]
+}

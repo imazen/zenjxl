@@ -1,0 +1,24 @@
+{
+  "kind": "correctness validation, not a performance benchmark",
+  "source_commit": "e016eeba59576ccf66c7183078ac6078a0e382b7",
+  "configuration_change": "Cross.toml mounts CODEC_CORPUS_CACHE, runs from validation/collections, and mounts a caller-owned disk scratch directory",
+  "host": "r7900x",
+  "toolchain": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "target": "i686-unknown-linux-gnu",
+  "cross_image": "ghcr.io/cross-rs/i686-unknown-linux-gnu:0.2.5",
+  "command": "cross test --target i686-unknown-linux-gnu --test consumer",
+  "working_directory": "isolated export / validation/collections",
+  "environment": {
+    "TMPDIR": "caller-owned disk scratch directory",
+    "ZENJXL_COLLECTION_SCRATCH": "same directory as TMPDIR",
+    "CODEC_CORPUS_CACHE": "base cache directory containing codec-corpus/v1",
+    "CROSS_CONFIG": "absolute path to validation/collections/Cross.toml",
+    "CROSS_CONTAINER_OPTS": "--memory=12g --memory-swap=12g --cpus=2"
+  },
+  "passed": 7,
+  "failed": 0,
+  "exit_code": 0,
+  "run_heavy": "done rc=0 77s | peak-RSS 0.04GiB | min-avail 13095MiB | peak-load 0.88",
+  "measurement_limit": "The wrapper RSS excludes Docker-managed processes; it is not decoder RSS. Container memory is capped separately. No speed or codec-memory claim is made.",
+  "log": "~/tmp/zenjxl-collection-cross-3-20261026.log"
+}

@@ -426,7 +426,11 @@ fn decode_rgb8(codestream: &[u8]) -> Result<(Vec<u8>, u32, u32), At<JxlError>> {
     let out = decode(codestream, None, &[PixelDescriptor::RGB8])?;
     let w = out.info.width;
     let h = out.info.height;
-    Ok((out.pixels.into_vec(), w, h))
+    let mut parts = out.pixels.into_contiguous().into_parts();
+    // The packed allocation can retain an alignment prefix. Move only the
+    // requested RGB8 samples; the usual offset-zero path retains the Vec.
+    parts.data.drain(..parts.offset);
+    Ok((parts.data, w, h))
 }
 
 #[inline]

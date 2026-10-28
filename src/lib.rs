@@ -21,6 +21,9 @@ whereat::define_at_crate_info!();
 mod alloc_util;
 #[cfg(feature = "zencodec")]
 mod codec;
+/// Checked presentations and raw layers through the shared collection interface.
+#[cfg(feature = "collections")]
+pub mod collection;
 #[cfg(feature = "decode")]
 mod decode;
 mod error;

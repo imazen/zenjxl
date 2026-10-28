@@ -22,6 +22,25 @@ env:
   CI: true
 
 jobs:
+  collections:
+    name: Collections (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-11-arm]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: validation/collections
+          key: collections
+      - name: Consumer contracts from the independent pinned graph
+        run: cargo test --manifest-path validation/collections/Cargo.toml
+      - name: Collection adapter lint
+        run: cargo clippy --manifest-path validation/collections/Cargo.toml -p zenjxl --lib -- -D warnings
+
   # Base tests (no-default-features, zencodec) — run on all platforms.
   test-base:
     name: Base (${{ matrix.os }})
@@ -31,7 +50,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest, windows-11-arm]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
+      - name: Check out the shared contract revision
+        uses: actions/checkout@v7
+        with:
+          repository: imazen/zencodec
+          ref: fd014a1890764dbe462c2be36789294acfb3188a
+          path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
         run: |
@@ -67,10 +92,16 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Clone zenjxl-decoder (test resources)
         shell: bash
         run: git clone --depth 1 https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
+      - name: Check out the shared contract revision
+        uses: actions/checkout@v7
+        with:
+          repository: imazen/zencodec
+          ref: fd014a1890764dbe462c2be36789294acfb3188a
+          path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
         run: |
@@ -99,7 +130,13 @@ jobs:
     name: Test (i686 cross)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
+      - name: Check out the shared contract revision
+        uses: actions/checkout@v7
+        with:
+          repository: imazen/zencodec
+          ref: fd014a1890764dbe462c2be36789294acfb3188a
+          path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
         run: |
@@ -125,12 +162,26 @@ jobs:
           ZENJXL_DECODER_DIR: ${{ github.workspace }}/../zenjxl-decoder
           BUTTERAUGLI_DIR: ${{ github.workspace }}/../../butteraugli
         run: cross test --target i686-unknown-linux-gnu --no-default-features --features inventory --test inventory_feature --test fuzz_regression
+      - name: Checked collection consumer (i686 cross)
+        working-directory: validation/collections
+        run: |
+          export ZENJXL_COLLECTION_SCRATCH="$HOME/tmp/zenjxl-collections"
+          export TMPDIR="$ZENJXL_COLLECTION_SCRATCH"
+          export CODEC_CORPUS_CACHE="$HOME/.cache"
+          mkdir -p "$TMPDIR" "$CODEC_CORPUS_CACHE"
+          cross test --target i686-unknown-linux-gnu --test consumer
 
   wasm:
     name: WASM
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
+      - name: Check out the shared contract revision
+        uses: actions/checkout@v7
+        with:
+          repository: imazen/zencodec
+          ref: fd014a1890764dbe462c2be36789294acfb3188a
+          path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
         run: |
@@ -150,7 +201,13 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
+      - name: Check out the shared contract revision
+        uses: actions/checkout@v7
+        with:
+          repository: imazen/zencodec
+          ref: fd014a1890764dbe462c2be36789294acfb3188a
+          path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
         run: |
@@ -163,6 +220,9 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Shared contract identity
+        shell: bash
+        run: cargo metadata --format-version 1 --all-features | python3 scripts/check-contract-graph.py
       - name: Clippy (no default features)
         run: cargo clippy --no-default-features --all-targets -- -D warnings
       - name: Clippy (zencodec only)
@@ -178,7 +238,7 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -189,7 +249,13 @@ jobs:
     name: MSRV
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
+      - name: Check out the shared contract revision
+        uses: actions/checkout@v7
+        with:
+          repository: imazen/zencodec
+          ref: fd014a1890764dbe462c2be36789294acfb3188a
+          path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
         run: |
@@ -210,9 +276,15 @@ jobs:
     name: Coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Clone zenjxl-decoder (test resources)
         run: git clone --depth 1 https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
+      - name: Check out the shared contract revision
+        uses: actions/checkout@v7
+        with:
+          repository: imazen/zencodec
+          ref: fd014a1890764dbe462c2be36789294acfb3188a
+          path: .zencodec
       - name: Clone patched siblings ([patch.crates-io] paths)
         shell: bash
         run: |

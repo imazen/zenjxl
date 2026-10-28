@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+### Checked image collections
+
+- Declare reconstructed auxiliary samples on the emitted color sample grid.
+  Keep source reduction factors separate; the shared output contract checks
+  dimensions and freezes registration through mapping and color replacement.
+
+- Retain native auxiliary allocations independently when shared image output
+  replaces packed color. The old color charge releases after original clones
+  drop; auxiliary samples, addresses, interpretation and charges stay intact.
+
+- Honor shared `OpenRequest::with_output_storage(StorageBudget)`. Color and
+  auxiliary payloads are admitted before native writes; the shared owner keeps
+  charges through publication and the last image clone. Refusal is recoverable
+  after held outputs drop, without an unaccounted fallback. Native workspace,
+  input, metadata and owner allocations remain outside this payload budget.
+  Both allocation modes use word-aligned backing storage for F32 mappings.
+  Each request supplies its own pool through one immutable registry; cloned
+  requests share admission without retaining codec-specific storage settings.
+- Enforce `max_input_bytes` on the actual immutable resident slice before
+  parsing either view. Retain typed/traced `InputSize` refusal and exclude this
+  handled field from mixed unsupported-configuration reports. Native workspace
+  and the other shared decode caps remain unqualified.
+- Root integration builds use one pinned checkout for registry and Git shared
+  contract edges; CI rejects duplicate contract identities. This keeps existing
+  HDR reconstruction compatible with the collection feature. Pixel ownership
+  examples retain layout/context; the JPEG scoring helper explicitly removes
+  stride padding and alignment prefixes when extracting packed RGB8 bytes.
+- Add optional `collections` support through `collection::JxlCollectionConfig`
+  and the shared `CodecSet`. The composition view is fixed at open: rendered
+  presentations or raw layers with signed placement, blend/reference facts,
+  auxiliary channels, native timing and explicit reversed CMYK polarity.
+- Preserve actual F32 sample/color ownership through publication policy.
+  Resident input is required; child discovery, regions and unqualified shared
+  resource/policy requirements return typed refusals. Native discovery and
+  replay have separate image-count and frame-header allowances. This is not a
+  global memory-admission or progressive-input implementation.
+- Add an isolated consumer graph with pinned contracts and native decoder.
+  Decode-only compilation no longer includes unused encode validation helpers.
+  See [the collection contract](docs/COLLECTIONS.md).
+
 ### Dependency integration
 
 - Reconstruct HDR with ultrahdr-core 0.6, enabling its explicit f16 output feature. The six gain-map rendering tests pass against the pinned current-main implementation.
@@ -83,6 +123,10 @@
 
 
 ### QUEUED BREAKING CHANGES
+- Review-only `JxlCollectionConfig::with_output_storage`, introduced in
+  `7fc16265`, moves to shared `OpenRequest::with_output_storage`. The native
+  factory implements `open_with(CollectionOpenContext)`; its configuration
+  is `Copy` again and contains only codec-specific discovery limits.
 - zencodec trait impls' associated `Error` type changed from `At<JxlError>`
   to `At<zencodec::CodecError>` (the envelope, Pattern B) — breaking for code
   that names the trait impls' associated `Error` type. See *Changed* below

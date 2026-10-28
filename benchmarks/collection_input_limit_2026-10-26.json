@@ -1,0 +1,31 @@
+{
+  "kind": "correctness validation, not a performance benchmark",
+  "base_commit": "36f0a399a568697d801f5b03a72d306966011ebf",
+  "source_sha256": {
+    "src/collection/mod.rs": "781645250b4ffb6a332bfa77ab40c6115495c876423812ca2836623494ae8e14",
+    "validation/collections/tests/consumer.rs": "a7937c6c1580bbb84b334a7e89058dc13f7c58dc4a3e895464b25f2c4a8faaca"
+  },
+  "host": "r7900x",
+  "command": "just collection-validation",
+  "checks": {
+    "consumer_contracts": {
+      "passed": 9,
+      "failed": 0
+    },
+    "strict_consumer_and_adapter_clippy": "passed",
+    "input_limit": "actual resident bytes before native parser in both composition views",
+    "length_hints": [
+      null,
+      0,
+      18446744073709551615
+    ],
+    "oversize_invalid_payload": "3 bytes; limits 0, 1, 2; InputSize actual/max and At trace preserved",
+    "admitted_payload": "exact length and length + 1; both views; native samples equal uncapped output",
+    "mixed_requirements": "unsupported memory cap refuses before source access; handled input cap omitted from UnsupportedLimits",
+    "nonresident_source": "ResidentInputRequired without staging or I/O"
+  },
+  "exit_code": 0,
+  "run_heavy": "done rc=0 31s | peak-RSS 0.24GiB | min-avail 13089MiB | peak-load 0.57",
+  "measurement_limit": "Whole build/test process-tree observation. This is not decoder memory or timing; an accepted resident-input size does not admit native workspace or caller-owned storage.",
+  "log": "~/tmp/zenjxl-admission-qualified-20261026.log"
+}

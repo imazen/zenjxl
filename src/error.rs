@@ -122,7 +122,7 @@ pub enum JxlError {
 /// own classification. `Decode` / `Encode` **introspect** the wrapped foreign
 /// error's own sub-variants — via [`jxl::api::Error::kind`] (a coarse
 /// `ErrorClass` jxl-rs itself maintains for exactly this purpose) and a direct
-/// match over [`jxl_encoder::EncodeError`]'s variants respectively — rather
+/// match over `jxl_encoder::EncodeError`'s variants respectively — rather
 /// than folding every foreign decode/encode failure into one bucket.
 impl CategorizedError for JxlError {
     #[inline]
@@ -265,7 +265,7 @@ impl CategorizedError for JxlError {
 /// Bridge a bare [`JxlError`] into the shared [`CodecError`](zencodec::CodecError)
 /// envelope as `At<CodecError>` — the one-impl adoption cost of the zencodec
 /// **envelope** error pattern (Pattern B). The zencodec trait impls
-/// ([`codec`](crate::codec)) return `At<CodecError>` so a generic consumer
+/// (`codec`) return `At<CodecError>` so a generic consumer
 /// recovers the [`ErrorCategory`] *and* the codec name through `Dyn*` dispatch
 /// and `Box<dyn Error>` erasure; the native API ([`decode`](crate::decode) etc.)
 /// keeps the typed `At<JxlError>`.

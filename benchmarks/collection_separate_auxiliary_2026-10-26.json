@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-26",
+  "kind": "native ownership correctness; no speed or isolated codec memory claim",
+  "base_zenjxl": "3660d49318e4d234ec2eb8e531a3e3a1d40a2215",
+  "core": "b2d8244eb2378093c541d141a85cfabb7bbafdf5",
+  "source_sha256": {
+    "src/collection/output.rs": "ab92bed54a7acfa49bc05c0e77d922890e693da327736397030cde086aa38964",
+    "validation/collections/tests/consumer.rs": "778f935437c2c3ff309991993040bfdf56b64702963f08bef4aa8148dacd4bb2",
+    "Cargo.toml": "89fad6ef6668972bdff0255d015f3ce74886c29ad25f16e1194135a4dfbbac3e",
+    "validation/collections/Cargo.toml": "28d12ed8c38de313747e32a48b164f0146215376d0bdfcb4b578984c8e9ba1a4",
+    ".github/workflows/ci.yml": "5e48fde1452a93420a0cf99f44cb039b55788c30ec2483bcf143cbced4703b3a"
+  },
+  "checks": {
+    "consumer_tests_passed": 15,
+    "consumer_tests_failed": 0,
+    "new_control": "four native selections: CMYK/RGB raw first layers, spot and extra-channel first presentations; active samples exact, auxiliary addresses unchanged, old color charge released only after original clones drop",
+    "consumer_and_adapter_clippy": "passed",
+    "wasm32_wasip1_and_i686_compilation": "passed; execution not claimed for new revision",
+    "strict_rustdoc_and_api": "passed, native collection API unchanged",
+    "root_all_features_all_targets_clippy": "passed",
+    "root_contract_identity": "one each zencodec, zenmeta, zencodec-testkit, zenpixels, zenpixels-convert"
+  },
+  "commands": [
+    "just collection-context-check",
+    "just integration-check"
+  ],
+  "runs": [
+    {
+      "log": "/home/lilith/tmp/zenjxl-separate-auxiliary-20261026.log",
+      "sha256": "25475e80ddeb50ea344af4a0eb2eb705ee7f72395ddbba1d981a52a28a3eb07a",
+      "resource_wrapper": "run-heavy: done rc=0 72s | peak-RSS 0.66GiB | min-avail 10283MiB | peak-load 1.41"
+    },
+    {
+      "log": "/home/lilith/tmp/zenjxl-separate-auxiliary-root-20261026.log",
+      "sha256": "5c8f73cf1f535d0d5d7208570285b0bcd9efb81b5a8eaab332aceb57271292db",
+      "resource_wrapper": "run-heavy: done rc=0 7s | peak-RSS 0.70GiB | min-avail 11097MiB | peak-load 0.94"
+    }
+  ],
+  "consumer_lock": {
+    "path": "/mnt/v/output/zencodec/platform-regions-20261026-run/native-auxiliary-package-1/consumer.lock",
+    "sha256": "e906ebd5e183c6691cf6e8be4d73517142aa0641bb76e9f9556cffa4dc02f04b"
+  }
+}

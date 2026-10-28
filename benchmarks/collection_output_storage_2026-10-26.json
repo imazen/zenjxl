@@ -1,0 +1,78 @@
+{
+  "kind": "packaged retained-output admission qualification; no performance claim",
+  "base_commit": "d5fe3e2b51259c4f644fd9071a4f3d8a56f80223",
+  "core_commit": "1f46337b9d4fae225a007dacd56a7a2298a4bf34",
+  "native_commit": "fe819360581acb3796ea2925f2a81f44f0a430e6",
+  "host": "r7900x",
+  "source_sha256": {
+    "Cargo.toml": "0bd66dea60bb4ec84773456262ad69329bf79107ce8fc3294c35515ad0d01baf",
+    "src/collection/mod.rs": "c8a616148d14432b547ad4bf4ef87638a3557dbf95dae7e495b28ce533d7cf03",
+    "src/collection/presentations.rs": "ebe88ae6d71d523d953e37fa0c7338c0482b870841bfaa644f4d9b1b9f4f9e35",
+    "src/collection/layers.rs": "3a5b945e78fb0bcea2ee14ff0f88965612ac1fd22624bfbb7d0376eadb9fb5c2",
+    "src/collection/output.rs": "04756fea39f9b072b94287c94c5e25be7366bd6e8c23e0dcb9e279bcbd22bae7",
+    "validation/collections/tests/consumer.rs": "1d796cfe7bde57c04a5278f127c6181e1f8127e2931074e3d38d5ff29b230f3e"
+  },
+  "contract": "JxlCollectionConfig::with_output_storage shares one StorageBudget across configs, operations and retained outputs",
+  "consumer_controls": {
+    "passed": 12,
+    "failed": 0,
+    "ignored": 0,
+    "new_coverage": [
+      "both composition views of named-frame and CMYK-layer sources",
+      "exact native samples through ordinary versus admitted storage",
+      "callback observes charged original allocation; output retains its address",
+      "aligned F32 backing words; no copied sample buffer",
+      "charges survive registry/operation drop and last-clone retention",
+      "another operation refuses while an old output holds the allowance, then retries successfully after release",
+      "zero and partial byte/object limits refuse before publication without unaccounted fallback",
+      "cancellation, policy decline, typed callback error and unwind release unpublished storage"
+    ]
+  },
+  "checks": [
+    {
+      "log": "zenjxl-collections-owned-1-20261026.log",
+      "sha256": "470bbaa92a0e74ad17ce6bf888cf9ff45186f6d7592ff057243ce23513233832",
+      "result": "initial test helper compile refusal: first_image returns Option<Outcome<ImageOutput>>, not ImageOutput",
+      "run_heavy": "run-heavy: done rc=101 3s | peak-RSS 0.28GiB | min-avail 13410MiB | peak-load 0.12"
+    },
+    {
+      "log": "zenjxl-collections-owned-2-20261026.log",
+      "sha256": "0daa65071f81ea533defe1b7aeaf137237e0489069d4d75f06ccfe2c71360e30",
+      "result": "12 consumer controls and strict lint passed before alignment refinement",
+      "run_heavy": "run-heavy: done rc=0 32s | peak-RSS 0.30GiB | min-avail 13241MiB | peak-load 0.68"
+    },
+    {
+      "log": "zenjxl-collections-owned-contracts-20261026.log",
+      "sha256": "b7e357d3a2f320ebe55a1fffb883723c856e563bbea7a815fd4480aadb5ef2b7",
+      "result": "WASI/i686 check, strict Rustdoc and API snapshot passed before alignment refinement",
+      "run_heavy": "run-heavy: done rc=0 11s | peak-RSS 0.42GiB | min-avail 13020MiB | peak-load 0.64"
+    },
+    {
+      "log": "zenjxl-collections-owned-integration-20261026.log",
+      "sha256": "bd50e21aca7934542ff7272fe846ff554595afa2bf174523bd0dc10cb7c75a1a",
+      "result": "one contract identity, strict all-feature/all-target lint and legacy alpha/HDR/JPEG/lossless tests passed before alignment refinement",
+      "run_heavy": "run-heavy: done rc=0 253s | peak-RSS 1.17GiB | min-avail 12505MiB | peak-load 1.32"
+    },
+    {
+      "log": "zenjxl-collections-owned-aligned-20261026.log",
+      "sha256": "0411f7a76ad15dd5182af1330472dd118f25b411bc30dec17ca59f7a86a5905c",
+      "result": "final aligned storage: 12 consumer controls, strict consumer/adapter lint, WASI/i686 check, strict Rustdoc and API snapshot passed",
+      "run_heavy": "run-heavy: done rc=0 34s | peak-RSS 0.30GiB | min-avail 13114MiB | peak-load 0.68"
+    },
+    {
+      "log": "zenjxl-collections-owned-aligned-root-20261026.log",
+      "sha256": "436308a5e103ee7103f4c3bd1732bbbbc554b36199fadf6033e7a68ac74c42a9",
+      "result": "final aligned storage: one contract identity and strict root all-feature/all-target lint passed",
+      "run_heavy": "run-heavy: done rc=0 2s | peak-RSS 0.26GiB | min-avail 13402MiB | peak-load 0.29"
+    }
+  ],
+  "limits": [
+    "selected output payload including padding only",
+    "native work/reference buffers, input, discovery, metadata/profile/owner allocations and caller copies excluded",
+    "shared max_memory_bytes remains unsupported",
+    "full matrix through admitted packaged outputs qualified separately in zencodec",
+    "legacy all-feature regression result precedes the final alignment-only collection change; final collection controls and all-feature lint use aligned storage"
+  ],
+  "artifact_directory": "/mnt/v/output/zencodec/platform-regions-20261026-run/packaged-owner-1",
+  "measurement_limit": "run-heavy observations cover entire validation process trees, not a decoder memory bound or speed comparison"
+}

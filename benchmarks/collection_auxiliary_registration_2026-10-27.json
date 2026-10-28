@@ -1,0 +1,43 @@
+{
+  "date_utc": "2026-10-27",
+  "kind": "native auxiliary registration qualification; no performance comparison",
+  "base_commit": "974aa0410030ca5b541fcf418a63690e51203ff7",
+  "core_commit": "fd014a1890764dbe462c2be36789294acfb3188a",
+  "native_commit": "fe819360581acb3796ea2925f2a81f44f0a430e6",
+  "source_sha256": {
+    "Cargo.toml": "ff1e200552ec802a12f553fdee2ebaad2e5839e0e88bee6807a168e8a41ea9f4",
+    "src/collection/output.rs": "0716cd942db4010d876a6cb8acec25f66575454df30423b44b99cc3260102e1e",
+    "validation/collections/tests/consumer.rs": "37ed35f6949bfc55a5aecf4ab931429dc0e85bf69763cfd374b4fad5cdcaf220",
+    "validation/collections/Cargo.toml": "fa5994aee8ead45510ff605f5884c165e8439a1adac8609d96c7628e6276afa3"
+  },
+  "checks": [
+    {
+      "command": "just collection-validation",
+      "log": "/home/lilith/tmp/zenjxl-auxiliary-registration-20261027.log",
+      "sha256": "e6a3af6122db2c089782eacc292302d6ed4748a5bafcafc3e7e107599c6a9cbd",
+      "result": "15 native consumer controls and strict consumer/adapter lint passed",
+      "resource_line": "run-heavy: done rc=0 35s | peak-RSS 0.43GiB | min-avail 10943MiB | peak-load 0.92"
+    },
+    {
+      "command": "just integration-validation",
+      "log": "/home/lilith/tmp/zenjxl-auxiliary-registration-root-20261027.log",
+      "sha256": "6f9d9b61e590b62362767e423d89cf118676eb8be7580635d8fcdc1f44651a27",
+      "result": "one shared contract identity; strict all-feature/all-target lint; 23 existing alpha, gain-map, lossy JPEG and lossless tests passed; readme_examples contains zero enabled tests under all-features",
+      "resource_line": "run-heavy: done rc=0 298s | peak-RSS 1.11GiB | min-avail 10382MiB | peak-load 5.09"
+    },
+    {
+      "command": "just collection-owner-contract-check",
+      "log": "/home/lilith/tmp/zenjxl-auxiliary-registration-portability-20261027.log",
+      "sha256": "ab600c6db4da3836a9dd72923e2190ff0b09a61445ef1af7edcf02ccfb6ebe56",
+      "result": "WASI/i686 check, warning-free Rustdoc, API extraction and consumer formatting passed",
+      "resource_line": "run-heavy: done rc=0 4s | peak-RSS 0.23GiB | min-avail 11460MiB | peak-load 0.82"
+    }
+  ],
+  "contract": "Every emitted native auxiliary view declares ColorSamples; adoption validates matching dimensions, and the claim survives retained ownership and color replacement.",
+  "limits": [
+    "This describes emitted native reconstruction, not source dim_shift or a general spatial transform.",
+    "No general sample-grid phase, origin or resampling method is represented.",
+    "The root regression suite is the selected integration gate, not all tests in the repository.",
+    "run-heavy measures the validation process tree, not a decoder memory bound or speed comparison."
+  ]
+}

@@ -2,6 +2,15 @@
 
 Thin Rust wrapper around `jxl-encoder` (pure-Rust JPEG XL encoder) and `zenjxl-decoder` (pure-Rust decoder, lib name `jxl`). Most knob selection delegates to jxl-encoder internals via the `__expert` feature; this crate exposes a Rust-friendly API surface on top.
 
+## Known Bugs
+
+- Collection integration exposed duplicate zencodec identities through direct Git
+  dependencies in HDR/JPEG adapters. A registry patch alone cannot replace those
+  edges. The root integration build patches both sources to the exact `.zencodec`
+  checkout documented in `docs/COLLECTIONS.md`; `just contract-identity` checks
+  the resolved shared types. Downstream workspaces need their own root patches
+  until publication. Keep the all-feature HDR tests in the validation loop.
+
 ## Variant generation / sweep infrastructure (added 2026-06-11)
 
 The zenjpeg variant-generation patterns are adopted here — **read

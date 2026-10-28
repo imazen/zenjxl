@@ -50,7 +50,7 @@ fn decode_to_rgba8() {
         let borrowed: Option<&[u8]> = output.pixels.as_contiguous_bytes();
         let _ = borrowed;
     }
-    let native: Vec<u8> = output.pixels.into_vec();
+    let native = output.pixels.into_parts();
     let _ = (rgba, w, h, native);
 }
 
