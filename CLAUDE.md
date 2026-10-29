@@ -65,3 +65,10 @@ Quick paths:
 zenjxl ships **no internal picker.** Knob selection is delegated to `jxl-encoder` internals.
 
 Training data for any future jxl picker lives in `benchmarks/zenjxl_*` (pareto sweeps + feature CSVs); the sweep planner above is the cell-generation side of that pipeline. For reference picker wiring see `~/work/zen/zenavif/src/auto_tune.rs` (the only production-shipped zen-codec picker).
+
+## Fixed: shared row entry inherited refusal (2026-10-29)
+
+The adapter advertised push_rows but inherited the default refusing begin. It
+now retains and enforces the row declaration, including specialized one-shot
+rejection and Pulse boundary reasons. Native algorithms and existing test
+assertions are unchanged. Scope and receipts: `docs/declared-rows.md`.

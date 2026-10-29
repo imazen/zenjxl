@@ -712,6 +712,7 @@ mod encoding {
                 limits: self.limits,
                 pulse: self.pulse,
                 stream: StreamState::Empty,
+                declaration: None,
                 gain_map: self.config.gain_map.clone(),
                 pixels_cicp: None,
             })
@@ -762,6 +763,7 @@ mod encoding {
         /// The job's control; the native encoder polls it for cancellation.
         pulse: Option<zencodec::SharedPulse>,
         stream: StreamState,
+        declaration: Option<(u32, u32, PixelDescriptor)>,
         gain_map: Option<Arc<GainMapData>>,
         /// The colour the pixel descriptor states, for when the metadata
         /// describes none.
@@ -769,6 +771,23 @@ mod encoding {
     }
 
     impl JxlEncoder {
+        fn check_row_control(&self) -> Result<(), At<JxlError>> {
+            if let Some(pulse) = &self.pulse {
+                enough::Stop::check(pulse)
+                    .map_err(|reason| whereat::at!(JxlError::Cancelled(reason)))?;
+            }
+            Ok(())
+        }
+
+        fn check_one_shot(&self) -> Result<(), At<JxlError>> {
+            if self.declaration.is_some() || !matches!(self.stream, StreamState::Empty) {
+                return Err(whereat::at!(JxlError::InvalidState(
+                    "one-shot encode after row admission".into()
+                )));
+            }
+            Ok(())
+        }
+
         /// Map a PixelDescriptor to the jxl-encoder PixelLayout.
         fn descriptor_to_layout(desc: PixelDescriptor) -> Result<PixelLayout, At<JxlError>> {
             let layout = desc.layout();
@@ -868,9 +887,9 @@ mod encoding {
             // JXL default (sRGB, or linear sRGB for float) doesn't already
             // say. Without this, PQ/HLG or wide-gamut pixels were tagged sRGB.
             let from_pixels = self.pixels_cicp.filter(|c| {
-                !described
-                    && !Self::layout_is_gray(layout)
-                    && !(c.color_primaries == 1 && matches!(c.transfer_characteristics, 8 | 13))
+                !(described
+                    || Self::layout_is_gray(layout)
+                    || (c.color_primaries == 1 && matches!(c.transfer_characteristics, 8 | 13)))
             });
             if !described && from_pixels.is_none() {
                 return (None, policy_icc);
@@ -1065,10 +1084,36 @@ mod encoding {
             JxlError::from(op).into()
         }
 
+        fn begin(
+            &mut self,
+            width: u32,
+            height: u32,
+            descriptor: PixelDescriptor,
+        ) -> Result<zencodec::encode::OutputTiming, Self::Error> {
+            (|| -> Result<_, At<JxlError>> {
+                self.check_one_shot()?;
+                self.check_row_control()?;
+                if width == 0 || height == 0 {
+                    return Err(whereat::at!(JxlError::InvalidInput("empty canvas".into())));
+                }
+                if !matches!(
+                    descriptor.pixel_format(),
+                    zenpixels::PixelFormat::Rgbx8 | zenpixels::PixelFormat::Bgrx8
+                ) {
+                    Self::descriptor_to_layout(descriptor)?;
+                }
+                self.check_limits(width, height)?;
+                self.declaration = Some((width, height, descriptor));
+                Ok(zencodec::encode::OutputTiming::AT_FINISH)
+            })()
+            .map_err(zencodec::CodecError::of)
+        }
+
         fn encode(
             mut self,
             pixels: PixelSlice<'_>,
         ) -> Result<EncodeOutput, At<zencodec::CodecError>> {
+            self.check_one_shot().map_err(zencodec::CodecError::of)?;
             self.pixels_cicp = zencodec::Cicp::from_descriptor(&pixels.descriptor());
             // The fallible body stays `At<JxlError>` (internal `?` sites
             // untouched); convert once at the boundary, preserving the trace.
@@ -1129,6 +1174,7 @@ mod encoding {
             stride_pixels: u32,
         ) -> Result<EncodeOutput, At<zencodec::CodecError>> {
             (move || -> Result<EncodeOutput, At<JxlError>> {
+                self.check_one_shot()?;
                 let w = width as usize;
                 let h = height as usize;
                 let stride = stride_pixels as usize;
@@ -1190,13 +1236,52 @@ mod encoding {
         }
 
         fn push_rows(&mut self, rows: PixelSlice<'_>) -> Result<(), At<zencodec::CodecError>> {
-            self.pixels_cicp = zencodec::Cicp::from_descriptor(&rows.descriptor());
             (move || -> Result<(), At<JxlError>> {
                 use zenpixels::PixelFormat;
 
                 let desc = rows.descriptor();
                 let width = rows.width();
                 let num_rows = rows.rows();
+
+                self.check_row_control()?;
+                let previous = match &self.stream {
+                    StreamState::Empty => 0,
+                    StreamState::Accumulating {
+                        width: prior_width,
+                        descriptor,
+                        rows_pushed,
+                        ..
+                    } => {
+                        if *prior_width != width || *descriptor != desc {
+                            return Err(whereat::at!(JxlError::InvalidInput(
+                                "row dimensions or descriptor changed".into()
+                            )));
+                        }
+                        *rows_pushed
+                    }
+                };
+                let total = previous.checked_add(num_rows).ok_or_else(|| {
+                    whereat::at!(JxlError::InvalidInput("row count overflow".into()))
+                })?;
+                if let Some((declared_width, height, descriptor)) = self.declaration
+                    && (width != declared_width || total > height || descriptor != desc)
+                {
+                    return Err(whereat::at!(JxlError::InvalidInput(
+                        "rows differ from declared canvas".into()
+                    )));
+                }
+                self.check_limits(width, total)?;
+                if let Some(limits) = &self.limits {
+                    let bytes = u64::from(width)
+                        .checked_mul(u64::from(total))
+                        .and_then(|n| n.checked_mul(desc.bytes_per_pixel() as u64))
+                        .ok_or_else(|| {
+                            whereat::at!(JxlError::OutOfMemory("row capacity overflow".into()))
+                        })?;
+                    limits.check_memory(bytes).map_err(|e| {
+                        whereat::at!(JxlError::LimitExceeded(e.to_string(), e.kind()))
+                    })?;
+                }
 
                 // Rgbx8 / Bgrx8: strip padding byte and coerce to Rgb8 in the
                 // accumulated buffer, then treat the stream as Rgb8 internally.
@@ -1225,6 +1310,9 @@ mod encoding {
                 match &mut self.stream {
                     StreamState::Empty => {
                         let mut data = Vec::new();
+                        data.try_reserve(bytes.len()).map_err(|_| {
+                            whereat::at!(JxlError::OutOfMemory("row accumulation".into()))
+                        })?;
                         data.extend_from_slice(bytes);
                         self.stream = StreamState::Accumulating {
                             width,
@@ -1235,21 +1323,16 @@ mod encoding {
                         };
                     }
                     StreamState::Accumulating {
-                        width: w,
-                        descriptor: d,
-                        data,
-                        rows_pushed,
-                        ..
+                        data, rows_pushed, ..
                     } => {
-                        if width != *w || desc != *d {
-                            return Err(whereat::at!(JxlError::InvalidInput(
-                                "push_rows: width or pixel format changed between calls".into(),
-                            )));
-                        }
+                        data.try_reserve(bytes.len()).map_err(|_| {
+                            whereat::at!(JxlError::OutOfMemory("row accumulation".into()))
+                        })?;
                         data.extend_from_slice(bytes);
-                        *rows_pushed += num_rows;
+                        *rows_pushed = total;
                     }
                 }
+                self.pixels_cicp = zencodec::Cicp::from_descriptor(&desc);
                 Ok(())
             })()
             .map_err(zencodec::CodecError::of)
@@ -1257,6 +1340,7 @@ mod encoding {
 
         fn finish(self) -> Result<EncodeOutput, At<zencodec::CodecError>> {
             (move || -> Result<EncodeOutput, At<JxlError>> {
+                self.check_row_control()?;
                 let StreamState::Accumulating {
                     width,
                     layout,
@@ -1272,6 +1356,13 @@ mod encoding {
                     )));
                 };
 
+                if let Some((_, height, _)) = self.declaration
+                    && rows_pushed != height
+                {
+                    return Err(whereat::at!(JxlError::InvalidInput(
+                        "incomplete declared canvas".into()
+                    )));
+                }
                 self.check_limits(width, rows_pushed)?;
 
                 let encoded = self.encode_with_metadata(data, width, rows_pushed, layout)?;

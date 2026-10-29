@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Shared row encoding now admits and retains canvas declarations, validates strips/completion, rejects one-shot paths after admission, and preserves Pulse reasons at row boundaries. Output remains AT_FINISH; see `docs/declared-rows.md`.
+
 - Align native metadata rewriting and testkit with the shared 0.2 contract via
   version edges, allowing consumer root patches to select one core family.
 

@@ -228,3 +228,8 @@ release-runtime-check:
 
 release-lint-check:
     cargo clippy --all-features --all-targets --locked -- -D warnings
+
+# Declared row protocol, padded parity and existing encode metadata controls.
+declared-rows-check:
+    cargo test --locked --features zencodec --test declared_rows --test encode_color_signal --test shared_contracts
+    cargo clippy --locked --features zencodec --lib --test declared_rows -- -D warnings
