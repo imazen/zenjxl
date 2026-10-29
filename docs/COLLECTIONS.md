@@ -203,3 +203,22 @@ dependencies. Cross now mounts only the retained decoder test resources. No
 platform or native test is removed. Independent collection CI passed on Linux,
 macOS ARM64 and Windows ARM64 at 0dcc0a7b; this does not qualify the new encoder
 pin or the repaired cross configuration.
+
+The complete unoptimized suite reached the final lossless thread-determinism
+case but exceeded the 900-second wrapper deadline (rc124, peak RSS 1.14 GiB,
+minimum available 13400 MiB). Earlier library, alpha-axis, animation, gain-map,
+inventory and orientation suites passed; this is not an overall pass. The test
+profile now uses optimization level 1 with debug assertions and overflow checks
+explicitly enabled. Fixtures, thread counts, efforts and assertions are unchanged;
+the optimized full rerun remains required.
+
+The complete optimized rerun passes: 203 tests, zero failures and the one existing
+ignored gain-map doctest, across 25 result groups. Both lossless thread-determinism
+cases pass with their original data and assertions. Wrapper receipt: rc0,
+199 seconds including compilation, peak RSS 1.22 GiB, minimum available
+12448 MiB. This run uses portable encoder Git pin f42a5932 (no encoder path
+patch), paired pixels f23ac753 and core 3f4fd14f. The prior timeout remains a
+separate failed run; these timings are not a codec-performance comparison.
+
+Strict all-feature/all-target Clippy also passes on the portable graph (rc0,
+9 seconds, peak RSS 0.64 GiB, minimum available 13666 MiB).

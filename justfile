@@ -225,3 +225,6 @@ release-feature-check:
 
 release-runtime-check:
     cargo test --all-features --locked
+
+release-lint-check:
+    cargo clippy --all-features --all-targets --locked -- -D warnings

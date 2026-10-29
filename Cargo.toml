@@ -193,3 +193,9 @@ required-features = ["encode", "decode", "metadata-rewrite"]
 [[example]]
 name = "animation_timing_oracle"
 required-features = ["encode", "zencodec"]
+
+# Keep the full native matrix practical without disabling correctness checks.
+[profile.test]
+opt-level = 1
+debug-assertions = true
+overflow-checks = true
