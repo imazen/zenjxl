@@ -222,3 +222,12 @@ separate failed run; these timings are not a codec-performance comparison.
 
 Strict all-feature/all-target Clippy also passes on the portable graph (rc0,
 9 seconds, peak RSS 0.64 GiB, minimum available 13666 MiB).
+
+### CI dependency transport (2026-10-29)
+
+Run 40921137754 at efa533d0 failed on macOS while Cargo fetched the pinned
+JPEG dependency's nested skcms submodule. SecureTransport closed the connection
+after its retries; compilation had not begun. CI now requests Git's fetch
+transport via CARGO_NET_GIT_FETCH_WITH_CLI. Source revisions, feature matrices
+and assertions are unchanged. The failed run remains evidence; this change
+requires the macOS CI rerun before claiming platform qualification.

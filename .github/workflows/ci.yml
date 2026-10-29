@@ -19,6 +19,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Avoid Cargo libgit2 SecureTransport failures on nested codec submodules.
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CI: true
 
 jobs:
