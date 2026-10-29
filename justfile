@@ -213,3 +213,15 @@ rendering-intent-check:
 hdr-reconstruction-check:
     cargo test --locked --features reconstruct-hdr --test gain_map_render
     cargo clippy --locked --features reconstruct-hdr --lib -- -D warnings
+
+# Isolated root: optional Pulse, native metadata and collection feature integration.
+release-contract-check:
+    cargo metadata --locked --all-features --format-version 1 | python3 scripts/check-contract-graph.py
+    cargo test --locked --features zencodec,metadata-rewrite,collections --test shared_contracts --test metadata_rewrite
+    cargo clippy --locked --features zencodec,metadata-rewrite,collections --lib --test shared_contracts --test metadata_rewrite -- -D warnings
+
+release-feature-check:
+    cargo check --all-features --all-targets --locked
+
+release-runtime-check:
+    cargo test --all-features --locked

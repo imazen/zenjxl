@@ -17,8 +17,10 @@ and F32 layer path from [decoder PR68](https://github.com/imazen/zenjxl-decoder/
 and explicit CMYK polarity from [zenpixels PR93](https://github.com/imazen/zenpixels/pull/93).
 
 The root integration build also needs zencodec revision
-`fd014a1890764dbe462c2be36789294acfb3188a` checked out at `.zencodec`.
+`3f4fd14feb9bdfed041e426aaa569b236a201158` checked out at `.zencodec`.
 Its root patches replace both registry and Git dependencies with that checkout.
+Native build dependencies now use exact Git pins rather than floating sibling
+checkouts. Decoder test resources remain a separate CI checkout.
 This keeps HDR reconstruction, JPEG metadata and the collection adapter on one
 shared type identity without changing codec math. `just contract-identity`
 checks the resolved graph. Cargo applies patches only at the consuming workspace
@@ -155,3 +157,49 @@ The existing [timing/incremental PR20](https://github.com/imazen/zenjxl/pull/20)
 and [inventory-behavior PR30](https://github.com/imazen/zenjxl/pull/30) cover
 different paths. This collection implementation does not merge or replace those
 changes; integration still has to preserve their contracts.
+
+## Optional-Pulse rollout validation (2026-10-29)
+
+The standalone all-feature dependency graph resolves exactly one identity each
+for zencodec, zenmeta, zencodec-testkit, zenpixels and zenpixels-convert. Shared
+metadata and testkit dependencies use version edges so a consuming root can
+select that same family. Native dependencies use exact pins; the core checkout
+is 3f4fd14f and the paired pixel revision is f23ac753.
+
+The collection-capable decoder remains fe819360. Substituting the ordinary
+application pin ce1a28b4 fails compilation: frame/layer inspection, extra-channel
+details and frame-header bounds are missing. Keep collection qualification
+separate from a successful still-image application build.
+
+With the collection feature enabled, six metadata rewrite tests and three shared
+contract tests pass, as does strict Clippy for those tests and the library.
+The stopped rewrite fixture now passes Some(pulse), preserving its refusal
+assertion. Run `just release-contract-check` from an isolated checkout with the
+pinned `.zencodec` directory. Wrapper receipt: rc0, 16 seconds, peak RSS 0.56 GiB,
+minimum available 13454 MiB. These are build/test resource figures, not image
+processing peak-memory measurements. Independent collection tests, the full
+feature matrix and platform qualification have separate receipts.
+
+The independent collection consumer now passes all 15 controls, including every
+observed cancellation/publication seam, last-clone storage ownership, unchanged
+samples across views and refusal of unproven workspace requirements. Adapter
+Clippy passes in that graph (rc0, 47 seconds, peak RSS 0.70 GiB, minimum available
+13796 MiB). All-feature/all-target compilation also passes (rc0, 6 seconds,
+peak RSS 0.63 GiB, minimum available 13891 MiB). JPEG-lossy explicitly enables
+zenjpeg metadata for quality detection; the sole added dependency is the XML
+parser required by that feature. The complete runtime/platform matrix is not
+implied by these focused checks.
+
+The full runtime matrix exposed a dependency regression that focused metadata
+checks missed: encoder 3c1be817 emits a complete codestream before animation
+metadata, failing the existing required header/Exif/XMP/frame box order. The
+candidate now pins the current-main/animation-stack integration f42a5932
+([encoder PR139](https://github.com/imazen/jxl-encoder/pull/139)). Its 92 consumer
+library tests pass, including the unchanged box-order check; the remaining
+integration suite and encoder oracle gate are still running/unqualified.
+
+The first cross CI run also found obsolete mounts for removed sibling build
+dependencies. Cross now mounts only the retained decoder test resources. No
+platform or native test is removed. Independent collection CI passed on Linux,
+macOS ARM64 and Windows ARM64 at 0dcc0a7b; this does not qualify the new encoder
+pin or the repaired cross configuration.

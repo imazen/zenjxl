@@ -650,7 +650,7 @@ mod encoding {
         fn job(self) -> JxlEncodeJob {
             JxlEncodeJob {
                 config: self,
-                stop: None,
+                pulse: None,
                 limits: None,
                 metadata: None,
                 policy: EncodePolicy::none(),
@@ -664,7 +664,7 @@ mod encoding {
     /// Per-operation encode job for JPEG XL.
     pub struct JxlEncodeJob {
         config: JxlEncoderConfig,
-        stop: Option<zencodec::StopToken>,
+        pulse: Option<zencodec::SharedPulse>,
         limits: Option<ResourceLimits>,
         metadata: Option<Metadata>,
         policy: EncodePolicy,
@@ -676,8 +676,8 @@ mod encoding {
         type Enc = JxlEncoder;
         type AnimationFrameEnc = JxlAnimationFrameEncoder;
 
-        fn with_stop(mut self, stop: zencodec::StopToken) -> Self {
-            self.stop = Some(stop);
+        fn with_pulse(mut self, pulse: zencodec::SharedPulse) -> Self {
+            self.pulse = Some(pulse);
             self
         }
 
@@ -710,7 +710,7 @@ mod encoding {
                 metadata: self.metadata,
                 policy: self.policy,
                 limits: self.limits,
-                stop: self.stop,
+                pulse: self.pulse,
                 stream: StreamState::Empty,
                 gain_map: self.config.gain_map.clone(),
                 pixels_cicp: None,
@@ -759,7 +759,8 @@ mod encoding {
         metadata: Option<Metadata>,
         policy: EncodePolicy,
         limits: Option<ResourceLimits>,
-        stop: Option<zencodec::StopToken>,
+        /// The job's control; the native encoder polls it for cancellation.
+        pulse: Option<zencodec::SharedPulse>,
         stream: StreamState,
         gain_map: Option<Arc<GainMapData>>,
         /// The colour the pixel descriptor states, for when the metadata
@@ -1029,8 +1030,8 @@ mod encoding {
                 } else {
                     req
                 };
-                let req = if let Some(ref stop) = self.stop {
-                    req.with_stop(stop)
+                let req = if let Some(ref pulse) = self.pulse {
+                    req.with_stop(pulse)
                 } else {
                     req
                 };
@@ -1517,13 +1518,13 @@ mod encoding {
             &mut self,
             pixels: PixelSlice<'_>,
             duration: zencodec::animation::FrameDuration,
-            stop: Option<&dyn Stop>,
+            pulse: Option<&dyn zencodec::Pulse>,
         ) -> Result<zencodec::animation::FrameDuration, Self::Error> {
             let mut timing = self.timing;
             let encoded = timing
                 .quantize(duration)
                 .map_err(|_| Self::reject(UnsupportedOperation::AnimationTiming))?;
-            self.push_frame_exact(pixels, encoded, stop)?;
+            self.push_frame_exact(pixels, encoded, pulse)?;
             self.timing = timing;
             Ok(encoded)
         }
@@ -1532,7 +1533,7 @@ mod encoding {
             &mut self,
             pixels: PixelSlice<'_>,
             duration: zencodec::animation::FrameDuration,
-            stop: Option<&dyn Stop>,
+            pulse: Option<&dyn zencodec::Pulse>,
         ) -> Result<(), Self::Error> {
             let (mut a, mut b) = (self.clock, duration.denominator());
             while b != 0 {
@@ -1551,7 +1552,7 @@ mod encoding {
             if self.frames.iter().any(|&n| n.checked_mul(scale).is_none()) {
                 return Err(Self::reject(UnsupportedOperation::AnimationTiming));
             }
-            self.push_frame_ticks(pixels, ticks, stop)?;
+            self.push_frame_ticks(pixels, ticks, pulse.map(|p| p as &dyn Stop))?;
             let previous = self.frames.len() - 1;
             for ticks in &mut self.frames[..previous] {
                 *ticks *= scale;
@@ -1564,19 +1565,22 @@ mod encoding {
             &mut self,
             pixels: PixelSlice<'_>,
             duration_ms: u32,
-            stop: Option<&dyn Stop>,
+            pulse: Option<&dyn zencodec::Pulse>,
         ) -> Result<(), Self::Error> {
             self.push_frame_exact(
                 pixels,
                 zencodec::animation::FrameDuration::from_millis(duration_ms),
-                stop,
+                pulse,
             )
         }
 
-        fn finish(self, stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<zencodec::CodecError>> {
+        fn finish(
+            self,
+            pulse: Option<&dyn zencodec::Pulse>,
+        ) -> Result<EncodeOutput, At<zencodec::CodecError>> {
             (move || -> Result<EncodeOutput, At<JxlError>> {
                 // Check cancellation before expensive encode.
-                if let Some(stop) = stop {
+                if let Some(stop) = pulse {
                     stop.check()
                         .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
                 }
@@ -1978,7 +1982,7 @@ mod decoding {
             JxlDecodeJob {
                 limits: None,
                 policy: DecodePolicy::none(),
-                stop: None,
+                pulse: None,
                 start_frame_index: 0,
                 extract_gain_map: false,
                 gain_map_render: zencodec::GainMapRender::default(),
@@ -2031,7 +2035,7 @@ mod decoding {
     pub struct JxlDecodeJob {
         limits: Option<ResourceLimits>,
         policy: DecodePolicy,
-        stop: Option<zencodec::StopToken>,
+        pulse: Option<zencodec::SharedPulse>,
         start_frame_index: u32,
         extract_gain_map: bool,
         /// Gain-map rendition intent (zencodec 0.1.21). `Components` (and
@@ -2437,8 +2441,8 @@ mod decoding {
         type StreamDec = Unsupported<At<zencodec::CodecError>>;
         type AnimationFrameDec = JxlAnimationFrameDecoder;
 
-        fn with_stop(mut self, stop: zencodec::StopToken) -> Self {
-            self.stop = Some(stop);
+        fn with_pulse(mut self, pulse: zencodec::SharedPulse) -> Self {
+            self.pulse = Some(pulse);
             self
         }
 
@@ -2503,7 +2507,7 @@ mod decoding {
                     },
                     max_memory: self.limits.as_ref().and_then(|l| l.max_memory_bytes),
                 };
-                let stop = self.stop.as_ref().map(|s| s as &dyn Stop);
+                let stop = self.pulse.as_ref().map(|p| p as &dyn Stop);
                 crate::inventory::walk(data, cfg, stop).map_err(|e| match e {
                     crate::inventory::WalkError::Parts(e) => {
                         use zencodec::CategorizedError;
@@ -2613,7 +2617,7 @@ mod decoding {
                     data,
                     limits: self.limits,
                     policy: self.policy,
-                    stop: self.stop,
+                    pulse: self.pulse,
                     preferred: preferred.to_vec(),
                     extract_gain_map: self.extract_gain_map,
                     gain_map_render: self.gain_map_render,
@@ -2696,7 +2700,7 @@ mod decoding {
                     data: data.into_owned(),
                     limits: self.limits,
                     policy: self.policy,
-                    stop: self.stop,
+                    pulse: self.pulse,
                     preferred: preferred.to_vec(),
                     frames: None,
                     image_info: Some(image_info),
@@ -2715,7 +2719,7 @@ mod decoding {
         data: Cow<'a, [u8]>,
         limits: Option<ResourceLimits>,
         policy: DecodePolicy,
-        stop: Option<zencodec::StopToken>,
+        pulse: Option<zencodec::SharedPulse>,
         preferred: Vec<PixelDescriptor>,
         extract_gain_map: bool,
         gain_map_render: zencodec::GainMapRender,
@@ -2739,8 +2743,9 @@ mod decoding {
                     .as_ref()
                     .map(|l| l.prefer_fallible_allocations)
                     .unwrap_or_default();
+                // The native decoder polls an owned view of the job's pulse.
                 let stop_arc: Option<Arc<dyn Stop>> =
-                    self.stop.map(|s| Arc::new(s) as Arc<dyn Stop>);
+                    self.pulse.map(|p| Arc::new(p) as Arc<dyn Stop>);
                 #[cfg(feature = "reconstruct-hdr")]
                 let stop_for_apply = stop_arc.clone();
                 // Gate progressive content during decode when the policy forbids it.
@@ -2887,7 +2892,7 @@ mod decoding {
         data: Vec<u8>,
         limits: Option<ResourceLimits>,
         policy: DecodePolicy,
-        stop: Option<zencodec::StopToken>,
+        pulse: Option<zencodec::SharedPulse>,
         preferred: Vec<PixelDescriptor>,
         /// Pre-decoded frames (lazily populated on first render_next_frame call).
         frames: Option<DecodedFrames>,
@@ -2943,8 +2948,8 @@ mod decoding {
             }
 
             // Forward stop token for cooperative cancellation.
-            if let Some(ref stop) = self.stop {
-                options.stop = Arc::new(stop.clone());
+            if let Some(ref pulse) = self.pulse {
+                options.stop = Arc::new(pulse.clone());
             }
 
             let decoder = JxlRsDecoder::new(options);
@@ -3224,7 +3229,7 @@ mod decoding {
 
         fn render_next_frame(
             &mut self,
-            _stop: Option<&dyn Stop>,
+            _pulse: Option<&dyn zencodec::Pulse>,
         ) -> Result<Option<AnimationFrame<'_>>, At<zencodec::CodecError>> {
             // Single fallible site (the eager all-frames decode): convert at the
             // boundary. `render_next_frame` returns a frame borrowing `self`, so
@@ -3241,17 +3246,17 @@ mod decoding {
 
         fn render_next_frame_to_sink(
             &mut self,
-            stop: Option<&dyn Stop>,
+            pulse: Option<&dyn zencodec::Pulse>,
             sink: &mut dyn zencodec::decode::DecodeRowSink,
         ) -> Result<Option<OutputInfo>, At<zencodec::CodecError>> {
             // The helper drives `render_next_frame_owned` + `wrap_sink_error`,
             // both `Self::Error` (now `At<CodecError>`).
-            zencodec::helpers::copy_frame_to_sink(self, stop, sink)
+            zencodec::helpers::copy_frame_to_sink(self, pulse, sink)
         }
 
         fn render_next_frame_owned(
             &mut self,
-            _stop: Option<&dyn Stop>,
+            _pulse: Option<&dyn zencodec::Pulse>,
         ) -> Result<Option<OwnedAnimationFrame>, At<zencodec::CodecError>> {
             if self.frames.is_none() {
                 self.decode_all_frames().map_err(zencodec::CodecError::of)?;

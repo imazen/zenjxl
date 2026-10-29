@@ -9,12 +9,13 @@ use std::{
     },
 };
 use zencodec::{
-    At, CodecSet, ImageFormat, ResourceLimits, StopToken, Unstoppable,
+    At, CodecSet, ImageFormat, ResourceLimits, SharedPulse,
     collection::{
         CollectionOpenError, Composition, ImageRequest, OpenRequest, Rect, SelectionError,
     },
     decode::DecodePolicy,
     enough::{Stop, StopReason},
+    how_far::StopOnly,
     image::{ImageOutput, Row},
     operation::{CollectionStage, Decision, PolicySet, Question},
     source::{DynReadAt, ReadAtShim, SliceReadAt},
@@ -37,8 +38,8 @@ fn codecs() -> CodecSet {
 fn request(view: Composition) -> OpenRequest {
     OpenRequest::new(view, 512)
 }
-fn stop() -> StopToken {
-    StopToken::new(Unstoppable)
+fn pulse() -> SharedPulse {
+    SharedPulse::default()
 }
 fn samples(image: &ImageOutput) -> Vec<Vec<u8>> {
     let mapped = image.map().unwrap();
@@ -117,7 +118,7 @@ fn replacement_releases_native_color_and_keeps_exact_independent_auxiliary_owner
                 &mut source,
                 request(view).with_output_storage(storage.clone()),
                 PolicySet::new(),
-                stop(),
+                pulse(),
             )
             .unwrap();
         let image = opened
@@ -241,7 +242,7 @@ fn public_collection_retains_views_interpretation_and_owned_samples() {
                 &mut source,
                 request(view),
                 resolver,
-                stop(),
+                pulse(),
             )
             .unwrap();
         drop(registry);
@@ -349,7 +350,7 @@ fn all_stored_orientations_remain_explicit_in_both_views() {
                     &mut source,
                     request(view),
                     PolicySet::new(),
-                    stop(),
+                    pulse(),
                 )
                 .unwrap();
             let mut cursor = images.images().unwrap();
@@ -400,7 +401,7 @@ fn unhandled_requirements_refuse_before_io_with_typed_located_causes() {
             &mut NoRead,
             request(Composition::Composited),
             PolicySet::new(),
-            stop(),
+            pulse(),
         )
         .err()
         .unwrap();
@@ -419,7 +420,7 @@ fn unhandled_requirements_refuse_before_io_with_typed_located_causes() {
             &mut NoRead,
             request(Composition::Composited),
             PolicySet::new(),
-            stop(),
+            pulse(),
         )
         .err()
         .unwrap();
@@ -435,7 +436,7 @@ fn unhandled_requirements_refuse_before_io_with_typed_located_causes() {
             &mut NoRead,
             request(Composition::Composited),
             PolicySet::new(),
-            stop(),
+            pulse(),
         )
         .err()
         .unwrap();
@@ -486,7 +487,7 @@ fn resident_input_limit_uses_actual_bytes_before_native_parsing() {
                         &mut source,
                         request(view),
                         PolicySet::new(),
-                        stop(),
+                        pulse(),
                     )
                     .err()
                     .expect("oversize resident input was admitted");
@@ -509,7 +510,7 @@ fn resident_input_limit_uses_actual_bytes_before_native_parsing() {
             &mut NoRead,
             request(Composition::Composited),
             PolicySet::new(),
-            stop(),
+            pulse(),
         )
         .err()
         .unwrap();
@@ -524,7 +525,7 @@ fn resident_input_limit_uses_actual_bytes_before_native_parsing() {
             &mut NoRead,
             request(Composition::Composited),
             PolicySet::new(),
-            stop(),
+            pulse(),
         )
         .err()
         .unwrap();
@@ -545,7 +546,7 @@ fn resident_input_limit_boundary_preserves_both_views_and_native_samples() {
                 &mut source,
                 request(view),
                 PolicySet::new(),
-                stop(),
+                pulse(),
             )
             .unwrap();
         let expected = original.first_image(&ImageRequest::new()).unwrap().unwrap();
@@ -562,7 +563,7 @@ fn resident_input_limit_boundary_preserves_both_views_and_native_samples() {
                         &mut source,
                         request(view),
                         PolicySet::new(),
-                        stop(),
+                        pulse(),
                     )
                     .unwrap();
                 let output = images.first_image(&ImageRequest::new()).unwrap().unwrap();
@@ -591,7 +592,7 @@ fn foreign_id_child_and_region_refusals_leave_valid_selection_available() {
             &mut first_source,
             request(Composition::Uncomposited),
             PolicySet::new(),
-            stop(),
+            pulse(),
         )
         .unwrap();
     let mut second = codecs()
@@ -600,7 +601,7 @@ fn foreign_id_child_and_region_refusals_leave_valid_selection_available() {
             &mut second_source,
             request(Composition::Uncomposited),
             PolicySet::new(),
-            stop(),
+            pulse(),
         )
         .unwrap();
     let mut cursor = first.images().unwrap();
@@ -665,7 +666,7 @@ fn cancellation_and_timeout_cover_all_observed_publication_seams() {
                 &mut source,
                 request(view),
                 PolicySet::new(),
-                StopToken::new(token),
+                SharedPulse::new(StopOnly::new(token)),
             )?;
             let result = images.first_image(&ImageRequest::new());
             if let Err(error) = &result {
@@ -735,7 +736,7 @@ fn callback_errors_keep_location_and_do_not_leak_payloads_or_bypass_policy() {
             &mut source,
             request(Composition::Uncomposited),
             resolver,
-            stop(),
+            pulse(),
         )
         .unwrap();
     let error = images.first_image(&ImageRequest::new()).unwrap_err();
@@ -749,7 +750,7 @@ fn callback_errors_keep_location_and_do_not_leak_payloads_or_bypass_policy() {
             &mut source,
             request(Composition::Uncomposited),
             PolicySet::new().allow_opaque_profiles(false),
-            stop(),
+            pulse(),
         )
         .unwrap();
     assert_eq!(
@@ -777,7 +778,7 @@ fn native_discovery_allowances_latch_failure_instead_of_reporting_exhaustion() {
                 &mut source,
                 request(view),
                 PolicySet::new(),
-                stop(),
+                pulse(),
             )
             .unwrap();
         let mut cursor = collection.images().unwrap();
@@ -816,7 +817,7 @@ fn ordinary_first(bytes: &[u8], view: Composition) -> ImageOutput {
             &mut source,
             request(view),
             PolicySet::new(),
-            stop(),
+            pulse(),
         )
         .unwrap()
         .first_image(&ImageRequest::new())
@@ -863,7 +864,7 @@ fn output_storage_follows_last_clone_across_registry_drop_and_new_operations() {
                     &mut source,
                     request(view).with_output_storage(storage.clone()),
                     resolver,
-                    stop(),
+                    pulse(),
                 )
                 .unwrap();
             drop(registry);
@@ -895,7 +896,7 @@ fn output_storage_follows_last_clone_across_registry_drop_and_new_operations() {
                     &mut other_source,
                     request(view).with_output_storage(storage.clone()),
                     PolicySet::new(),
-                    stop(),
+                    pulse(),
                 )
                 .unwrap();
             let mut cursor = other.images().unwrap();
@@ -955,7 +956,7 @@ fn output_storage_partial_admission_refuses_without_unaccounted_fallback() {
                     &mut source,
                     request(view).with_output_storage(storage.clone()),
                     resolver,
-                    stop(),
+                    pulse(),
                 )
                 .unwrap();
             let error = opened.first_image(&ImageRequest::new()).unwrap_err();
@@ -999,10 +1000,10 @@ fn output_storage_releases_unpublished_samples_on_stop_decline_error_and_unwind(
         let storage = StorageBudget::new(size, objects);
         let registry = CodecSet::new().with_collection(JxlCollectionConfig::new(64, 64));
         let observed = Arc::new(AtomicUsize::new(0));
-        let token = StopToken::new(StopAfterOutput {
+        let token = SharedPulse::new(StopOnly::new(StopAfterOutput {
             storage: storage.clone(),
             observed: observed.clone(),
-        });
+        }));
         let mut source = ReadAtShim(SliceReadAt::new(&bytes));
         let mut opened = registry
             .open_collection(
@@ -1041,7 +1042,7 @@ fn output_storage_releases_unpublished_samples_on_stop_decline_error_and_unwind(
                     &mut source,
                     request(view).with_output_storage(storage.clone()),
                     resolver,
-                    stop(),
+                    pulse(),
                 )
                 .unwrap();
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1086,7 +1087,7 @@ fn operation_output_pools_are_independent_through_one_registry() {
                     &mut source,
                     request,
                     PolicySet::new(),
-                    stop(),
+                    pulse(),
                 )
                 .unwrap()
                 .first_image(&ImageRequest::new())
@@ -1136,7 +1137,7 @@ fn output_pool_does_not_satisfy_native_workspace_requirement() {
             &mut source,
             request(Composition::Composited).with_output_storage(storage.clone()),
             PolicySet::new(),
-            stop(),
+            pulse(),
         )
         .err()
         .expect("payload pool was mistaken for workspace admission");
