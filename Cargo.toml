@@ -26,7 +26,7 @@ rgb = { version = "0.8.53", default-features = false, features = ["as-bytes"] }
 imgref = "1.12.0"
 enough = "0.4.3"
 # Native collection F32 payloads retain word alignment while borrowing bytes.
-bytemuck = { version = "1.25.2", default-features = false, optional = true }
+bytemuck = { version = "1.25.2", default-features = false, features = ["extern_crate_alloc"], optional = true }
 # Shared optional-Pulse contract; paired releases resolve through the root patches.
 zencodec = { version = ">=0.2.0, <0.4.0" }
 zenpixels = { version = ">=0.2.17, <0.4.0", default-features = false, features = ["rgb"] }
@@ -114,7 +114,7 @@ metadata-rewrite = ["dep:zenmeta"]
 default = ["encode", "decode"]
 # Container inventory is optional; ordinary metadata decode stays available.
 inventory = ["zencodec", "decode"]
-decode = ["dep:jxl"]
+decode = ["dep:jxl", "dep:bytemuck"]
 threads = ["decode", "jxl/threads"]
 encode = ["dep:jxl-encoder"]
 # Enable rayon-based per-frame parallelism inside the JXL encoder.

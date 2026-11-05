@@ -22,7 +22,6 @@
 //!
 //! [`AllocPreference`]: zencodec::AllocPreference
 
-use alloc::vec;
 use alloc::vec::Vec;
 use whereat::{At, at};
 
@@ -53,7 +52,7 @@ pub(crate) fn resolve_fallible(
 /// `pref` is the caller's [`AllocPreference`](zencodec::AllocPreference);
 /// `site_default_fallible` is this site's default when `pref` is `CodecDefault`.
 ///
-/// * fallible → `try_reserve_exact` then zero-fill, returning
+/// * fallible → allocator-zeroed storage, returning
 ///   [`JxlError::OutOfMemory`] on allocation failure.
 /// * infallible → `vec![0u8; n]` (single `calloc`, aborts on OOM).
 pub(crate) fn alloc_zeroed(
@@ -61,18 +60,15 @@ pub(crate) fn alloc_zeroed(
     site_default_fallible: bool,
     n: usize,
 ) -> Result<Vec<u8>, At<JxlError>> {
-    if resolve_fallible(pref, site_default_fallible) {
-        let mut v = Vec::new();
-        v.try_reserve_exact(n).map_err(|_| {
-            at!(JxlError::OutOfMemory(alloc::format!(
-                "out of memory allocating {n} bytes"
-            )))
-        })?;
-        v.resize(n, 0);
-        Ok(v)
-    } else {
-        Ok(vec![0u8; n])
-    }
+    bytemuck::allocation::try_zeroed_vec(n).map_err(|()| {
+        if !resolve_fallible(pref, site_default_fallible) {
+            let layout = core::alloc::Layout::array::<u8>(n).expect("capacity overflow");
+            alloc::alloc::handle_alloc_error(layout);
+        }
+        at!(JxlError::OutOfMemory(alloc::format!(
+            "out of memory allocating {n} bytes"
+        )))
+    })
 }
 
 /// Allocate an empty `Vec<u8>` with reserved capacity for `cap` bytes, honoring
@@ -139,6 +135,33 @@ mod tests {
     fn explicit_infallible_overrides_any_site_default() {
         assert!(!resolve_fallible(AllocPreference::Infallible, true));
         assert!(!resolve_fallible(AllocPreference::Infallible, false));
+    }
+
+    #[test]
+    fn zeroed_boundaries_preserve_policy_and_growth() {
+        for pref in [
+            zencodec::AllocPreference::CodecDefault,
+            zencodec::AllocPreference::Fallible,
+            zencodec::AllocPreference::Infallible,
+        ] {
+            for site in [false, true] {
+                for n in [0, 1, 4095, 4096, 4097] {
+                    let mut v = alloc_zeroed(pref, site, n).unwrap();
+                    assert_eq!(v.len(), n);
+                    assert!(v.iter().all(|&b| b == 0));
+                    v.fill(7);
+                    v.push(9);
+                    assert!(v[..n].iter().all(|&b| b == 7));
+                    assert_eq!(v[n], 9);
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "capacity overflow")]
+    fn infallible_overflow_panics() {
+        let _ = alloc_zeroed(zencodec::AllocPreference::Infallible, false, usize::MAX);
     }
 
     #[test]
