@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Whole-image integer decode measures the current `ExactDepth` after rendering;
+  byte-only orientation retains the evidence. Coded bit depth remains separate,
+  and floating output carries no integer-grid statement.
+
 - Fresh zeroed output buffers use allocator-zeroed storage while retaining fallible errors and infallible overflow/allocator handling.
 
 - Shared row encoding now admits and retains canvas declarations, validates strips/completion, rejects one-shot paths after admission, and preserves Pulse reasons at row boundaries. Output remains AT_FINISH; see `docs/declared-rows.md`.

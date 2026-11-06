@@ -233,3 +233,12 @@ release-lint-check:
 declared-rows-check:
     cargo test --locked --features zencodec --test declared_rows --test encode_color_signal --test shared_contracts
     cargo clippy --locked --features zencodec --lib --test declared_rows -- -D warnings
+
+# Whole-image integer evidence and byte-only orientation; no external corpus.
+exact-depth-check:
+    cargo test --locked --no-default-features --features decode,zencodec --test exact_depth --test orientation
+
+exact-depth-contract-check:
+    cargo test --locked --features zencodec --lib --tests
+    cargo clippy --locked --all-targets --features zencodec -- -D warnings
+    cargo check --locked --no-default-features

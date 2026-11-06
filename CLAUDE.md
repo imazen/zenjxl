@@ -72,3 +72,16 @@ The adapter advertised push_rows but inherited the default refusing begin. It
 now retains and enforces the row declaration, including specialized one-shot
 rejection and Pulse boundary reasons. Native algorithms and existing test
 assertions are unchanged. Scope and receipts: `docs/declared-rows.md`.
+
+## Fixed: whole-image integer-grid evidence (2026-11-06)
+
+Native whole-image decode measures the delivered U8/U16 samples after rendering
+and value conversion, then checks cancellation before returning. The adapter
+retains that evidence through descriptor enrichment and byte-only orientation.
+A coded eight-bit black/white fixture measures one bit; lossless RGB16/RGBA16
+with off-grid samples measures sixteen. F32 output has no integer statement.
+`just exact-depth-contract-check` runs the default encode/decode adapter suite,
+strict all-target Clippy and no-default-features check.
+`just exact-depth-check` also checks the decode-only feature set. These passed
+against the root's frozen shared contract and native dependencies. Animation,
+checked collections and reconstructed gain-map evidence are not qualified here.

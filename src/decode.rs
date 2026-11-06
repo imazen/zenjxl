@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 
 use zenpixels::{ChannelLayout, ChannelType, PixelBuffer, PixelDescriptor};
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 
 use jxl::api::{
     ExtraChannel, GainMapBundle, JxlBitDepth, JxlColorEncoding, JxlColorProfile, JxlColorType,
@@ -828,6 +828,7 @@ pub(crate) fn decode_with_options_oriented(
         options.stop = stop;
     }
 
+    let completion_stop = options.stop.clone();
     let decoder = JxlDecoder::new(options);
 
     // Phase 1: parse header
@@ -962,7 +963,18 @@ pub(crate) fn decode_with_options_oriented(
         clamp_f32_buf(&mut buf);
     }
 
-    let pixels = build_pixel_data(&buf, width, height, &chosen);
+    let mut pixels = build_pixel_data(&buf, width, height, &chosen);
+    if matches!(chosen.channel_type, ChannelType::U8 | ChannelType::U16) {
+        let exact = zenpixels::sample::ExactDepth::measure(&pixels.as_slice())
+            .map_err(|error| whereat::at!(JxlError::InvalidInput(error.to_string())))?;
+        pixels
+            .set_exact_depth(Some(exact))
+            .map_err(|error| whereat::at!(JxlError::InvalidInput(error.to_string())))?;
+    }
+
+    completion_stop
+        .check()
+        .map_err(|reason| whereat::at!(JxlError::Cancelled(reason)))?;
 
     Ok(JxlDecodeOutput {
         pixels,

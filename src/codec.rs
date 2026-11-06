@@ -2515,7 +2515,12 @@ mod decoding {
                 return (pixels, info);
             }
             // Pixel-exact orientation transform — no resampling, no rounding.
-            let baked = zenpixels_convert::orient::apply_orientation(pixels.as_slice(), extra);
+            let exact = pixels.exact_depth();
+            let mut baked = zenpixels_convert::orient::apply_orientation(pixels.as_slice(), extra);
+            // The transform only permutes whole pixel bytes.
+            baked
+                .set_exact_depth(exact)
+                .expect("orientation preserves descriptor and grid");
             // `ImageInfo` has no dimension setter; the fields are public. Report the
             // baked buffer's geometry + Identity (pixels are now final, so no
             // consumer can double-apply a stale tag).
