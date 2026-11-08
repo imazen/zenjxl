@@ -892,3 +892,7 @@ Initial release.
 - Probe API for extracting JXL image info without full decode
 - Butteraugli-loop encoding (feature-gated)
 - Multi-threaded decoding (feature-gated)
+
+## Frozen consumer compatibility (2026-11-08)
+
+Use the public fallible pixel orientation facade on frozen a76ac76d. Preserve native and converter causes and traces without changing public error variants or numerical kernels. Consumer qualification belongs to zencodec PR201.

@@ -2410,10 +2410,10 @@ mod decoding {
             pixels: PixelBuffer,
             mut info: ImageInfo,
             hint: OrientationHint,
-        ) -> (PixelBuffer, ImageInfo) {
+        ) -> Result<(PixelBuffer, ImageInfo), At<zencodec::CodecError>> {
             if !Self::hint_bakes(hint) {
                 // Preserve: stored pixels, intrinsic tag — leave both untouched.
-                return (pixels, info);
+                return Ok((pixels, info));
             }
             let extra = Self::extra_orientation(hint);
             if extra.is_identity() {
@@ -2421,17 +2421,32 @@ mod decoding {
                 // ExactTransform(Identity)): the decoder already produced the final
                 // pixels; just declare them final so no stale tag is re-applied.
                 info = info.with_orientation(Orientation::Identity);
-                return (pixels, info);
+                return Ok((pixels, info));
             }
             // Pixel-exact orientation transform — no resampling, no rounding.
-            let baked = zenpixels_convert::orient::apply_orientation(pixels.as_slice(), extra);
+            use zenpixels_convert::PixelSliceConvertExt;
+            let baked = pixels.as_slice().oriented(extra).map_err(|error| {
+                error.map_error(|cause| {
+                    let category = match cause {
+                        zenpixels_convert::ConvertError::AllocationFailed => {
+                            zencodec::ErrorCategory::Resource(zencodec::ResourceError::OutOfMemory)
+                        }
+                        _ => zencodec::ErrorCategory::Internal(zencodec::InternalKind::Dependency),
+                    };
+                    zencodec::CodecError::from_parts(
+                        Some("zenjxl"),
+                        category,
+                        alloc::boxed::Box::new(cause),
+                    )
+                })
+            })?;
             // `ImageInfo` has no dimension setter; the fields are public. Report the
             // baked buffer's geometry + Identity (pixels are now final, so no
             // consumer can double-apply a stale tag).
             info.width = baked.width();
             info.height = baked.height();
             info = info.with_orientation(Orientation::Identity);
-            (baked, info)
+            Ok((baked, info))
         }
     }
 
@@ -2731,7 +2746,7 @@ mod decoding {
         type Error = At<zencodec::CodecError>;
 
         fn decode(self) -> Result<DecodeOutput, At<zencodec::CodecError>> {
-            (move || -> Result<DecodeOutput, At<JxlError>> {
+            (move || -> Result<DecodeOutput, At<zencodec::CodecError>> {
                 let native_limits = JxlDecodeJob::to_native_limits(&self.limits);
                 let parallel = policy_to_parallel(&self.limits);
                 // Forward the caller's allocation-fallibility preference to the
@@ -2768,7 +2783,8 @@ mod decoding {
                     JxlDecodeJob::decoder_adjust_orientation(self.orientation),
                     reject_progressive,
                     alloc_pref,
-                )?;
+                )
+                .map_err(zencodec::CodecError::of)?;
 
                 let info = JxlDecodeJob::apply_policy(
                     JxlDecodeJob::jxl_info_to_image_info(&result.info),
@@ -2799,8 +2815,8 @@ mod decoding {
                         #[cfg(not(feature = "reconstruct-hdr"))]
                         zencodec::GainMapRender::ReconstructHdr { .. } => (true, None),
                         _ => {
-                            return Err(whereat::at!(JxlError::InvalidInput(
-                                "unrecognized GainMapRender mode".into()
+                            return Err(zencodec::CodecError::of(whereat::at!(
+                                JxlError::InvalidInput("unrecognized GainMapRender mode".into())
                             )));
                         }
                     };
@@ -2839,7 +2855,7 @@ mod decoding {
                 // HDR gain-map reconstruction so the final composited image is
                 // upright. Pixel-exact — orientation only reorders pixels.
                 let (pixels, info) =
-                    JxlDecodeJob::apply_orientation_to_pixels(pixels, info, self.orientation);
+                    JxlDecodeJob::apply_orientation_to_pixels(pixels, info, self.orientation)?;
 
                 let mut output =
                     DecodeOutput::new(pixels, info).with_source_encoding_details(result.info);
@@ -2863,7 +2879,8 @@ mod decoding {
                             true,
                             false,
                             alloc_pref,
-                        )?;
+                        )
+                        .map_err(zencodec::CodecError::of)?;
                         let source = bundle_to_gain_map_source(gm);
                         let gm_info = source.metadata.clone();
                         output = output.with_extras(zencodec::decode::DecodedGainMap::new(
@@ -2877,7 +2894,6 @@ mod decoding {
                 }
                 Ok(output)
             })()
-            .map_err(zencodec::CodecError::of)
         }
     }
 
