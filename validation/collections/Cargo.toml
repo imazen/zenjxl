@@ -17,6 +17,6 @@ bytemuck = { version = "1.25.2", default-features = false }
 
 [patch.crates-io]
 zencodec = { git = "https://github.com/imazen/zencodec", rev = "3f4fd14feb9bdfed041e426aaa569b236a201158" }
-zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "f23ac7535be1144a22d0dc6b71f866a08b151f34" }
-zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "f23ac7535be1144a22d0dc6b71f866a08b151f34" }
-zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "fe819360581acb3796ea2925f2a81f44f0a430e6" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "18afc75f1fd40c7feafeef6deae4df8e97e5e1b9" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "18afc75f1fd40c7feafeef6deae4df8e97e5e1b9" }
+zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "e1c366b089b29511ef66f1b5af5d9e208dbff5d1" }
