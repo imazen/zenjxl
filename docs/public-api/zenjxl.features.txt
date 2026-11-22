@@ -1,5 +1,5 @@
 # zenjxl public API — additions from non-default features
-# features: butteraugli-loop,decode,encode,inventory,jpeg-lossy,metadata-rewrite,parallel,reconstruct-hdr,threads,zencodec
+# features: butteraugli-loop,collections,decode,encode,inventory,jpeg-lossy,metadata-rewrite,parallel,reconstruct-hdr,threads,zencodec
 # (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
 # Encodings: crate-name prefix stripped; auto traits collapse to a
 # count + exceptions; trait impls collapse to one roster line per
@@ -9,23 +9,39 @@
 
 ## summary
 #
-#   pub modules                                 2
-#   pub types (struct/enum/trait/alias)        13
+#   pub modules                                 3
+#   pub types (struct/enum/trait/alias)        16
+#   pub consts/statics                          1
 #   free functions                              6
 #   inherent methods                           15
-#   struct fields                               7
+#   struct fields                              16
 #   enum variants                               8
-#   trait roster entries (type × trait)        30
-#   auto-trait-complete types                   7
+#   trait roster entries (type × trait)        36
+#   auto-trait-complete types                  10
 #   auto-trait exceptions                       5
 #
 # per-module pub lines:
-#   (root)                           24
+#   (root)                           26
+#   collection                       12
 #   jpeg_lossy                       26
 #   metadata                          1
 
-## items (51 lines)
+## items (65 lines)
 
+pub mod collection
+pub struct collection::JxlCollectionConfig
+pub const fn collection::JxlCollectionConfig::new(usize, u64) -> Self
+#[non_exhaustive] pub struct collection::JxlRawLayer
+pub collection::JxlRawLayer::image: zencodec::collection::ImageId
+pub collection::JxlRawLayer::native: zenjxl_decoder::api::data_types::JxlLayerInfo
+#[non_exhaustive] pub struct collection::JxlSourceFacts
+pub collection::JxlSourceFacts::embedded_color: zenjxl_decoder::api::color::JxlColorProfile
+pub collection::JxlSourceFacts::extra_details: alloc::vec::Vec<zenjxl_decoder::api::data_types::JxlExtraChannelDetails>
+pub collection::JxlSourceFacts::frame_index: usize
+pub collection::JxlSourceFacts::frame_name: alloc::string::String
+pub collection::JxlSourceFacts::frame_timecode: core::option::Option<u32>
+pub collection::JxlSourceFacts::header: zenjxl_decoder::api::JxlBasicInfo
+pub collection::JxlSourceFacts::is_last: bool
 pub mod jpeg_lossy
 #[non_exhaustive] pub enum jpeg_lossy::InferredMetric
 pub jpeg_lossy::InferredMetric::Butteraugli
@@ -54,7 +70,7 @@ pub fn jpeg_lossy::recompress_jpeg_lossy_relative(&[u8], f32, bool, &jpeg_lossy:
 pub fn jpeg_lossy::recompress_jpeg_lossy_target(&[u8], jpeg_lossy::JpegRecompressMethod, jpeg_lossy::QualityTarget, &jpeg_lossy::RelativeScorer<'_>, u8) -> core::result::Result<alloc::vec::Vec<u8>, whereat::at::At<JxlError>>
 pub type jpeg_lossy::RelativeScorer<'a> = (dyn core::ops::function::Fn(&[u8], &[u8], u32, u32) -> f32 + 'a)
 pub mod metadata
-pub fn metadata::rewrite<'a>(&zencodec::metadata_rewrite::Request<'a>) -> core::result::Result<zencodec::metadata_rewrite::Plan<'a>, zencodec::metadata_rewrite::Error>
+pub fn metadata::rewrite<'a>(&zencodec::metadata_rewrite::RewriteRequest<'a>) -> core::result::Result<zencodec::metadata_rewrite::Plan<'a>, zencodec::metadata_rewrite::Error>
 pub struct GainMapData
 pub GainMapData::jhgm_payload: alloc::vec::Vec<u8>
 pub struct JxlAnimationFrameDecoder
@@ -78,7 +94,7 @@ pub fn JxlEncoderConfig::with_distance(self, f32) -> Self
 pub fn JxlEncoderConfig::with_gain_map(self, alloc::vec::Vec<u8>) -> Self
 pub fn JxlEncoderConfig::with_noise(self, bool) -> Self
 
-## trait impls (12 types)
+## trait impls (14 types)
 
 GainMapData: Clone, Debug
 JxlAnimationFrameDecoder: zencodec::traits::decoder::AnimationFrameDecoder
@@ -89,13 +105,15 @@ JxlDecoderConfig: Clone, Debug, Default, zencodec::traits::decoding::DecoderConf
 JxlEncodeJob: zencodec::traits::encoding::EncodeJob
 JxlEncoder: zencodec::traits::encoder::Encoder
 JxlEncoderConfig: Clone, Debug, Default, zencodec::traits::encoding::EncoderConfig
+collection::JxlCollectionConfig: Clone, Copy, Debug, zencodec::collection::factory::CollectionFactory
+collection::JxlRawLayer: Clone, Debug
 jpeg_lossy::InferredMetric: Clone, Copy, Debug, Eq, PartialEq
 jpeg_lossy::JpegRecompressMethod: Clone, Copy, Debug, Default, Eq, PartialEq
 jpeg_lossy::QualityTarget: Clone, Copy, Debug
 
 ## auto traits
 
-7 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+10 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 JxlAnimationFrameDecoder: !RefUnwindSafe !UnwindSafe
 JxlDecodeJob: !RefUnwindSafe !UnwindSafe
 JxlDecoder<'a>: !RefUnwindSafe !UnwindSafe

@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- Bump dependency version floors (`enough` 0.4.5, `almost-enough` 0.4.5,
+  `linear-srgb` 0.6.12, `imgref` 1.12.3, `thiserror` 2.0.21, `zenutils-apidoc`
+  0.1.1), advance `zenflate` (`f6c96cc`) and `butteraugli` (`e45310c`) patches,
+  align `fuzz/Cargo.toml` contract/decoder pins with root (`zencodec` `3f4fd14f`,
+  `zenpixels` `18afc75f`, `zenjxl-decoder` `e1c366b0`), and refresh public API
+  snapshots.
+
 - Whole-image integer decode measures the current `ExactDepth` after rendering;
   byte-only orientation retains the evidence. Coded bit depth remains separate,
   and floating output carries no integer-grid statement.

@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenjxl.txt 102 lines (supported surface) | zenjxl.features.txt 69 added (features: butteraugli-loop,decode,encode,inventory,jpeg-lossy,metadata-rewrite,parallel,reconstruct-hdr,threads,zencodec) | zenjxl.internal.txt 236 lines (10 hidden + 400 excluded-feature)
+# files: zenjxl.txt 99 lines (supported surface) | zenjxl.features.txt 85 added (features: butteraugli-loop,collections,decode,encode,inventory,jpeg-lossy,metadata-rewrite,parallel,reconstruct-hdr,threads,zencodec) | zenjxl.internal.txt 237 lines (11 hidden + 400 excluded-feature)
 
 ## summary
 #
@@ -15,22 +15,21 @@
 #   free functions                              4
 #   struct fields                              38
 #   enum variants                              25
-#   re-exports                                 17
+#   re-exports                                 14
 #   trait roster entries (type × trait)        27
 #   auto-trait-complete types                   6
 #   auto-trait exceptions                       1
 #
 # per-module pub lines:
-#   (root)                           92
+#   (root)                           89
 
-## items (92 lines)
+## items (89 lines)
 
 pub mod zenjxl
 pub use GainMapBundle
 pub use LosslessConfig
 pub use LossyConfig
 pub use PixelLayout
-pub use append_gain_map_box
 pub use calibrated_jxl_quality
 pub use encode_bgra8
 pub use encode_bgra8_lossless
@@ -40,8 +39,6 @@ pub use encode_rgb8
 pub use encode_rgb8_lossless
 pub use encode_rgba8
 pub use encode_rgba8_lossless
-pub use is_bare_codestream
-pub use is_container
 pub use quality_to_distance
 #[non_exhaustive] pub enum JxlError
 pub JxlError::Cancelled(enough::reason::StopReason)
@@ -114,7 +111,7 @@ pub struct JxlLimits
 pub JxlLimits::max_memory_bytes: core::option::Option<u64>
 pub JxlLimits::max_pixels: core::option::Option<u64>
 pub fn decode(&[u8], core::option::Option<&JxlLimits>, &[zenpixels::descriptor::PixelDescriptor]) -> core::result::Result<JxlDecodeOutput, whereat::at::At<JxlError>>
-pub fn decode_with_options(&[u8], core::option::Option<&JxlLimits>, &[zenpixels::descriptor::PixelDescriptor], core::option::Option<bool>, core::option::Option<alloc::sync::Arc<dyn enough::Stop>>) -> core::result::Result<JxlDecodeOutput, whereat::at::At<JxlError>>
+pub fn decode_with_options(&[u8], core::option::Option<&JxlLimits>, &[zenpixels::descriptor::PixelDescriptor], core::option::Option<bool>, core::option::Option<alloc::rcs::arc::Arc<dyn enough::Stop>>) -> core::result::Result<JxlDecodeOutput, whereat::at::At<JxlError>>
 pub fn decode_with_parallel(&[u8], core::option::Option<&JxlLimits>, &[zenpixels::descriptor::PixelDescriptor], core::option::Option<bool>) -> core::result::Result<JxlDecodeOutput, whereat::at::At<JxlError>>
 pub fn probe(&[u8]) -> core::result::Result<JxlInfo, whereat::at::At<JxlError>>
 
