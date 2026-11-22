@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Upgrade `archmage` dev-dependency to `0.9.33`, advance `[patch.crates-io]`
+  pins for `jxl-encoder` (`c087fbd6`), `ultrahdr-core` (`c67bee41`), `zenflate`
+  (`7270e38f`), and `butteraugli` (`48387382`) while keeping `zenjxl-decoder`
+  at `e1c366b0`, and propagate errors from `jxl_encoder::append_gain_map_box`.
+
 - Bump dependency version floors (`enough` 0.4.5, `almost-enough` 0.4.5,
   `linear-srgb` 0.6.12, `imgref` 1.12.3, `thiserror` 2.0.21, `zenutils-apidoc`
   0.1.1), advance `zenflate` (`f6c96cc`) and `butteraugli` (`e45310c`) patches,

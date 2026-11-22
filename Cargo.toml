@@ -57,12 +57,12 @@ ultrahdr-core = { version = "0.6.0", optional = true, default-features = false, 
 zenpng = { git = "https://github.com/imazen/zenpng", rev = "8605d8c4443e3bff6273cde438d3adfa0cbdb2b8" }
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "18afc75f1fd40c7feafeef6deae4df8e97e5e1b9" }
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "18afc75f1fd40c7feafeef6deae4df8e97e5e1b9" }
-ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "ade3c857f5541aaff3828e0c7fad073bfe109fd9" }
-jxl-encoder = { git = "https://github.com/imazen/jxl-encoder", rev = "13b04b6b71c8847b1d95414586c3a8c0023355ef" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "c67bee41f54427ef8015a815b11c6167d6d480af" }
+jxl-encoder = { git = "https://github.com/imazen/jxl-encoder", rev = "c087fbd66d2db60de1c39bb401444f41b7435a54" }
 zenjpeg = { git = "https://github.com/imazen/zenjpeg", rev = "9274e38073684876c4283918251f5ccdb4a0b02f" }
 zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "e1c366b089b29511ef66f1b5af5d9e208dbff5d1" }
-zenflate = { git = "https://github.com/imazen/zenflate", rev = "f6c96cc68e6ce49473943dba1ff1159bfad7a74d" }
-butteraugli = { git = "https://github.com/imazen/butteraugli", rev = "e45310c2ef1fd3b8760a78b9d6e7c798cb87dd86" }
+zenflate = { git = "https://github.com/imazen/zenflate", rev = "7270e38faca9cdbae793938fa229d40ac4fe4c39" }
+butteraugli = { git = "https://github.com/imazen/butteraugli", rev = "48387382c3b3086f8c23548598afcd4066ea9f5f" }
 zencodec = { path = ".zencodec" }
 zenmeta = { path = ".zencodec/zenmeta" }
 zencodec-testkit = { path = ".zencodec/zencodec-testkit" }
@@ -87,7 +87,7 @@ zencodec-testkit = { version = ">=0.2.0, <0.4.0" }
 # Concrete `enough::Stop` token for the README cancellation example
 # (tests/readme_examples.rs compiles the documented snippets).
 almost-enough = "0.4.5"
-archmage = { version = "0.9.32", features = ["std"] }
+archmage = { version = "0.9.33", features = ["std"] }
 # Builds the jhgm gain-map fixture for tests/gain_map_render.rs
 # (GainMapBundle + append_gain_map_bundle).
 jxl-encoder = { version = "0.4.0", default-features = false, features = [

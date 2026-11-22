@@ -1067,10 +1067,11 @@ mod encoding {
         ///
         /// Bare codestreams are wrapped in a container first. Container-format
         /// output gets the jhgm box appended.
-        fn maybe_attach_gain_map(&self, encoded: Vec<u8>) -> Vec<u8> {
+        fn maybe_attach_gain_map(&self, encoded: Vec<u8>) -> Result<Vec<u8>, At<JxlError>> {
             match &self.gain_map {
-                Some(gm) => jxl_encoder::append_gain_map_box(&encoded, &gm.jhgm_payload),
-                None => encoded,
+                Some(gm) => jxl_encoder::append_gain_map_box(&encoded, &gm.jhgm_payload)
+                    .map_err(|e| whereat::at!(JxlError::Encode(e))),
+                None => Ok(encoded),
             }
         }
     }
@@ -1143,7 +1144,7 @@ mod encoding {
                     }
                     let encoded =
                         self.encode_with_metadata(&rgb, width, height, PixelLayout::Rgb8)?;
-                    let encoded = self.maybe_attach_gain_map(encoded);
+                    let encoded = self.maybe_attach_gain_map(encoded)?;
                     self.check_encoded_output_size(&encoded)?;
                     return Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                         .with_mime_type("image/jxl")
@@ -1155,7 +1156,7 @@ mod encoding {
 
                 let data = pixels.contiguous_bytes();
                 let encoded = self.encode_with_metadata(&data, width, height, layout)?;
-                let encoded = self.maybe_attach_gain_map(encoded);
+                let encoded = self.maybe_attach_gain_map(encoded)?;
                 self.check_encoded_output_size(&encoded)?;
 
                 Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
@@ -1205,7 +1206,7 @@ mod encoding {
                     }
                     let encoded =
                         self.encode_with_metadata(&rgb, width, height, PixelLayout::Rgb8)?;
-                    let encoded = self.maybe_attach_gain_map(encoded);
+                    let encoded = self.maybe_attach_gain_map(encoded)?;
                     self.check_encoded_output_size(&encoded)?;
                     Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                         .with_mime_type("image/jxl")
@@ -1225,7 +1226,7 @@ mod encoding {
                     };
                     let encoded =
                         self.encode_with_metadata(&pixel_data, width, height, PixelLayout::Rgba8)?;
-                    let encoded = self.maybe_attach_gain_map(encoded);
+                    let encoded = self.maybe_attach_gain_map(encoded)?;
                     self.check_encoded_output_size(&encoded)?;
                     Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                         .with_mime_type("image/jxl")
@@ -1366,7 +1367,7 @@ mod encoding {
                 self.check_limits(width, rows_pushed)?;
 
                 let encoded = self.encode_with_metadata(data, width, rows_pushed, layout)?;
-                let encoded = self.maybe_attach_gain_map(encoded);
+                let encoded = self.maybe_attach_gain_map(encoded)?;
                 self.check_encoded_output_size(&encoded)?;
 
                 Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
@@ -1567,7 +1568,10 @@ mod encoding {
 
         /// Wrap an encoded animation codestream with EXIF/XMP metadata boxes
         /// and an optional gain map box.
-        fn wrap_with_metadata_and_gain_map(&self, codestream: Vec<u8>) -> Vec<u8> {
+        fn wrap_with_metadata_and_gain_map(
+            &self,
+            codestream: Vec<u8>,
+        ) -> Result<Vec<u8>, At<JxlError>> {
             let has_meta = self
                 .anim_meta
                 .as_ref()
@@ -1575,7 +1579,7 @@ mod encoding {
             let has_gain_map = self.gain_map.is_some();
 
             if !has_meta && !has_gain_map {
-                return codestream;
+                return Ok(codestream);
             }
 
             // Always need container format if we have metadata or gain map.
@@ -1592,8 +1596,9 @@ mod encoding {
             };
 
             match &self.gain_map {
-                Some(gm) => jxl_encoder::append_gain_map_box(&wrapped, &gm.jhgm_payload),
-                None => wrapped,
+                Some(gm) => jxl_encoder::append_gain_map_box(&wrapped, &gm.jhgm_payload)
+                    .map_err(|e| whereat::at!(JxlError::Encode(e))),
+                None => Ok(wrapped),
             }
         }
     }
@@ -1746,7 +1751,7 @@ mod encoding {
                         .map_err_at(JxlError::Encode)?,
                 };
 
-                let encoded = self.wrap_with_metadata_and_gain_map(encoded);
+                let encoded = self.wrap_with_metadata_and_gain_map(encoded)?;
 
                 Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                     .with_mime_type("image/jxl")
@@ -4607,7 +4612,7 @@ mod tests {
             alt_icc_compressed: None,
             gain_map_codestream: vec![0xFF, 0x0A, 0x01, 0x02],
         };
-        let with_gm = jxl_encoder::append_gain_map_box(&encoded, &bundle.serialize());
+        let with_gm = jxl_encoder::append_gain_map_box(&encoded, &bundle.serialize()).unwrap();
 
         // Should now be container format.
         assert!(jxl_encoder::is_container(&with_gm));
