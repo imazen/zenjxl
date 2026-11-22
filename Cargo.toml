@@ -20,11 +20,11 @@ include = [
 
 [dependencies]
 zenmeta = { version = "0.1.0", default-features = false, features = ["rewrite"], optional = true }
-thiserror = { version = "2.0.18", default-features = false }
+thiserror = { version = "2.0.21", default-features = false }
 whereat = { version = "0.1.5"}
 rgb = { version = "0.8.53", default-features = false, features = ["as-bytes"] }
-imgref = "1.12.0"
-enough = "0.4.3"
+imgref = "1.12.3"
+enough = "0.4.5"
 # Native collection F32 payloads retain word alignment while borrowing bytes.
 bytemuck = { version = "1.25.2", default-features = false, features = ["extern_crate_alloc"], optional = true }
 # Shared optional-Pulse contract; paired releases resolve through the root patches.
@@ -35,7 +35,7 @@ zenpixels = { version = ">=0.2.17, <0.4.0", default-features = false, features =
 # (no CMS / ICC db); `rgb` matches the zenpixels feature already enabled above.
 # Pulled in by the `zencodec` feature (the adapter is gated there), like zenwebp.
 zenpixels-convert = { version = ">=0.2.13, <0.4.0", default-features = false, features = ["rgb"], optional = true }
-linear-srgb = { version = "0.6.7"}
+linear-srgb = { version = "0.6.12"}
 jxl = { version = "0.4.0", package = "zenjxl-decoder", optional = true }
 jxl-encoder = { version = "0.4.0", optional = true, default-features = false, features = ["std", "convenience"] }
 # Source-quality detection (header-only) for the inferred-target floor predictor
@@ -61,8 +61,8 @@ ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "ade3c857f55
 jxl-encoder = { git = "https://github.com/imazen/jxl-encoder", rev = "13b04b6b71c8847b1d95414586c3a8c0023355ef" }
 zenjpeg = { git = "https://github.com/imazen/zenjpeg", rev = "9274e38073684876c4283918251f5ccdb4a0b02f" }
 zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "e1c366b089b29511ef66f1b5af5d9e208dbff5d1" }
-zenflate = { git = "https://github.com/imazen/zenflate", rev = "a0ea03637a2cc9a193e343018ae2cfb1a6c31edd" }
-butteraugli = { git = "https://github.com/imazen/butteraugli", rev = "b89693d28cef75332c7bb64dec3702878aa0a475" }
+zenflate = { git = "https://github.com/imazen/zenflate", rev = "f6c96cc68e6ce49473943dba1ff1159bfad7a74d" }
+butteraugli = { git = "https://github.com/imazen/butteraugli", rev = "e45310c2ef1fd3b8760a78b9d6e7c798cb87dd86" }
 zencodec = { path = ".zencodec" }
 zenmeta = { path = ".zencodec/zenmeta" }
 zencodec-testkit = { path = ".zencodec/zencodec-testkit" }
@@ -86,7 +86,7 @@ backtrace = "0.3.76"
 zencodec-testkit = { version = ">=0.2.0, <0.4.0" }
 # Concrete `enough::Stop` token for the README cancellation example
 # (tests/readme_examples.rs compiles the documented snippets).
-almost-enough = "0.4.4"
+almost-enough = "0.4.5"
 archmage = { version = "0.9.32", features = ["std"] }
 # Builds the jhgm gain-map fixture for tests/gain_map_render.rs
 # (GainMapBundle + append_gain_map_bundle).
