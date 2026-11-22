@@ -3383,11 +3383,11 @@ pub use decoding::{JxlAnimationFrameDecoder, JxlDecodeJob, JxlDecoder, JxlDecode
 mod tests {
     #[cfg(any(feature = "encode", feature = "decode"))]
     use super::*;
-    #[cfg(any(feature = "encode", feature = "decode"))]
+    #[cfg(feature = "decode")]
     use alloc::borrow::Cow;
-    #[cfg(feature = "encode")]
-    use alloc::vec;
     #[cfg(any(feature = "encode", feature = "decode"))]
+    use alloc::vec;
+    #[cfg(feature = "encode")]
     use alloc::vec::Vec;
 
     #[cfg(feature = "encode")]
@@ -3682,11 +3682,10 @@ mod tests {
     #[cfg(feature = "decode")]
     #[test]
     fn probe_returns_info() {
-        use zencodec::decode::{DecodeJob, DecoderConfig};
-
         // Encode a minimal image to probe
         #[cfg(feature = "encode")]
         {
+            use zencodec::decode::{DecodeJob, DecoderConfig};
             use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
             let pixels: Vec<rgb::Rgb<u8>> = vec![rgb::Rgb { r: 0, g: 0, b: 0 }; 4];
