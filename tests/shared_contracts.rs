@@ -120,8 +120,8 @@ fn rewrite_preserves_encoded_image_and_decoded_metadata() {
             let a = zenjxl::decode(&input, None, &[]).unwrap();
             let b = zenjxl::decode(out, None, &[]).unwrap();
             assert_eq!(
-                a.pixels.as_contiguous_bytes(),
-                b.pixels.as_contiguous_bytes()
+                a.pixels.as_view().as_contiguous_bytes(),
+                b.pixels.as_view().as_contiguous_bytes()
             );
             assert_eq!(a.info.icc_profile, b.info.icc_profile);
             Ok(())

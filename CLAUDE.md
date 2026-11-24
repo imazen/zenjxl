@@ -4,12 +4,15 @@ Thin Rust wrapper around `jxl-encoder` (pure-Rust JPEG XL encoder) and `zenjxl-d
 
 ## Known Bugs
 
-- Collection integration exposed duplicate zencodec identities through direct Git
-  dependencies in HDR/JPEG adapters. A registry patch alone cannot replace those
-  edges. The root integration build patches both sources to the exact `.zencodec`
-  checkout documented in `docs/COLLECTIONS.md`; `just contract-identity` checks
-  the resolved shared types. Downstream workspaces need their own root patches
-  until publication. Keep the all-feature HDR tests in the validation loop.
+- The integration graph pins the paired pixel, codec, HDR and JPEG sources.
+  External roots need the same patches until publication. Use
+  `just contract-identity` to check the resolved shared types.
+- The decode row-sink fallback reports identity in `orientation_applied`
+  even after a still-image orientation bake. The animation adapter currently
+  applies codestream orientation regardless of its job's orientation hint.
+- Alternate-gamut `jhgm` bundles need their alternate color declaration
+  resolved before gain application. The legacy HDR adapter computes in
+  the base gamut.
 
 ## Variant generation / sweep infrastructure (added 2026-06-11)
 

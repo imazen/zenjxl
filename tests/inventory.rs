@@ -34,13 +34,19 @@ fn lossless(w: u32, h: u32, noisy: bool) -> Vec<u8> {
             }
         })
         .collect();
-    let buf = zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, w, h).expect("buffer");
+    let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        pixels,
+        w,
+        h,
+        zenpixels::ImageSpec::rgb8_srgb(),
+    )
+    .expect("buffer");
     JxlEncoderConfig::new()
         .with_lossless(true)
         .job()
         .encoder()
         .expect("encoder")
-        .encode(buf.as_slice().into())
+        .encode(buf.as_view())
         .expect("encode")
         .into_vec()
 }
@@ -56,13 +62,19 @@ fn lossy(w: u32, h: u32) -> Vec<u8> {
             }
         })
         .collect();
-    let buf = zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, w, h).expect("buffer");
+    let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        pixels,
+        w,
+        h,
+        zenpixels::ImageSpec::rgb8_srgb(),
+    )
+    .expect("buffer");
     JxlEncoderConfig::new()
         .with_generic_quality(60.0)
         .job()
         .encoder()
         .expect("encoder")
-        .encode(buf.as_slice().into())
+        .encode(buf.as_view())
         .expect("encode")
         .into_vec()
 }
@@ -1236,10 +1248,14 @@ fn animation(w: u32, h: u32, frames: u32) -> Vec<u8> {
                 }
             })
             .collect();
-        let buf =
-            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, w, h).expect("buffer");
-        enc.push_frame(buf.as_slice().into(), 100, None)
-            .expect("push");
+        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+            pixels,
+            w,
+            h,
+            zenpixels::ImageSpec::rgb8_srgb(),
+        )
+        .expect("buffer");
+        enc.push_frame(buf.as_view(), 100, None).expect("push");
     }
     enc.finish(None).expect("finish").into_vec()
 }

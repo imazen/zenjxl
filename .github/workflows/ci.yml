@@ -53,12 +53,6 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest, windows-11-arm]
     steps:
       - uses: actions/checkout@v7
-      - name: Check out the shared contract revision
-        uses: actions/checkout@v7
-        with:
-          repository: imazen/zencodec
-          ref: 3f4fd14feb9bdfed041e426aaa569b236a201158
-          path: .zencodec
       - name: Clone zenjxl-decoder (test resources)
         shell: bash
         run: git clone --depth 1 https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
@@ -93,12 +87,6 @@ jobs:
       - name: Clone zenjxl-decoder (test resources)
         shell: bash
         run: git clone --depth 1 https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
-      - name: Check out the shared contract revision
-        uses: actions/checkout@v7
-        with:
-          repository: imazen/zencodec
-          ref: 3f4fd14feb9bdfed041e426aaa569b236a201158
-          path: .zencodec
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -123,12 +111,6 @@ jobs:
       CROSS_CONTAINER_OPTS: --security-opt seccomp=unconfined
     steps:
       - uses: actions/checkout@v7
-      - name: Check out the shared contract revision
-        uses: actions/checkout@v7
-        with:
-          repository: imazen/zencodec
-          ref: 3f4fd14feb9bdfed041e426aaa569b236a201158
-          path: .zencodec
       - name: Clone zenjxl-decoder (test resources)
         shell: bash
         run: git clone --depth 1 https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
@@ -158,12 +140,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Check out the shared contract revision
-        uses: actions/checkout@v7
-        with:
-          repository: imazen/zencodec
-          ref: 3f4fd14feb9bdfed041e426aaa569b236a201158
-          path: .zencodec
       - name: Clone zenjxl-decoder (test resources)
         shell: bash
         run: git clone --depth 1 https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
@@ -179,12 +155,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Check out the shared contract revision
-        uses: actions/checkout@v7
-        with:
-          repository: imazen/zencodec
-          ref: 3f4fd14feb9bdfed041e426aaa569b236a201158
-          path: .zencodec
       - name: Clone zenjxl-decoder (test resources)
         shell: bash
         run: git clone --depth 1 https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
@@ -222,12 +192,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Check out the shared contract revision
-        uses: actions/checkout@v7
-        with:
-          repository: imazen/zencodec
-          ref: 3f4fd14feb9bdfed041e426aaa569b236a201158
-          path: .zencodec
       - name: Clone zenjxl-decoder (test resources)
         shell: bash
         run: git clone --depth 1 https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
@@ -246,12 +210,6 @@ jobs:
       - uses: actions/checkout@v7
       - name: Clone zenjxl-decoder (test resources)
         run: git clone --depth 1 https://github.com/imazen/zenjxl-decoder ../zenjxl-decoder
-      - name: Check out the shared contract revision
-        uses: actions/checkout@v7
-        with:
-          repository: imazen/zencodec
-          ref: 3f4fd14feb9bdfed041e426aaa569b236a201158
-          path: .zencodec
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: Swatinem/rust-cache@v2

@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES
+
+- The zenpixels 0.5 cohort replaces `PixelBuffer`, `PixelSlice` and
+  `PixelDescriptor` with `PixelBuf`, `PixelView` and `ImageSpec`.
+  Whole-image and animation decode adopt native-aligned output storage
+  directly. The output spec describes the decoder's active color profile.
+  Integer evidence reports a full-range grid common to the delivered channels.
+- Reconstruct a `jhgm` gain map in stored coordinates before correcting the
+  base orientation. The final byte permutation retains HDR metadata and
+  color provenance.
+
+### Earlier changes
+
 - Upgrade `archmage` dev-dependency to `0.9.33`, advance `[patch.crates-io]`
   pins for `jxl-encoder` (`c087fbd6`), `ultrahdr-core` (`c67bee41`), `zenflate`
   (`7270e38f`), and `butteraugli` (`48387382`) while keeping `zenjxl-decoder`

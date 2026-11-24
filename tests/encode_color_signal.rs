@@ -9,15 +9,16 @@ use zencodec::decode::{Decode, DecodeJob, DecoderConfig};
 use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 use zencodec::{Metadata, MetadataPolicy};
 use zenjxl::{JxlDecoderConfig, JxlEncoderConfig};
-use zenpixels::{PixelDescriptor, PixelSlice};
+use zenpixels::{ImageSpec, PixelView};
 
-fn encode(desc: PixelDescriptor, meta: Option<Metadata>) -> Vec<u8> {
+#[allow(deprecated)] // Exercise retained best-effort metadata behavior.
+fn encode(desc: ImageSpec, meta: Option<Metadata>) -> Vec<u8> {
     let (w, h) = (8u32, 4u32);
-    let bpp = desc.bytes_per_pixel();
+    let bpp = desc.layout.bytes_per_pixel();
     let bytes: Vec<u8> = (0..w as usize * h as usize * bpp)
         .map(|i| (i * 37) as u8)
         .collect();
-    let slice = PixelSlice::new(&bytes, w, h, w as usize * bpp, desc).unwrap();
+    let slice = PixelView::new(&bytes, w, h, w as usize * bpp, desc).unwrap();
     let mut job = JxlEncoderConfig::new().with_generic_quality(90.0).job();
     if let Some(m) = meta {
         job = job.with_metadata_policy(m, MetadataPolicy::PreserveExact);
@@ -38,15 +39,15 @@ fn decode(bytes: &[u8]) -> zencodec::decode::DecodeOutput {
 #[test]
 fn hdr_and_wide_gamut_descriptors_are_signalled_without_metadata() {
     for (desc, primaries, transfer) in [
-        (PixelDescriptor::RGB16_BT2100_PQ, 9, 16),
-        (PixelDescriptor::RGB16_BT2100_HLG, 9, 18),
+        (ImageSpec::rgb16_bt2100_pq(), 9, 16),
+        (ImageSpec::rgb16_bt2100_hlg_scene(), 9, 18),
         (
-            PixelDescriptor::RGB8_SRGB.with_primaries(zenpixels::ColorPrimaries::DisplayP3),
+            ImageSpec::rgb8_srgb().with_primaries(zenpixels::Primaries::DisplayP3),
             12,
             13,
         ),
     ] {
-        let out = decode(&encode(desc, None));
+        let out = decode(&encode(desc.clone(), None));
         let cicp = out
             .info()
             .source_color
@@ -72,7 +73,7 @@ fn a_jpeg_exif_prefix_is_not_boxed() {
     let mut app1 = b"Exif\0\0".to_vec();
     app1.extend_from_slice(&tiff);
     let out = decode(&encode(
-        PixelDescriptor::RGB8_SRGB,
+        ImageSpec::rgb8_srgb(),
         Some(Metadata::none().with_exif(app1)),
     ));
     let exif = out.metadata().exif.expect("EXIF kept");

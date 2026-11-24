@@ -77,7 +77,7 @@ pub ValidationError::NoiseInLosslessMode
 pub struct JxlDecodeOutput
 pub JxlDecodeOutput::gain_map: core::option::Option<zenjxl_decoder::container::gain_map::GainMapBundle>
 pub JxlDecodeOutput::info: JxlInfo
-pub JxlDecodeOutput::pixels: zenpixels::buffer::PixelBuffer
+pub JxlDecodeOutput::pixels: zenpixels::buffer::PixelBuf
 pub struct JxlExtraChannelInfo
 pub JxlExtraChannelInfo::alpha_associated: bool
 pub JxlExtraChannelInfo::bits_per_sample: u8
@@ -110,9 +110,9 @@ pub JxlInfo::xyb_encoded: bool
 pub struct JxlLimits
 pub JxlLimits::max_memory_bytes: core::option::Option<u64>
 pub JxlLimits::max_pixels: core::option::Option<u64>
-pub fn decode(&[u8], core::option::Option<&JxlLimits>, &[zenpixels::descriptor::PixelDescriptor]) -> core::result::Result<JxlDecodeOutput, whereat::at::At<JxlError>>
-pub fn decode_with_options(&[u8], core::option::Option<&JxlLimits>, &[zenpixels::descriptor::PixelDescriptor], core::option::Option<bool>, core::option::Option<alloc::rcs::arc::Arc<dyn enough::Stop>>) -> core::result::Result<JxlDecodeOutput, whereat::at::At<JxlError>>
-pub fn decode_with_parallel(&[u8], core::option::Option<&JxlLimits>, &[zenpixels::descriptor::PixelDescriptor], core::option::Option<bool>) -> core::result::Result<JxlDecodeOutput, whereat::at::At<JxlError>>
+pub fn decode(&[u8], core::option::Option<&JxlLimits>, &[zenpixels::color::ImageSpec]) -> core::result::Result<JxlDecodeOutput, whereat::at::At<JxlError>>
+pub fn decode_with_options(&[u8], core::option::Option<&JxlLimits>, &[zenpixels::color::ImageSpec], core::option::Option<bool>, core::option::Option<alloc::rcs::arc::Arc<dyn enough::Stop>>) -> core::result::Result<JxlDecodeOutput, whereat::at::At<JxlError>>
+pub fn decode_with_parallel(&[u8], core::option::Option<&JxlLimits>, &[zenpixels::color::ImageSpec], core::option::Option<bool>) -> core::result::Result<JxlDecodeOutput, whereat::at::At<JxlError>>
 pub fn probe(&[u8]) -> core::result::Result<JxlInfo, whereat::at::At<JxlError>>
 
 ## trait impls (8 types)

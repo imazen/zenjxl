@@ -1,7 +1,7 @@
 //! Compile-checks for the code examples in `README.md`.
 //!
 //! The README's "Quick start" snippets reach across crate boundaries
-//! (`zenpixels` for `PixelBuffer`, `zenpixels-convert` for `.to_rgba8()`,
+//! (`zenpixels` for `PixelBuf`, `zenpixels-convert` for `convert_buf`,
 //! `whereat` for the `At<JxlError>` wrapper, `almost-enough` for a concrete
 //! `Stop` token). Those types aren't visible from a plain `cargo test --doc`
 //! run, so the README examples used to drift out of sync with the real API
@@ -13,7 +13,7 @@
 //! runtime, so the functions are never called.
 //!
 //! Gated on `decode + encode + zencodec` because the decode snippet uses the
-//! `zenpixels-convert` extension trait (pulled in by `zencodec`) and the encode
+//! `zenpixels-convert` conversion API (pulled in by `zencodec`) and the encode
 //! snippet uses the encoder re-exports. CI exercises it via `cargo test
 //! --all-features`.
 #![cfg(all(feature = "decode", feature = "encode", feature = "zencodec"))]
@@ -22,7 +22,7 @@
 // ── Decode → packed RGBA8 (README "Decode") ─────────────────────────────────
 fn decode_to_rgba8() {
     use zenjxl::{JxlLimits, decode, probe};
-    use zenpixels::PixelDescriptor;
+    use zenpixels::ImageSpec;
 
     let jxl_bytes: &[u8] = &[];
 
@@ -37,19 +37,25 @@ fn decode_to_rgba8() {
     };
     let output = decode(jxl_bytes, Some(&limits), &[]).unwrap();
 
-    // Normalize to packed RGBA8 bytes via the `zenpixels-convert` trait.
-    use zenpixels_convert::PixelBufferConvertTypedExt;
-    let rgba: Vec<u8> = output.pixels.to_rgba8().copy_to_contiguous_bytes();
+    // Convert the actual output color and sample layout to packed RGBA8.
+    use zenpixels::PeakSource;
+    use zenpixels_convert::{ConvertPolicy, convert_buf};
+    let converted = convert_buf(
+        &output.pixels.as_view(),
+        ImageSpec::rgba8_srgb(),
+        &ConvertPolicy::permissive(),
+        PeakSource::Measured,
+    )
+    .unwrap();
+    let rgba: Vec<u8> = converted.try_into_vec().unwrap();
 
-    // Native layout straight off the PixelBuffer.
+    // Native layout straight off the PixelBuf.
     let (w, h) = (output.pixels.width(), output.pixels.height());
-    let desc: PixelDescriptor = output.pixels.descriptor();
-    let _bpp = desc.bytes_per_pixel();
-    {
-        // Borrowing native bytes (Some only when rows are unpadded).
-        let borrowed: Option<&[u8]> = output.pixels.as_contiguous_bytes();
-        let _ = borrowed;
-    }
+    let desc = output.pixels.spec();
+    let _bpp = desc.layout.bytes_per_pixel();
+    let view = output.pixels.as_view();
+    let borrowed: Option<&[u8]> = view.as_contiguous_bytes();
+    let _ = borrowed;
     let native = output.pixels.into_parts();
     let _ = (rgba, w, h, native);
 }

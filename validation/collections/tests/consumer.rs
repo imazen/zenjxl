@@ -72,24 +72,19 @@ fn replacement_releases_native_color_and_keeps_exact_independent_auxiliary_owner
         width: u32,
         rows: u32,
         stride: usize,
-        descriptor: zenpixels::PixelDescriptor,
-        context: Option<Arc<zenpixels::ColorContext>>,
+        descriptor: zenpixels::ImageSpec,
     }
     impl PackedImageOwner for Color {
-        fn pixels(&self) -> Result<zenpixels::PixelSlice<'_>, At<zencodec::image::OutputError>> {
-            let pixels = zenpixels::PixelSlice::new(
+        fn pixels(&self) -> Result<zenpixels::PixelView<'_>, At<zencodec::image::OutputError>> {
+            let pixels = zenpixels::PixelView::new(
                 bytemuck::cast_slice(self.data.as_slice()),
                 self.width,
                 self.rows,
                 self.stride,
-                self.descriptor,
+                self.descriptor.clone(),
             )
             .unwrap();
-            Ok(if let Some(context) = &self.context {
-                pixels.with_color_context(context.clone())
-            } else {
-                pixels
-            })
+            Ok(pixels)
         }
     }
     for (name, view) in [
@@ -144,8 +139,7 @@ fn replacement_releases_native_color_and_keeps_exact_independent_auxiliary_owner
                     width: pixels.width(),
                     rows: pixels.rows(),
                     stride,
-                    descriptor: pixels.descriptor(),
-                    context: pixels.color_context().cloned(),
+                    descriptor: pixels.spec().clone(),
                 }
             })
             .unwrap();
@@ -298,8 +292,11 @@ fn public_collection_retains_views_interpretation_and_owned_samples() {
                     image
                         .with_pixels(|p| {
                             assert_eq!(
-                                p.descriptor().format,
-                                zenpixels::PixelFormat::CmykF32Inverted
+                                p.spec().layout,
+                                zenpixels::SampleLayout::new(
+                                    zenpixels::SampleType::F32,
+                                    zenpixels::ChannelOrder::CmykInverted
+                                )
                             )
                         })
                         .unwrap();

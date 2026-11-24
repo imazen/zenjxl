@@ -9,12 +9,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .job()
         .animation_frame_encoder()?;
     for index in 0..3 {
-        let pixels = zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(
+        let pixels = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
             vec![rgb::Rgb::new(index * 40, 20, 60); 16 * 16],
             16,
             16,
+            zenpixels::ImageSpec::rgb8_srgb(),
         )?;
-        encoder.push_frame_timed(pixels.as_slice().into(), FrameDuration::new(1, 30)?, None)?;
+        encoder.push_frame_timed(pixels.as_view(), FrameDuration::new(1, 30)?, None)?;
     }
     std::fs::write(path, encoder.finish(None)?.into_vec())?;
     Ok(())

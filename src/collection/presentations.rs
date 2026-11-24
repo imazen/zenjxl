@@ -244,7 +244,7 @@ impl<'a> JxlItems<'a> {
             decoder.set_pixel_format(format.clone());
         }
         let profile = decoder.output_color_profile().clone();
-        // PixelSlice requires whole-pixel strides, not just sample alignment.
+        // PixelView requires whole-pixel strides, not just sample alignment.
         // We own these buffers, so request one pixel of padding. The native
         // 13-byte padding stress path remains in the native qualification harness.
         let padding = format.color_type.samples_per_pixel() * 4;

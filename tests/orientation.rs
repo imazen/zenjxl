@@ -79,7 +79,7 @@ fn source_pixel_for_dest(
 }
 
 /// Assert that `transformed` equals `base` remapped through `orientation`, bit
-/// for bit. Reads both buffers row-by-row via `PixelSlice::row`, so it is
+/// for bit. Reads both buffers row-by-row via `PixelView::row`, so it is
 /// correct for strided buffers (per the strided-rows discipline) and does not
 /// assume a contiguous backing.
 fn assert_equals_under_orientation(
@@ -151,7 +151,7 @@ fn assert_pixels_identical(
 }
 
 fn channels_of(out: &zencodec::decode::DecodeOutput) -> usize {
-    out.descriptor().channels()
+    out.descriptor().layout.channels()
 }
 
 // ── Preserve ─────────────────────────────────────────────────────────────

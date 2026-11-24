@@ -52,12 +52,12 @@ collection-api output:
     cargo public-api --manifest-path validation/collections/Cargo.toml -p zenjxl -sss --color never | rg 'zenjxl::collection' > "{{output}}"
 
 # Refresh our root build export without reading live sibling worktrees.
-# Caller prepares immutable dependency checkouts at the manifest's paths.
+# The manifest pins the immutable dependency sources.
 integration-validation-sync destination:
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p "{{destination}}"
-    rsync -a --exclude .git --exclude .jj --exclude .workongoing --exclude target --exclude .zencodec --exclude Cargo.lock ./ "{{destination}}/"
+    rsync -a --exclude .git --exclude .jj --exclude .workongoing --exclude target --exclude Cargo.lock ./ "{{destination}}/"
 
 integration-validation:
     just integration-check

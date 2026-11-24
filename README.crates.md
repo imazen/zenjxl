@@ -12,17 +12,21 @@ zenjxl-decoder is Imazen's fork of [jxl-rs](https://github.com/libjxl/jxl-rs) wi
 
 ```toml
 [dependencies]
-zenjxl = "0.2.1"
+zenjxl = "0.3"
 ```
 
 To read decoded pixels back out as packed RGBA8 bytes (see the Decode example),
 also add the pixel crates and — for cancellation — `almost-enough`:
 
 ```toml
-zenpixels = "0.2.13"           # PixelBuffer / PixelDescriptor (returned by decode)
-zenpixels-convert = "0.2.13"   # the `.to_rgba8()` extension trait
+zenpixels = "0.5"               # PixelBuf and ImageSpec
+zenpixels-convert = "0.5"       # convert_buf
 almost-enough = "0.4.4"        # a ready-made cancellation token (optional)
 ```
+
+The versioned examples target the paired release. For integration builds,
+select the draft Git revision and copy the root `[patch.crates-io]` entries
+into the consuming workspace.
 
 ## Quick start
 
@@ -30,7 +34,7 @@ almost-enough = "0.4.4"        # a ready-made cancellation token (optional)
 
 ```rust
 use zenjxl::{decode, probe, JxlLimits};
-use zenpixels::PixelDescriptor;
+use zenpixels::{ImageSpec, PeakSource};
 
 let jxl_bytes: &[u8] = &std::fs::read("photo.jxl").unwrap();
 
@@ -39,27 +43,28 @@ let info = probe(jxl_bytes).unwrap();
 println!("{}x{}, alpha={}, gray={}", info.width, info.height, info.has_alpha, info.is_gray);
 
 // Full decode with resource limits. The 3rd arg is a pixel-format preference
-// list (`&[zenpixels::PixelDescriptor]`); `&[]` lets the decoder pick natively.
+// list (`&[zenpixels::ImageSpec]`); `&[]` lets the decoder pick natively.
 let limits = JxlLimits {
     max_pixels: Some(120_000_000),                  // 108 MP photos are common
     max_memory_bytes: Some(2 * 1024 * 1024 * 1024),
 };
 let output = decode(jxl_bytes, Some(&limits), &[]).unwrap();
 
-// `output.pixels` is a `zenpixels::PixelBuffer` in the image's NATIVE format
-// (opaque → RGB8, with alpha → RGBA8). Normalize to packed RGBA8 bytes with the
-// `zenpixels-convert` extension trait:
-use zenpixels_convert::PixelBufferConvertTypedExt;
-let rgba: Vec<u8> = output.pixels.to_rgba8().copy_to_contiguous_bytes(); // w*h*4, R,G,B,A
+// Convert the actual decoded layout and color to packed RGBA8.
+use zenpixels_convert::{ConvertPolicy, convert_buf};
+let rgba: Vec<u8> = convert_buf(
+    &output.pixels.as_view(),
+    ImageSpec::rgba8_srgb(),
+    &ConvertPolicy::permissive(),
+    PeakSource::Measured,
+).unwrap().try_into_vec().unwrap();
 
-// Need the bytes in their native layout instead? Read them straight off the
-// PixelBuffer — no conversion crate required. `descriptor()` tells you the layout
-// (e.g. RGB8 vs RGBA8); `width()`/`height()` give the dimensions.
+// Borrow the native pixels or take ownership of their backing storage.
 let (w, h) = (output.pixels.width(), output.pixels.height());
-let desc = output.pixels.descriptor();              // PixelDescriptor: channels + bit depth
-let native = output.pixels.into_parts();           // owns data, offset, stride and color context
-// (use `output.pixels.as_contiguous_bytes()` — `Option<&[u8]>`, `Some` only when rows
-// are unpadded — to borrow instead of taking ownership.)
+let view = output.pixels.as_view();
+let spec = view.spec();                           // layout and active color
+let borrowed = view.as_contiguous_bytes();        // Some for tight rows
+let native = output.pixels.into_parts();          // storage, stride, origin and HDR metadata
 ```
 
 **Limits.** `max_pixels` and `max_memory_bytes` both gate up front: before any
@@ -70,8 +75,8 @@ decoder's internal memory tracker, which bounds allocations during the decode
 itself — so it caps both the early estimate and the live decode, not just the
 output buffer. Pass `None` for `limits` to use the decoder's built-in defaults.
 
-**Dependencies & errors.** Besides `zenjxl`, add `zenpixels` (`PixelBuffer`/
-`PixelDescriptor`), `zenpixels-convert` (the `.to_rgba8()` trait), and `enough`
+**Dependencies & errors.** Besides `zenjxl`, add `zenpixels` (`PixelBuf`
+and `ImageSpec`), `zenpixels-convert` (`convert_buf`), and `enough`
 (cancellation). `decode`/`probe`/`encode_*` return `Result<_, whereat::At<E>>`
 (`At<JxlError>`): the `At<…>` adds a build-time source location for logs — print
 the error with its captured frames via `err.full_trace()` (a `Display`, e.g.
@@ -131,7 +136,7 @@ level it would in a JPEG encoder. Convenience wrappers
 
 ## Features
 
-**Decode** -- `probe()` returns `JxlInfo` with dimensions, bit depth, ICC profile, CICP signaling, EXIF orientation, raw EXIF/XMP bytes, extra channel metadata, HDR tone mapping fields, preview size, and gain map bundles. `decode()` returns a `PixelBuffer` with automatic format negotiation. `decode_with_parallel()` enables multithreaded decoding; `decode_with_options()` adds cancellation via `enough::Stop`.
+**Decode** -- `probe()` returns `JxlInfo` with dimensions, bit depth, ICC profile, CICP signaling, EXIF orientation, raw EXIF/XMP bytes, extra channel metadata, HDR tone mapping fields, preview size, and gain map bundles. `decode()` returns a `PixelBuf` with automatic format negotiation. `decode_with_parallel()` enables multithreaded decoding; `decode_with_options()` adds cancellation via `enough::Stop`.
 
 **Encode** -- Convenience functions for RGB, RGBA, BGRA, and grayscale u8 data in both lossy (VarDCT) and lossless (modular) modes. `calibrated_jxl_quality()` maps a 0--100 quality scale to JXL distance. Container utilities (`append_gain_map_box`, `is_bare_codestream`, `is_container`) for gain map authoring.
 

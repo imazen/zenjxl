@@ -3,7 +3,11 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use zenpixels::{ChannelLayout, ChannelType, PixelBuffer, PixelDescriptor};
+use zenpixels::{
+    AlphaMode, ByteStorageMut, ChannelOrder, Cicp, ColorOrigin, ColorSpace, CustomPrimaries, Gamma,
+    HdrMetadata, ImageSpec, PixelBuf, PixelStorage, Primaries, RenderingIntent, SampleLayout,
+    SampleType, SignalRange, Transfer,
+};
 
 use alloc::string::{String, ToString};
 
@@ -192,13 +196,13 @@ impl zencodec::SourceEncodingDetails for JxlInfo {
 #[derive(Debug)]
 pub struct JxlDecodeOutput {
     /// Decoded pixel data.
-    pub pixels: PixelBuffer,
+    pub pixels: PixelBuf,
     /// Image metadata.
     pub info: JxlInfo,
     /// HDR gain map bundle from `jhgm` container box (ISO 21496-1).
     ///
     /// Present when the JXL file contains a gain map for HDR/SDR adaptation.
-    /// The base image is HDR; the gain map maps HDR→SDR (inverse direction).
+    /// ISO 21496-1 metadata determines whether the base is SDR or HDR.
     pub gain_map: Option<GainMapBundle>,
 }
 
@@ -235,7 +239,7 @@ impl JxlLimits {
     }
 }
 
-use jxl::api::{JxlPrimaries, JxlTransferFunction};
+use jxl::api::{JxlPrimaries, JxlTransferFunction, JxlWhitePoint};
 
 pub(crate) fn map_err(e: jxl::api::Error) -> JxlError {
     // Surface a policy rejection as a dedicated variant so callers can match on
@@ -305,13 +309,15 @@ fn jxl_encoding_to_cicp(encoding: &JxlColorEncoding) -> Option<(u8, u8, u8, bool
         JxlColorEncoding::RgbColorSpace {
             primaries,
             transfer_function,
+            white_point,
             ..
         } => {
-            let cp = match primaries {
-                JxlPrimaries::SRGB => 1,   // BT.709
-                JxlPrimaries::BT2100 => 9, // BT.2020
-                JxlPrimaries::P3 => 12,    // Display P3
-                JxlPrimaries::Chromaticities { .. } => return None,
+            let cp = match (primaries, white_point) {
+                (JxlPrimaries::SRGB, JxlWhitePoint::D65) => 1,
+                (JxlPrimaries::BT2100, JxlWhitePoint::D65) => 9,
+                (JxlPrimaries::P3, JxlWhitePoint::DCI) => 11,
+                (JxlPrimaries::P3, JxlWhitePoint::D65) => 12,
+                _ => return None,
             };
             let tc = transfer_to_cicp(transfer_function)?;
             // JXL is always full range RGB, matrix = Identity (0)
@@ -380,7 +386,7 @@ pub(crate) struct ChosenFormat {
     /// The color type we requested (for buffer interpretation).
     pub(crate) color_type: JxlColorType,
     /// The channel type we're decoding into.
-    pub(crate) channel_type: ChannelType,
+    pub(crate) channel_type: SampleType,
 }
 
 /// Choose the output pixel format based on the image's native properties and
@@ -393,26 +399,26 @@ pub(crate) fn choose_pixel_format(
     has_alpha: bool,
     is_gray: bool,
     num_extra: usize,
-    preferred: &[PixelDescriptor],
+    preferred: &[ImageSpec],
 ) -> ChosenFormat {
     let is_float = matches!(bit_depth, JxlBitDepth::Float { .. });
     let bps = bit_depth.bits_per_sample();
 
     // Determine native channel type (what we can produce losslessly)
     let native_channel_type = if is_float || bps > 16 {
-        ChannelType::F32
+        SampleType::F32
     } else if bps > 8 {
-        ChannelType::U16
+        SampleType::U16
     } else {
-        ChannelType::U8
+        SampleType::U8
     };
 
     // Determine native channel layout
     let native_layout = match (is_gray, has_alpha) {
-        (true, false) => ChannelLayout::Gray,
-        (true, true) => ChannelLayout::GrayAlpha,
-        (false, false) => ChannelLayout::Rgb,
-        (false, true) => ChannelLayout::Rgba,
+        (true, false) => ChannelOrder::Gray,
+        (true, true) => ChannelOrder::GrayAlpha,
+        (false, false) => ChannelOrder::Rgb,
+        (false, true) => ChannelOrder::Rgba,
     };
 
     // If preferred list is non-empty, find the first we can produce losslessly.
@@ -421,24 +427,28 @@ pub(crate) fn choose_pixel_format(
     if !preferred.is_empty() {
         for desc in preferred {
             // Can we produce this channel type without precision loss?
-            let ct = desc.channel_type();
+            if !desc.layout.packing.is_full() {
+                continue;
+            }
+            let ct = desc.layout.sample;
             if !can_produce_losslessly(native_channel_type, ct) {
                 continue;
             }
             // Can we produce this layout from the native data?
-            if !layout_compatible(native_layout, desc.layout()) {
+            if !layout_compatible(native_layout, desc.layout.order) {
                 continue;
             }
             // Only allow grayscale output when the source is actually grayscale.
             // XYB-encoded JXL files have 3 color channels internally even if
             // the color profile says "gray", and jxl-rs rejects grayscale output
             // for 3-channel images.
-            if (desc.layout() == ChannelLayout::Gray || desc.layout() == ChannelLayout::GrayAlpha)
+            if (desc.layout.order == ChannelOrder::Gray
+                || desc.layout.order == ChannelOrder::GrayAlpha)
                 && !is_gray
             {
                 continue;
             }
-            return build_chosen(ct, desc.layout(), has_alpha, num_extra);
+            return build_chosen(ct, desc.layout.order, has_alpha, num_extra);
         }
     }
 
@@ -449,27 +459,24 @@ pub(crate) fn choose_pixel_format(
     // explicitly requests it (handled above).
     let default_layout = if is_gray {
         if has_alpha {
-            ChannelLayout::GrayAlpha
+            ChannelOrder::GrayAlpha
         } else {
-            ChannelLayout::Gray
+            ChannelOrder::Gray
         }
     } else if has_alpha {
-        ChannelLayout::Rgba
+        ChannelOrder::Rgba
     } else {
-        ChannelLayout::Rgb
+        ChannelOrder::Rgb
     };
     build_chosen(native_channel_type, default_layout, has_alpha, num_extra)
 }
 
 /// Returns true if we can produce `target` type from `native` without lossy conversion.
-fn can_produce_losslessly(native: ChannelType, target: ChannelType) -> bool {
+fn can_produce_losslessly(native: SampleType, target: SampleType) -> bool {
     match native {
-        ChannelType::U8 => matches!(
-            target,
-            ChannelType::U8 | ChannelType::U16 | ChannelType::F32
-        ),
-        ChannelType::U16 => matches!(target, ChannelType::U16 | ChannelType::F32),
-        ChannelType::F32 => matches!(target, ChannelType::F32),
+        SampleType::U8 => matches!(target, SampleType::U8 | SampleType::U16 | SampleType::F32),
+        SampleType::U16 => matches!(target, SampleType::U16 | SampleType::F32),
+        SampleType::F32 => matches!(target, SampleType::F32),
         _ => false,
     }
 }
@@ -483,7 +490,7 @@ fn can_produce_losslessly(native: ChannelType, target: ChannelType) -> bool {
 /// - RGB ↔ RGBA (add/drop alpha)
 /// - RGB → BGRA / BGR variant (channel reorder — lossless)
 /// - Gray ↔ GrayAlpha (add/drop alpha)
-fn layout_compatible(native: ChannelLayout, target: ChannelLayout) -> bool {
+fn layout_compatible(native: ChannelOrder, target: ChannelOrder) -> bool {
     // The JXL decoder's set_pixel_format handles all color type conversions,
     // so we're quite flexible here. We just need to avoid conversions that
     // are clearly lossy in a way the caller wouldn't expect.
@@ -491,46 +498,45 @@ fn layout_compatible(native: ChannelLayout, target: ChannelLayout) -> bool {
         // Same layout always works
         (a, b) if a == b => true,
         // Adding/removing alpha is fine (decoder handles it)
-        (ChannelLayout::Rgb, ChannelLayout::Rgba | ChannelLayout::Bgra) => true,
-        (ChannelLayout::Rgba, ChannelLayout::Rgb | ChannelLayout::Bgra) => true,
-        (ChannelLayout::Gray, ChannelLayout::GrayAlpha) => true,
-        (ChannelLayout::GrayAlpha, ChannelLayout::Gray) => true,
+        (ChannelOrder::Rgb, ChannelOrder::Rgba | ChannelOrder::Bgra) => true,
+        (ChannelOrder::Rgba, ChannelOrder::Rgb | ChannelOrder::Bgra) => true,
+        (ChannelOrder::Gray, ChannelOrder::GrayAlpha) => true,
+        (ChannelOrder::GrayAlpha, ChannelOrder::Gray) => true,
         // Gray → RGB (replicate — lossless)
         (
-            ChannelLayout::Gray | ChannelLayout::GrayAlpha,
-            ChannelLayout::Rgb | ChannelLayout::Rgba | ChannelLayout::Bgra,
+            ChannelOrder::Gray | ChannelOrder::GrayAlpha,
+            ChannelOrder::Rgb | ChannelOrder::Rgba | ChannelOrder::Bgra,
         ) => true,
         // RGB → Gray (luminance — conceptually lossy, but decoder does it correctly)
-        (
-            ChannelLayout::Rgb | ChannelLayout::Rgba,
-            ChannelLayout::Gray | ChannelLayout::GrayAlpha,
-        ) => true,
+        (ChannelOrder::Rgb | ChannelOrder::Rgba, ChannelOrder::Gray | ChannelOrder::GrayAlpha) => {
+            true
+        }
         _ => false,
     }
 }
 
 fn build_chosen(
-    channel_type: ChannelType,
-    layout: ChannelLayout,
+    channel_type: SampleType,
+    layout: ChannelOrder,
     has_alpha: bool,
     num_extra: usize,
 ) -> ChosenFormat {
     let color_type = match layout {
-        ChannelLayout::Gray => JxlColorType::Grayscale,
-        ChannelLayout::GrayAlpha => JxlColorType::GrayscaleAlpha,
-        ChannelLayout::Rgb => JxlColorType::Rgb,
-        ChannelLayout::Rgba => JxlColorType::Rgba,
-        ChannelLayout::Bgra => JxlColorType::Bgra,
+        ChannelOrder::Gray => JxlColorType::Grayscale,
+        ChannelOrder::GrayAlpha => JxlColorType::GrayscaleAlpha,
+        ChannelOrder::Rgb => JxlColorType::Rgb,
+        ChannelOrder::Rgba => JxlColorType::Rgba,
+        ChannelOrder::Bgra => JxlColorType::Bgra,
         _ => JxlColorType::Rgba, // fallback for unknown layouts
     };
 
     let data_format = match channel_type {
-        ChannelType::U8 => jxl::api::JxlDataFormat::U8 { bit_depth: 8 },
-        ChannelType::U16 => jxl::api::JxlDataFormat::U16 {
+        SampleType::U8 => jxl::api::JxlDataFormat::U8 { bit_depth: 8 },
+        SampleType::U16 => jxl::api::JxlDataFormat::U16 {
             endianness: jxl::api::Endianness::native(),
             bit_depth: 16,
         },
-        ChannelType::F32 => jxl::api::JxlDataFormat::F32 {
+        SampleType::F32 => jxl::api::JxlDataFormat::F32 {
             endianness: jxl::api::Endianness::native(),
         },
         _ => jxl::api::JxlDataFormat::U8 { bit_depth: 8 },
@@ -621,6 +627,13 @@ pub(crate) fn probe_with_orientation(
     data: &[u8],
     adjust_orientation: bool,
 ) -> Result<JxlInfo, At<JxlError>> {
+    probe_output(data, adjust_orientation).map(|(info, _)| info)
+}
+
+pub(crate) fn probe_output(
+    data: &[u8],
+    adjust_orientation: bool,
+) -> Result<(JxlInfo, ImageSpec), At<JxlError>> {
     let mut options = JxlDecoderOptions::default();
     options.adjust_orientation = adjust_orientation;
     // Probe-specific limits: only header parsing is needed, so use tight bounds.
@@ -638,7 +651,7 @@ pub(crate) fn probe_with_orientation(
     let result = decoder
         .process(&mut input)
         .map_err(|e| e.map_error(map_err))?;
-    let decoder = match result {
+    let mut decoder = match result {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
             return Err(whereat::at!(JxlError::UnexpectedEof(
@@ -671,34 +684,47 @@ pub(crate) fn probe_with_orientation(
     let extra_channels = convert_extra_channels(&info.extra_channels);
     let preview_size = info.preview_size.map(|(w, h)| (w as u32, h as u32));
     let intrinsic_size = info.intrinsic_size.map(|(w, h)| (w as u32, h as u32));
-    let tm = &info.tone_mapping;
-
-    Ok(JxlInfo {
-        width: dim_to_u32(width, "width").map_err(|e| whereat::at!(e))?,
-        height: dim_to_u32(height, "height").map_err(|e| whereat::at!(e))?,
-        coded_width: dim_to_u32(coded_width, "coded width").map_err(|e| whereat::at!(e))?,
-        coded_height: dim_to_u32(coded_height, "coded height").map_err(|e| whereat::at!(e))?,
+    let tm = info.tone_mapping.clone();
+    let alpha = output_alpha(info);
+    let chosen = choose_pixel_format(
+        &info.bit_depth,
         has_alpha,
-        has_animation,
-        bit_depth: Some(bit_depth),
-        icc_profile,
-        orientation,
-        intrinsic_orientation,
-        cicp,
         is_gray,
-        // Probing only parses headers; EXIF/XMP are in trailing container
-        // boxes and require full decode to access.
-        exif: None,
-        xmp: None,
-        extra_channels,
-        preview_size,
-        xyb_encoded,
-        intensity_target: tm.intensity_target,
-        min_nits: tm.min_nits,
-        relative_to_max_display: tm.relative_to_max_display,
-        linear_below: tm.linear_below,
-        intrinsic_size,
-    })
+        info.extra_channels.len(),
+        &[],
+    );
+    decoder.set_pixel_format(chosen.pixel_format.clone());
+    let spec = chosen.image_spec(decoder.output_color_profile(), alpha);
+
+    Ok((
+        JxlInfo {
+            width: dim_to_u32(width, "width").map_err(|e| whereat::at!(e))?,
+            height: dim_to_u32(height, "height").map_err(|e| whereat::at!(e))?,
+            coded_width: dim_to_u32(coded_width, "coded width").map_err(|e| whereat::at!(e))?,
+            coded_height: dim_to_u32(coded_height, "coded height").map_err(|e| whereat::at!(e))?,
+            has_alpha,
+            has_animation,
+            bit_depth: Some(bit_depth),
+            icc_profile,
+            orientation,
+            intrinsic_orientation,
+            cicp,
+            is_gray,
+            // Probing only parses headers; EXIF/XMP are in trailing container
+            // boxes and require full decode to access.
+            exif: None,
+            xmp: None,
+            extra_channels,
+            preview_size,
+            xyb_encoded,
+            intensity_target: tm.intensity_target,
+            min_nits: tm.min_nits,
+            relative_to_max_display: tm.relative_to_max_display,
+            linear_below: tm.linear_below,
+            intrinsic_size,
+        },
+        spec,
+    ))
 }
 
 /// Decode JXL to pixels.
@@ -709,7 +735,7 @@ pub(crate) fn probe_with_orientation(
 pub fn decode(
     data: &[u8],
     limits: Option<&JxlLimits>,
-    preferred: &[PixelDescriptor],
+    preferred: &[ImageSpec],
 ) -> Result<JxlDecodeOutput, At<JxlError>> {
     decode_with_parallel(data, limits, preferred, None)
 }
@@ -723,7 +749,7 @@ pub fn decode(
 pub fn decode_with_parallel(
     data: &[u8],
     limits: Option<&JxlLimits>,
-    preferred: &[PixelDescriptor],
+    preferred: &[ImageSpec],
     parallel: Option<bool>,
 ) -> Result<JxlDecodeOutput, At<JxlError>> {
     decode_with_options(data, limits, preferred, parallel, None)
@@ -746,7 +772,7 @@ pub fn decode_with_parallel(
 pub fn decode_with_options(
     data: &[u8],
     limits: Option<&JxlLimits>,
-    preferred: &[PixelDescriptor],
+    preferred: &[ImageSpec],
     parallel: Option<bool>,
     stop: Option<alloc::sync::Arc<dyn enough::Stop>>,
 ) -> Result<JxlDecodeOutput, At<JxlError>> {
@@ -795,7 +821,7 @@ pub fn decode_with_options(
 pub(crate) fn decode_with_options_oriented(
     data: &[u8],
     limits: Option<&JxlLimits>,
-    preferred: &[PixelDescriptor],
+    preferred: &[ImageSpec],
     parallel: Option<bool>,
     stop: Option<alloc::sync::Arc<dyn enough::Stop>>,
     adjust_orientation: bool,
@@ -880,9 +906,9 @@ pub(crate) fn decode_with_options_oriented(
     let chosen = choose_pixel_format(jxl_bit_depth, has_alpha, is_gray, num_extra, preferred);
     let channels = chosen.color_type.samples_per_pixel();
     let bytes_per_sample = match chosen.channel_type {
-        ChannelType::U8 => 1,
-        ChannelType::U16 => 2,
-        ChannelType::F32 => 4,
+        SampleType::U8 => 1,
+        SampleType::U16 => 2,
+        SampleType::F32 => 4,
         _ => 1,
     };
 
@@ -897,7 +923,10 @@ pub(crate) fn decode_with_options_oriented(
             .map_err(|e| whereat::at!(e))?;
     }
 
+    let alpha = output_alpha(info);
+    let origin = color_origin(decoder.embedded_color_profile(), cicp);
     decoder.set_pixel_format(chosen.pixel_format.clone());
+    let spec = chosen.image_spec(decoder.output_color_profile(), alpha);
 
     // Phase 2: frame info
     let result = decoder
@@ -918,9 +947,9 @@ pub(crate) fn decode_with_options_oriented(
     // see the function docs.
     let (bytes_per_row, buf_size) =
         checked_buf_size(width, height, channels, bytes_per_sample).map_err(|e| whereat::at!(e))?;
-    let mut buf = crate::alloc_util::alloc_zeroed(alloc_pref, true, buf_size)?;
+    let mut buf = alloc_pixel_storage(chosen.channel_type, alloc_pref, buf_size)?;
 
-    let output = JxlOutputBuffer::new(&mut buf, height, bytes_per_row);
+    let output = JxlOutputBuffer::new(buf.as_bytes_mut(), height, bytes_per_row);
     let result = decoder
         .process(&mut input, &mut [output])
         .map_err(|e| e.map_error(map_err))?;
@@ -959,18 +988,14 @@ pub(crate) fn decode_with_options_oriented(
     // Lossy JXL can produce values slightly outside range as compression artifacts.
     // HDR (PQ/HLG) and wide gamut (BT.2020/P3) content is left unclamped.
     // When CICP is absent (ICC-only images), we don't know the gamut — don't clamp.
-    if chosen.channel_type == ChannelType::F32 && cicp.is_some() && !is_hdr_or_wide_gamut(cicp) {
-        clamp_f32_buf(&mut buf);
+    if chosen.channel_type == SampleType::F32 && cicp.is_some() && !is_hdr_or_wide_gamut(cicp) {
+        clamp_f32_buf(buf.as_bytes_mut());
     }
 
-    let mut pixels = build_pixel_data(&buf, width, height, &chosen);
-    if matches!(chosen.channel_type, ChannelType::U8 | ChannelType::U16) {
-        let exact = zenpixels::sample::ExactDepth::measure(&pixels.as_slice())
-            .map_err(|error| whereat::at!(JxlError::InvalidInput(error.to_string())))?;
-        pixels
-            .set_exact_depth(Some(exact))
-            .map_err(|error| whereat::at!(JxlError::InvalidInput(error.to_string())))?;
-    }
+    let mut pixels = adopt_pixels(buf, width_u32, height_u32, bytes_per_row, spec)?
+        .with_origin(origin)
+        .with_hdr(hdr_metadata(intensity_target));
+    measure_integer_depth(&mut pixels);
 
     completion_stop
         .check()
@@ -1006,190 +1031,220 @@ pub(crate) fn decode_with_options_oriented(
     })
 }
 
-/// Interpret the raw output buffer as a [`PixelBuffer`].
-///
-/// Returns a type-erased PixelBuffer with the base descriptor (Unknown transfer
-/// function). The caller should set the correct transfer function from CICP metadata.
-pub(crate) fn build_pixel_data(
-    buf: &[u8],
-    width: usize,
-    height: usize,
-    chosen: &ChosenFormat,
-) -> PixelBuffer {
-    use rgb::{Gray, Rgb, Rgba};
+impl ChosenFormat {
+    pub(crate) fn image_spec(&self, profile: &JxlColorProfile, alpha: AlphaMode) -> ImageSpec {
+        let order = match self.color_type {
+            JxlColorType::Grayscale => ChannelOrder::Gray,
+            JxlColorType::GrayscaleAlpha => ChannelOrder::GrayAlpha,
+            JxlColorType::Rgb => ChannelOrder::Rgb,
+            JxlColorType::Rgba => ChannelOrder::Rgba,
+            JxlColorType::Bgr => ChannelOrder::Bgr,
+            JxlColorType::Bgra => ChannelOrder::Bgra,
+            JxlColorType::Cmyk => ChannelOrder::CmykInverted,
+        };
+        output_spec(SampleLayout::new(self.channel_type, order), profile, alpha)
+    }
+}
 
-    let w = width as u32;
-    let h = height as u32;
-    // from_pixels validates count — unwrap is safe here because the decoder
-    // guarantees buf has exactly width*height*bpp bytes.
+pub(crate) fn output_alpha(info: &jxl::api::JxlBasicInfo) -> AlphaMode {
+    match info
+        .extra_channels
+        .iter()
+        .find(|ec| ec.ec_type == ExtraChannel::Alpha)
+    {
+        Some(ec) if ec.alpha_associated => AlphaMode::Premultiplied,
+        Some(_) => AlphaMode::Straight,
+        None => AlphaMode::Opaque,
+    }
+}
 
-    match (chosen.channel_type, &chosen.color_type) {
-        // ── u8 variants ──────────────────────────────────────────────
-        (ChannelType::U8, JxlColorType::Rgb) => {
-            let pixels: Vec<Rgb<u8>> = buf
-                .as_chunks::<3>()
-                .0
-                .iter()
-                .map(|c| Rgb {
-                    r: c[0],
-                    g: c[1],
-                    b: c[2],
-                })
-                .collect();
-            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
-        }
-        (ChannelType::U8, JxlColorType::Rgba) => {
-            let pixels: Vec<Rgba<u8>> = buf
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|c| Rgba {
-                    r: c[0],
-                    g: c[1],
-                    b: c[2],
-                    a: c[3],
-                })
-                .collect();
-            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
-        }
-        (ChannelType::U8, JxlColorType::Grayscale) => {
-            let pixels: Vec<Gray<u8>> = buf.iter().map(|&v| Gray::new(v)).collect();
-            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
-        }
-        (ChannelType::U8, JxlColorType::GrayscaleAlpha) => {
-            // GrayAlpha lacks bytemuck NoUninit, use from_vec with raw bytes
-            PixelBuffer::from_vec(buf.to_vec(), w, h, PixelDescriptor::GRAYA8).unwrap()
-        }
-        (ChannelType::U8, JxlColorType::Bgra) => {
-            let pixels: Vec<rgb::alt::BGRA<u8>> = buf
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|c| rgb::alt::BGRA {
-                    b: c[0],
-                    g: c[1],
-                    r: c[2],
-                    a: c[3],
-                })
-                .collect();
-            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
-        }
-        (ChannelType::U8, JxlColorType::Bgr) => {
-            // No Bgr pixel type, convert to Rgb
-            let pixels: Vec<Rgb<u8>> = buf
-                .as_chunks::<3>()
-                .0
-                .iter()
-                .map(|c| Rgb {
-                    r: c[2],
-                    g: c[1],
-                    b: c[0],
-                })
-                .collect();
-            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
-        }
-
-        // ── u16 variants ─────────────────────────────────────────────
-        (ChannelType::U16, JxlColorType::Rgb) => {
-            let pixels: Vec<Rgb<u16>> = buf
-                .as_chunks::<6>()
-                .0
-                .iter()
-                .map(|c| Rgb {
-                    r: u16::from_ne_bytes([c[0], c[1]]),
-                    g: u16::from_ne_bytes([c[2], c[3]]),
-                    b: u16::from_ne_bytes([c[4], c[5]]),
-                })
-                .collect();
-            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
-        }
-        (ChannelType::U16, JxlColorType::Rgba) => {
-            let pixels: Vec<Rgba<u16>> = buf
-                .as_chunks::<8>()
-                .0
-                .iter()
-                .map(|c| Rgba {
-                    r: u16::from_ne_bytes([c[0], c[1]]),
-                    g: u16::from_ne_bytes([c[2], c[3]]),
-                    b: u16::from_ne_bytes([c[4], c[5]]),
-                    a: u16::from_ne_bytes([c[6], c[7]]),
-                })
-                .collect();
-            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
-        }
-        (ChannelType::U16, JxlColorType::Grayscale) => {
-            let pixels: Vec<Gray<u16>> = buf
-                .as_chunks::<2>()
-                .0
-                .iter()
-                .map(|c| Gray::new(u16::from_ne_bytes([c[0], c[1]])))
-                .collect();
-            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
-        }
-        (ChannelType::U16, JxlColorType::GrayscaleAlpha) => {
-            // GrayAlpha lacks bytemuck NoUninit, use from_vec with raw bytes
-            PixelBuffer::from_vec(buf.to_vec(), w, h, PixelDescriptor::GRAYA16).unwrap()
-        }
-
-        // ── f32 variants ─────────────────────────────────────────────
-        (ChannelType::F32, JxlColorType::Rgb) => {
-            let pixels: Vec<Rgb<f32>> = buf
-                .as_chunks::<12>()
-                .0
-                .iter()
-                .map(|c| Rgb {
-                    r: f32::from_ne_bytes([c[0], c[1], c[2], c[3]]),
-                    g: f32::from_ne_bytes([c[4], c[5], c[6], c[7]]),
-                    b: f32::from_ne_bytes([c[8], c[9], c[10], c[11]]),
-                })
-                .collect();
-            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
-        }
-        (ChannelType::F32, JxlColorType::Rgba) => {
-            let pixels: Vec<Rgba<f32>> = buf
-                .as_chunks::<16>()
-                .0
-                .iter()
-                .map(|c| Rgba {
-                    r: f32::from_ne_bytes([c[0], c[1], c[2], c[3]]),
-                    g: f32::from_ne_bytes([c[4], c[5], c[6], c[7]]),
-                    b: f32::from_ne_bytes([c[8], c[9], c[10], c[11]]),
-                    a: f32::from_ne_bytes([c[12], c[13], c[14], c[15]]),
-                })
-                .collect();
-            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
-        }
-        (ChannelType::F32, JxlColorType::Grayscale) => {
-            let pixels: Vec<Gray<f32>> = buf
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|c| Gray::new(f32::from_ne_bytes([c[0], c[1], c[2], c[3]])))
-                .collect();
-            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
-        }
-        (ChannelType::F32, JxlColorType::GrayscaleAlpha) => {
-            // GrayAlpha lacks bytemuck NoUninit, use from_vec with raw bytes
-            PixelBuffer::from_vec(buf.to_vec(), w, h, PixelDescriptor::GRAYAF32).unwrap()
-        }
-
-        // Fallback: shouldn't happen given choose_pixel_format logic,
-        // but decode as RGBA8 to be safe
-        _ => {
-            let pixels: Vec<Rgba<u8>> = buf
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|c| Rgba {
-                    r: c[0],
-                    g: c[1],
-                    b: c[2],
-                    a: c[3],
-                })
-                .collect();
-            PixelBuffer::from_pixels_erased(pixels, w, h).unwrap()
+fn output_transfer(transfer: &JxlTransferFunction) -> Transfer {
+    match transfer {
+        JxlTransferFunction::BT709 => Transfer::Bt709,
+        JxlTransferFunction::SRGB => Transfer::Srgb,
+        JxlTransferFunction::Linear => Transfer::Linear,
+        JxlTransferFunction::PQ => Transfer::Pq,
+        JxlTransferFunction::HLG => Transfer::Hlg(zenpixels::HlgMode::Scene),
+        JxlTransferFunction::DCI => Transfer::Gamma(Gamma::DCI_2_6),
+        JxlTransferFunction::Gamma(gamma) => {
+            Gamma::from_encoding_gamma(*gamma).map_or(Transfer::Unknown, Transfer::Gamma)
         }
     }
+}
+
+fn output_primaries(primaries: &JxlPrimaries, white: &JxlWhitePoint) -> Primaries {
+    match (primaries, white) {
+        (JxlPrimaries::SRGB, JxlWhitePoint::D65) => Primaries::Bt709,
+        (JxlPrimaries::BT2100, JxlWhitePoint::D65) => Primaries::Bt2020,
+        (JxlPrimaries::P3, JxlWhitePoint::D65) => Primaries::DisplayP3,
+        (JxlPrimaries::P3, JxlWhitePoint::DCI) => Primaries::DciP3,
+        _ => {
+            let [r, g, b] = primaries.to_xy_coords();
+            CustomPrimaries::try_new(r, g, b, white.to_xy_coords())
+                .map_or(Primaries::Unknown, Primaries::Custom)
+        }
+    }
+}
+
+pub(crate) fn output_spec(
+    layout: SampleLayout,
+    profile: &JxlColorProfile,
+    alpha: AlphaMode,
+) -> ImageSpec {
+    let order = layout.order;
+    let alpha = if order.has_alpha_slot() {
+        alpha
+    } else {
+        AlphaMode::None
+    };
+    let color = match profile {
+        JxlColorProfile::Icc(icc) if order.is_cmyk_family() => ColorSpace::Cmyk {
+            inverted: true,
+            icc: Some(alloc::sync::Arc::from(icc.as_slice())),
+            alpha,
+        },
+        JxlColorProfile::Icc(icc) => ColorSpace::Icc {
+            profile: alloc::sync::Arc::from(icc.as_slice()),
+            channels: (order.channels() - usize::from(order.has_alpha_slot())) as u8,
+            alpha,
+            intent: RenderingIntent::RelativeColorimetric,
+        },
+        JxlColorProfile::Simple(encoding) => {
+            let (primaries, transfer) = match encoding {
+                JxlColorEncoding::RgbColorSpace {
+                    primaries,
+                    transfer_function,
+                    white_point,
+                    ..
+                } => (
+                    output_primaries(primaries, white_point),
+                    output_transfer(transfer_function),
+                ),
+                JxlColorEncoding::GrayscaleColorSpace {
+                    white_point,
+                    transfer_function,
+                    ..
+                } => (
+                    output_primaries(&JxlPrimaries::SRGB, white_point),
+                    output_transfer(transfer_function),
+                ),
+                JxlColorEncoding::XYB { .. } => (Primaries::Unknown, Transfer::Unknown),
+            };
+            if order.is_gray_family() {
+                ColorSpace::Gray {
+                    transfer,
+                    range: SignalRange::Full,
+                    alpha,
+                    white: None,
+                }
+            } else {
+                ColorSpace::Rgb {
+                    primaries,
+                    transfer,
+                    range: SignalRange::Full,
+                    alpha,
+                    white: None,
+                }
+            }
+        }
+    };
+    ImageSpec::new(layout, color)
+}
+
+pub(crate) fn color_origin(
+    profile: &JxlColorProfile,
+    cicp: Option<(u8, u8, u8, bool)>,
+) -> ColorOrigin {
+    match profile {
+        JxlColorProfile::Icc(bytes) => {
+            ColorOrigin::from_icc(alloc::sync::Arc::from(bytes.as_slice()))
+        }
+        JxlColorProfile::Simple(_) => cicp.map_or_else(ColorOrigin::assumed, |(p, t, m, r)| {
+            ColorOrigin::from_cicp(Cicp::new(p, t, m, r))
+        }),
+    }
+}
+
+pub(crate) fn hdr_metadata(intensity_target: f32) -> HdrMetadata {
+    HdrMetadata {
+        cll: (intensity_target > 255.0).then(|| {
+            zenpixels::ContentLightLevel::new(intensity_target.min(u16::MAX as f32) as u16, 0)
+        }),
+        mastering: None,
+    }
+}
+
+pub(crate) fn alloc_pixel_storage(
+    sample: SampleType,
+    pref: zencodec::AllocPreference,
+    bytes: usize,
+) -> Result<PixelStorage, At<JxlError>> {
+    PixelStorage::try_zeroed(sample, bytes).map_err(|_| {
+        if !crate::alloc_util::resolve_fallible(pref, true) {
+            let layout = core::alloc::Layout::from_size_align(bytes, sample.min_alignment())
+                .expect("pixel capacity overflow");
+            alloc::alloc::handle_alloc_error(layout);
+        }
+        whereat::at!(JxlError::OutOfMemory(alloc::format!(
+            "allocating {bytes} pixel bytes"
+        )))
+    })
+}
+
+pub(crate) fn adopt_pixels(
+    storage: PixelStorage,
+    width: u32,
+    height: u32,
+    stride: usize,
+    spec: ImageSpec,
+) -> Result<PixelBuf, At<JxlError>> {
+    PixelBuf::from_parts(storage, 0, width, height, stride, spec)
+        .map_err(|e| whereat::at!(JxlError::InvalidInput(e.to_string())))
+}
+
+fn measure_integer_depth(pixels: &mut PixelBuf) {
+    let view = pixels.as_view();
+    let storage_bits = match view.spec().layout.sample {
+        SampleType::U8 => 8,
+        SampleType::U16 => 16,
+        _ => return,
+    };
+    let storage_max = (1u32 << storage_bits) - 1;
+    let mut candidates = (1u32 << storage_bits) - 1;
+    // JXL output is full-range. Keep only depths whose canonical widening
+    // reproduces every active sample, including alpha.
+    'rows: for y in 0..view.rows() {
+        let row = view.row(y);
+        let samples = row.chunks_exact(storage_bits / 8).map(|bytes| {
+            if storage_bits == 8 {
+                u32::from(bytes[0])
+            } else {
+                u32::from(u16::from_ne_bytes([bytes[0], bytes[1]]))
+            }
+        });
+        for sample in samples {
+            if sample == 0 || sample == storage_max {
+                continue;
+            }
+            let mut remaining = candidates & ((1 << (storage_bits - 1)) - 1);
+            while remaining != 0 {
+                let bit = remaining.trailing_zeros();
+                let mask = 1 << bit;
+                remaining &= !mask;
+                let max = (2 << bit) - 1;
+                let narrowed = (sample * max + storage_max / 2) / storage_max;
+                if (narrowed * storage_max + max / 2) / max != sample {
+                    candidates &= !mask;
+                }
+            }
+            if candidates.is_power_of_two() {
+                break 'rows;
+            }
+        }
+    }
+    let mut facts = zenpixels::SampleFacts::NONE;
+    facts.exact.effective_bits = candidates.trailing_zeros() as u8 + 1;
+    pixels.set_facts(facts);
 }
 
 #[cfg(test)]

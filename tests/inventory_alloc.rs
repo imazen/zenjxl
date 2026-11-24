@@ -84,10 +84,14 @@ fn animation(size: u32) -> Vec<u8> {
         .expect("animation encoder");
     for f in 0..2u8 {
         let pixels = vec![rgb::Rgb { r: f, g: 7, b: 9 }; (size * size) as usize];
-        let buf = zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, size, size)
-            .expect("buffer");
-        enc.push_frame(buf.as_slice().into(), 100, None)
-            .expect("push");
+        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+            pixels,
+            size,
+            size,
+            zenpixels::ImageSpec::rgb8_srgb(),
+        )
+        .expect("buffer");
+        enc.push_frame(buf.as_view(), 100, None).expect("push");
     }
     enc.finish(None).expect("finish").into_vec()
 }

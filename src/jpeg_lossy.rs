@@ -31,11 +31,11 @@
 //!
 //! Requires the `jpeg-lossy` cargo feature.
 
-use alloc::vec::Vec;
+use alloc::{string::ToString, vec::Vec};
 
 use jxl_encoder::jpeg::encode_jpeg_recompress_auto_codestream;
 use zenjpeg::decoder::extract_icc_profile;
-use zenpixels::PixelDescriptor;
+use zenpixels::ImageSpec;
 
 use crate::decode::decode;
 use crate::error::JxlError;
@@ -423,14 +423,14 @@ fn run_loop(
 
 /// Decode a bare JXL codestream to tightly-packed RGB8 + dimensions.
 fn decode_rgb8(codestream: &[u8]) -> Result<(Vec<u8>, u32, u32), At<JxlError>> {
-    let out = decode(codestream, None, &[PixelDescriptor::RGB8])?;
+    let out = decode(codestream, None, &[ImageSpec::rgb8_srgb()])?;
     let w = out.info.width;
     let h = out.info.height;
-    let mut parts = out.pixels.into_contiguous().into_parts();
-    // The packed allocation can retain an alignment prefix. Move only the
-    // requested RGB8 samples; the usual offset-zero path retains the Vec.
-    parts.data.drain(..parts.offset);
-    Ok((parts.data, w, h))
+    let pixels = out
+        .pixels
+        .try_into_vec::<u8>()
+        .map_err(|error| whereat::at!(JxlError::OutOfMemory(error.to_string())))?;
+    Ok((pixels, w, h))
 }
 
 #[inline]

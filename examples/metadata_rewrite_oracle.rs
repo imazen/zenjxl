@@ -29,8 +29,8 @@ fn main() {
     let before = zenjxl::decode(&input, None, &[]).unwrap();
     let after = zenjxl::decode(&output, None, &[]).unwrap();
     assert_eq!(
-        before.pixels.as_contiguous_bytes(),
-        after.pixels.as_contiguous_bytes()
+        before.pixels.as_view().as_contiguous_bytes(),
+        after.pixels.as_view().as_contiguous_bytes()
     );
     assert_eq!(before.info.icc_profile, after.info.icc_profile);
     std::fs::write(directory.join("before.jxl"), input).unwrap();

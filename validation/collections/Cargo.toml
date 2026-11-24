@@ -8,15 +8,17 @@ publish = false
 
 [dependencies]
 zenjxl = { path = "../..", default-features = false, features = ["collections"] }
-zencodec = { version = ">=0.2.0, <0.4.0", features = ["std"] }
-zenpixels = ">=0.2.17, <0.4.0"
+zencodec = { version = ">=0.2.0, <0.3.0", features = ["std"] }
+zenpixels = ">=0.5.0, <0.6.0"
 
 [dev-dependencies]
 codec-corpus = "1.1.0"
 bytemuck = { version = "1.25.2", default-features = false }
 
 [patch.crates-io]
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "3f4fd14feb9bdfed041e426aaa569b236a201158" }
-zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "18afc75f1fd40c7feafeef6deae4df8e97e5e1b9" }
-zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "18afc75f1fd40c7feafeef6deae4df8e97e5e1b9" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "037ef59b57ae003f853a5b6624b173edfee22d6a" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "42a0c5c83c5c418950eb528d92d57788f6700bcf" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "42a0c5c83c5c418950eb528d92d57788f6700bcf" }
 zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "e1c366b089b29511ef66f1b5af5d9e208dbff5d1" }
+garb = { git = "https://github.com/imazen/garb", rev = "457ff8b9153e9d675a39dc098052b2ffeb6206fa" }
+linear-srgb = { git = "https://github.com/imazen/linear-srgb", rev = "ae83f19426737635fee3dd16f228681019f52585" }
