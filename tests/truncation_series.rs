@@ -20,11 +20,11 @@ fn valid_jxl() -> Vec<u8> {
             rgb::Rgb { r: v, g: v, b: v }
         })
         .collect();
-    let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+    let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
         pixels,
         w,
         h,
-        zenpixels::ImageSpec::rgb8_srgb(),
+        zenpixels::ImageSpec::RGB8_SRGB,
     )
     .expect("pixel buffer");
     JxlEncoderConfig::new()

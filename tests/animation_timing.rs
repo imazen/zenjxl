@@ -14,11 +14,11 @@ fn ordinary_rounding_preserves_total_and_rejection_preserves_phase() {
         .job()
         .animation_frame_encoder()
         .unwrap();
-    let pixels = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+    let pixels = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
         vec![rgb::Rgb::new(20, 40, 60); 16 * 16],
         16,
         16,
-        zenpixels::ImageSpec::rgb8_srgb(),
+        zenpixels::ImageSpec::RGB8_SRGB,
     )
     .unwrap();
     let duration = FrameDuration::new(1, 30).unwrap();
@@ -108,11 +108,11 @@ fn exact_encoding_rescales_buffered_frames() {
         .job()
         .animation_frame_encoder()
         .unwrap();
-    let pixels = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+    let pixels = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
         vec![rgb::Rgb::new(20, 40, 60); 256],
         16,
         16,
-        zenpixels::ImageSpec::rgb8_srgb(),
+        zenpixels::ImageSpec::RGB8_SRGB,
     )
     .unwrap();
     let durations = [

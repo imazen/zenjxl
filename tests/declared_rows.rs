@@ -6,12 +6,12 @@ use zenpixels::{ImageSpec, PixelView};
 #[test]
 fn jxl_admits_declared_rows_and_preserves_padded_input() {
     for desc in [
-        ImageSpec::rgb8_srgb(),
-        ImageSpec::rgba8_srgb(),
-        ImageSpec::rgbx8_srgb(),
+        ImageSpec::RGB8_SRGB,
+        ImageSpec::RGBA8_SRGB,
+        ImageSpec::RGBX8_SRGB,
     ] {
         let data: Vec<u8> = (0..96).map(|n| (n * 13) as u8).collect();
-        let image = || PixelView::new(&data, 5, 4, 24, desc.clone()).unwrap();
+        let image = || PixelView::new(&data, 5, 4, 24, &desc).unwrap();
         for lossless in [true, false] {
             let cfg = JxlEncoderConfig::new().with_lossless(lossless);
             let expected = cfg
@@ -30,21 +30,21 @@ fn jxl_admits_declared_rows_and_preserves_padded_input() {
             );
             assert!(enc.begin(5, 4, desc.clone()).is_err());
             assert!(
-                enc.push_rows(PixelView::new(&data, 4, 1, 24, desc.clone()).unwrap())
+                enc.push_rows(PixelView::new(&data, 4, 1, 24, &desc).unwrap())
                     .is_err()
             );
             for y in [0, 2] {
-                enc.push_rows(PixelView::new(&data[y * 24..], 5, 2, 24, desc.clone()).unwrap())
+                enc.push_rows(PixelView::new(&data[y * 24..], 5, 2, 24, &desc).unwrap())
                     .unwrap();
             }
             assert!(
-                enc.push_rows(PixelView::new(&data, 5, 1, 24, desc.clone()).unwrap())
+                enc.push_rows(PixelView::new(&data, 5, 1, 24, &desc).unwrap())
                     .is_err()
             );
             assert_eq!(enc.finish().unwrap().into_vec(), expected);
             let mut enc = cfg.clone().job().encoder().unwrap();
             enc.begin(5, 4, desc.clone()).unwrap();
-            enc.push_rows(PixelView::new(&data, 5, 1, 24, desc.clone()).unwrap())
+            enc.push_rows(PixelView::new(&data, 5, 1, 24, &desc).unwrap())
                 .unwrap();
             assert!(enc.finish().is_err());
             let mut enc = cfg.clone().job().encoder().unwrap();
@@ -97,19 +97,19 @@ fn declared_jxl_keeps_timeout_reasons_at_each_row_boundary() {
             .with_pulse(zencodec::SharedPulse::new(Deadline(expired.clone())))
             .encoder()
             .unwrap();
-        let desc = ImageSpec::rgb8_srgb();
+        let desc = ImageSpec::RGB8_SRGB;
         if stage > 0 {
             e.begin(1, 1, desc.clone()).unwrap();
         }
         if stage > 1 {
-            e.push_rows(PixelView::new(&[1, 2, 3], 1, 1, 3, desc.clone()).unwrap())
+            e.push_rows(PixelView::new(&[1, 2, 3], 1, 1, 3, &desc).unwrap())
                 .unwrap();
         }
         expired.store(true, Ordering::Relaxed);
         let err = match stage {
             0 => e.begin(1, 1, desc.clone()).unwrap_err(),
             1 => e
-                .push_rows(PixelView::new(&[1, 2, 3], 1, 1, 3, desc.clone()).unwrap())
+                .push_rows(PixelView::new(&[1, 2, 3], 1, 1, 3, &desc).unwrap())
                 .unwrap_err(),
             _ => e.finish().unwrap_err(),
         };

@@ -423,12 +423,12 @@ fn run_loop(
 
 /// Decode a bare JXL codestream to tightly-packed RGB8 + dimensions.
 fn decode_rgb8(codestream: &[u8]) -> Result<(Vec<u8>, u32, u32), At<JxlError>> {
-    let out = decode(codestream, None, &[ImageSpec::rgb8_srgb()])?;
+    let out = decode(codestream, None, &[ImageSpec::RGB8_SRGB])?;
     let w = out.info.width;
     let h = out.info.height;
     let pixels = out
         .pixels
-        .try_into_vec::<u8>()
+        .into_vec::<u8>()
         .map_err(|error| whereat::at!(JxlError::OutOfMemory(error.to_string())))?;
     Ok((pixels, w, h))
 }

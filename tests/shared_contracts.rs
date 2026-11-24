@@ -207,10 +207,7 @@ fn oriented_pq_rows_and_hdr_envelope_survive_reencode() {
     let assert_rows = |output: &zencodec::decode::DecodeOutput, dims, indexes: &[usize]| {
         let pixels = output.pixels();
         assert_eq!((pixels.width(), pixels.rows()), dims);
-        assert_eq!(
-            pixels.try_contiguous_bytes().unwrap().as_ref(),
-            bytes(indexes)
-        );
+        assert_eq!(pixels.contiguous_bytes().unwrap().as_ref(), bytes(indexes));
         assert!(matches!(
             pixels.spec().color,
             zenpixels::ColorSpace::Rgb {
@@ -271,7 +268,7 @@ fn oriented_pq_rows_and_hdr_envelope_survive_reencode() {
         assert_eq!(copied.origin().cicp, Some(expected_cicp));
         assert_eq!(copied.facts().depth, output.pixels().facts().depth);
         assert_eq!(
-            copied.as_view().try_contiguous_bytes().unwrap().as_ref(),
+            copied.as_view().contiguous_bytes().unwrap().as_ref(),
             bytes(&indexes)
         );
         assert_eq!(
@@ -387,9 +384,9 @@ fn animation_sink_reports_exact_frame_completion() {
                 .as_ref()
                 .unwrap()
                 .as_view()
-                .try_contiguous_bytes()
+                .contiguous_bytes()
                 .unwrap(),
-            expected.pixels().try_contiguous_bytes().unwrap(),
+            expected.pixels().contiguous_bytes().unwrap(),
         );
     }
     assert!(

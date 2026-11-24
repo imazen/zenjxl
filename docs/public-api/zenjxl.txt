@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenjxl.txt 99 lines (supported surface) | zenjxl.features.txt 85 added (features: butteraugli-loop,collections,decode,encode,inventory,jpeg-lossy,metadata-rewrite,parallel,reconstruct-hdr,threads,zencodec) | zenjxl.internal.txt 237 lines (11 hidden + 400 excluded-feature)
+# files: zenjxl.txt 100 lines (supported surface) | zenjxl.features.txt 85 added (features: butteraugli-loop,collections,decode,encode,inventory,jpeg-lossy,metadata-rewrite,parallel,reconstruct-hdr,threads,zencodec) | zenjxl.internal.txt 237 lines (11 hidden + 400 excluded-feature)
 
 ## summary
 #
@@ -17,8 +17,8 @@
 #   enum variants                              25
 #   re-exports                                 14
 #   trait roster entries (type × trait)        27
-#   auto-trait-complete types                   6
-#   auto-trait exceptions                       1
+#   auto-trait-complete types                   5
+#   auto-trait exceptions                       2
 #
 # per-module pub lines:
 #   (root)                           89
@@ -128,5 +128,6 @@ whereat::at::At<zencodec::error::CodecError>: From<JxlError>
 
 ## auto traits
 
-6 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+5 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+JxlDecodeOutput: !RefUnwindSafe !UnwindSafe
 JxlError: !RefUnwindSafe !UnwindSafe

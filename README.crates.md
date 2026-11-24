@@ -20,7 +20,7 @@ also add the pixel crates and — for cancellation — `almost-enough`:
 
 ```toml
 zenpixels = "0.5"               # PixelBuf and ImageSpec
-zenpixels-convert = "0.5"       # convert_buf
+zenpixels-convert = "0.5"       # convert_to_buf_with_peak
 almost-enough = "0.4.4"        # a ready-made cancellation token (optional)
 ```
 
@@ -51,13 +51,13 @@ let limits = JxlLimits {
 let output = decode(jxl_bytes, Some(&limits), &[]).unwrap();
 
 // Convert the actual decoded layout and color to packed RGBA8.
-use zenpixels_convert::{ConvertPolicy, convert_buf};
-let rgba: Vec<u8> = convert_buf(
+use zenpixels_convert::{ConvertPolicy, convert_to_buf_with_peak};
+let rgba: Vec<u8> = convert_to_buf_with_peak(
     &output.pixels.as_view(),
-    ImageSpec::rgba8_srgb(),
+    &ImageSpec::RGBA8_SRGB,
     &ConvertPolicy::permissive(),
     PeakSource::Measured,
-).unwrap().try_into_vec().unwrap();
+).unwrap().into_vec().unwrap();
 
 // Borrow the native pixels or take ownership of their backing storage.
 let (w, h) = (output.pixels.width(), output.pixels.height());
@@ -76,7 +76,7 @@ itself — so it caps both the early estimate and the live decode, not just the
 output buffer. Pass `None` for `limits` to use the decoder's built-in defaults.
 
 **Dependencies & errors.** Besides `zenjxl`, add `zenpixels` (`PixelBuf`
-and `ImageSpec`), `zenpixels-convert` (`convert_buf`), and `enough`
+and `ImageSpec`), `zenpixels-convert` (`convert_to_buf_with_peak`), and `enough`
 (cancellation). `decode`/`probe`/`encode_*` return `Result<_, whereat::At<E>>`
 (`At<JxlError>`): the `At<…>` adds a build-time source location for logs — print
 the error with its captured frames via `err.full_trace()` (a `Display`, e.g.

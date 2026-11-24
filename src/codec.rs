@@ -163,17 +163,17 @@ mod encoding {
     /// F32 layouts are linear-light (jxl-encoder assumes linear for float input).
     static JXL_ENCODE_DESCRIPTORS: &[ImageSpec] = &[
         // 8-bit sRGB
-        ImageSpec::rgb8_srgb(),
-        ImageSpec::rgba8_srgb(),
-        ImageSpec::bgra8_srgb(),
-        ImageSpec::rgbx8_srgb(),
-        ImageSpec::bgrx8_srgb(),
-        ImageSpec::gray8_srgb(),
-        ImageSpec::graya8_srgb(),
+        ImageSpec::RGB8_SRGB,
+        ImageSpec::RGBA8_SRGB,
+        ImageSpec::BGRA8_SRGB,
+        ImageSpec::RGBX8_SRGB,
+        ImageSpec::BGRX8_SRGB,
+        ImageSpec::GRAY8_SRGB,
+        ImageSpec::GRAYA8_SRGB,
         // 16-bit sRGB
-        ImageSpec::rgb16_srgb(),
-        ImageSpec::rgba16_srgb(),
-        ImageSpec::gray16_srgb(),
+        ImageSpec::RGB16_SRGB,
+        ImageSpec::RGBA16_SRGB,
+        ImageSpec::GRAY16_SRGB,
         zenpixels::ImageSpec::new(
             zenpixels::SampleLayout::new(
                 zenpixels::SampleType::U16,
@@ -182,9 +182,9 @@ mod encoding {
             GRAY_SRGB_ALPHA,
         ),
         // f32 linear
-        ImageSpec::rgbf32_linear(),
-        ImageSpec::rgbaf32_linear(),
-        ImageSpec::grayf32_linear(),
+        ImageSpec::RGBF32_LINEAR,
+        ImageSpec::RGBAF32_LINEAR,
+        ImageSpec::GRAYF32_LINEAR,
         zenpixels::ImageSpec::new(
             zenpixels::SampleLayout::new(
                 zenpixels::SampleType::F32,
@@ -208,7 +208,7 @@ mod encoding {
     /// Pre-serialized gain map data for embedding in the JXL container.
     ///
     /// This holds the raw jhgm box payload (the output of
-    /// [`GainMapBundle::serialize()`]). Wrapped in `Arc` so `JxlEncoderConfig`
+    /// `GainMapBundle::serialize()`). Wrapped in `Arc` so `JxlEncoderConfig`
     /// remains cheap to clone.
     #[derive(Clone, Debug)]
     pub struct GainMapData {
@@ -258,7 +258,7 @@ mod encoding {
         /// Attach a gain map for embedding in the output JXL container.
         ///
         /// The `jhgm_payload` is the serialized gain map bundle — the output
-        /// of [`GainMapBundle::serialize()`]. When set, the encoder wraps
+        /// of `GainMapBundle::serialize()`. When set, the encoder wraps
         /// the codestream in a JXL container and appends a `jhgm` box.
         ///
         /// # Example
@@ -287,7 +287,7 @@ mod encoding {
 
         /// Set the butteraugli distance directly, bypassing calibration.
         ///
-        /// This overrides any quality set via [`with_generic_quality`]. Valid
+        /// This overrides any quality set via [`zencodec::encode::EncoderConfig::with_generic_quality`]. Valid
         /// range is 0.0 (mathematically lossless) to 25.0 (very low quality).
         /// A distance of 1.0 is visually lossless for most content.
         pub fn with_distance(mut self, distance: f32) -> Self {
@@ -1253,7 +1253,7 @@ mod encoding {
                 {
                     self.check_limits(width, height)?;
                     let raw = pixels
-                        .try_contiguous_bytes()
+                        .contiguous_bytes()
                         .map_err(|error| whereat::at!(JxlError::OutOfMemory(error.to_string())))?;
                     let mut rgb =
                         alloc::vec::Vec::with_capacity((width as usize) * (height as usize) * 3);
@@ -1280,7 +1280,7 @@ mod encoding {
                 self.check_limits(width, height)?;
 
                 let data = pixels
-                    .try_contiguous_bytes()
+                    .contiguous_bytes()
                     .map_err(|error| whereat::at!(JxlError::OutOfMemory(error.to_string())))?;
                 let encoded = self.encode_with_metadata(&data, width, height, layout)?;
                 let encoded = self.maybe_attach_gain_map(encoded)?;
@@ -1416,7 +1416,7 @@ mod encoding {
                     if desc.layout.sample == SampleType::U8
                         && matches!(pf, ChannelOrder::Rgbx | ChannelOrder::Bgrx)
                     {
-                        let raw = rows.try_contiguous_bytes().map_err(|error| {
+                        let raw = rows.contiguous_bytes().map_err(|error| {
                             whereat::at!(JxlError::OutOfMemory(error.to_string()))
                         })?;
                         let mut rgb = alloc::vec::Vec::with_capacity(
@@ -1435,7 +1435,7 @@ mod encoding {
                     } else {
                         (
                             Self::descriptor_to_layout(desc)?,
-                            rows.try_contiguous_bytes().map_err(|error| {
+                            rows.contiguous_bytes().map_err(|error| {
                                 whereat::at!(JxlError::OutOfMemory(error.to_string()))
                             })?,
                         )
@@ -1608,7 +1608,7 @@ mod encoding {
 
                 let frame_data = if strip_padding {
                     let raw = pixels
-                        .try_contiguous_bytes()
+                        .contiguous_bytes()
                         .map_err(|error| whereat::at!(JxlError::OutOfMemory(error.to_string())))?;
                     let mut rgb = Vec::with_capacity((w as usize) * (h as usize) * 3);
                     if matches!(pf, ChannelOrder::Rgbx) {
@@ -1623,7 +1623,7 @@ mod encoding {
                     rgb
                 } else {
                     pixels
-                        .try_contiguous_bytes()
+                        .contiguous_bytes()
                         .map_err(|error| whereat::at!(JxlError::OutOfMemory(error.to_string())))?
                         .into_owned()
                 };
@@ -2067,7 +2067,7 @@ mod decoding {
             height: gm_pixels.height(),
             channels,
             data: gm_pixels
-                .try_into_vec()
+                .into_vec()
                 .map_err(|error| whereat::at!(JxlError::OutOfMemory(error.to_string())))?,
         };
 
@@ -2088,7 +2088,7 @@ mod decoding {
         let view = base.as_view();
         let rgba;
         let view = if view.spec().layout == zenpixels::SampleLayout::RGBF32 {
-            use zenpixels_convert::{ConvertPolicy, convert_buf};
+            use zenpixels_convert::{ConvertPolicy, convert_to_buf_with_peak};
             let spec = ImageSpec::new(
                 zenpixels::SampleLayout::RGBAF32,
                 view.spec()
@@ -2096,9 +2096,9 @@ mod decoding {
                     .clone()
                     .with_alpha(zenpixels::AlphaMode::Straight),
             );
-            rgba = convert_buf(
+            rgba = convert_to_buf_with_peak(
                 &view,
-                spec,
+                &spec,
                 &ConvertPolicy::default(),
                 zenpixels::PeakSource::Measured,
             )
@@ -2148,7 +2148,7 @@ mod decoding {
         info.source_color.diffuse_white = Some(white);
         let color = hdr.spec().color.clone().with_white(white);
         let hdr = hdr
-            .with_color(color)
+            .relabel_color(color)
             .map_err(|e| whereat::at!(JxlError::InvalidInput(e.to_string())))?
             .with_origin(base.origin().clone())
             .with_hdr(zenpixels::HdrMetadata {
@@ -2200,14 +2200,14 @@ mod decoding {
     /// jxl-rs can decode to U8/U16/F32 × Gray/GrayAlpha/RGB/RGBA.
     static JXL_DECODE_DESCRIPTORS: &[ImageSpec] = &[
         // 8-bit
-        ImageSpec::rgb8_srgb(),
-        ImageSpec::rgba8_srgb(),
-        ImageSpec::gray8_srgb(),
-        ImageSpec::graya8_srgb(),
+        ImageSpec::RGB8_SRGB,
+        ImageSpec::RGBA8_SRGB,
+        ImageSpec::GRAY8_SRGB,
+        ImageSpec::GRAYA8_SRGB,
         // 16-bit
-        ImageSpec::rgb16_srgb(),
-        ImageSpec::rgba16_srgb(),
-        ImageSpec::gray16_srgb(),
+        ImageSpec::RGB16_SRGB,
+        ImageSpec::RGBA16_SRGB,
+        ImageSpec::GRAY16_SRGB,
         zenpixels::ImageSpec::new(
             zenpixels::SampleLayout::new(
                 zenpixels::SampleType::U16,
@@ -2216,9 +2216,9 @@ mod decoding {
             GRAY_SRGB_ALPHA,
         ),
         // f32 linear
-        ImageSpec::rgbf32_linear(),
-        ImageSpec::rgbaf32_linear(),
-        ImageSpec::grayf32_linear(),
+        ImageSpec::RGBF32_LINEAR,
+        ImageSpec::RGBAF32_LINEAR,
+        ImageSpec::GRAYF32_LINEAR,
         zenpixels::ImageSpec::new(
             zenpixels::SampleLayout::new(
                 zenpixels::SampleType::F32,
@@ -3140,7 +3140,7 @@ mod decoding {
                         gm_info.bit_depth = gm_result.info.bit_depth.unwrap_or(8);
                         let gain_pixels = gm_result
                             .pixels
-                            .with_color(zenpixels::ColorSpace::Untagged {
+                            .relabel_color(zenpixels::ColorSpace::Untagged {
                                 channels,
                                 alpha: zenpixels::AlphaMode::None,
                             })
@@ -3685,11 +3685,11 @@ mod tests {
                 rgb::Rgb { r: v, g: v, b: v }
             })
             .collect();
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgb8_srgb(),
+            zenpixels::ImageSpec::RGB8_SRGB,
         )
         .unwrap();
 
@@ -3731,11 +3731,11 @@ mod tests {
                 }
             })
             .collect();
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgba<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgba<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgba8_srgb(),
+            zenpixels::ImageSpec::RGBA8_SRGB,
         )
         .unwrap();
 
@@ -3762,11 +3762,11 @@ mod tests {
         use zencodec::encode::EncoderConfig;
         let desc = JxlEncoderConfig::supported_descriptors();
         assert!(
-            desc.contains(&zenpixels::ImageSpec::rgbx8_srgb()),
+            desc.contains(&zenpixels::ImageSpec::RGBX8_SRGB),
             "RGBX8_SRGB must be in supported_descriptors"
         );
         assert!(
-            desc.contains(&zenpixels::ImageSpec::bgrx8_srgb()),
+            desc.contains(&zenpixels::ImageSpec::BGRX8_SRGB),
             "BGRX8_SRGB must be in supported_descriptors"
         );
     }
@@ -3776,7 +3776,7 @@ mod tests {
     fn encode_rgbx8_roundtrip() {
         use zencodec::decode::Decode;
         use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
-        use zenpixels::{ImageSpec, PixelView};
+        use zenpixels::PixelView;
 
         let w = 16u32;
         let h = 16u32;
@@ -3784,7 +3784,8 @@ mod tests {
         for _ in 0..(w * h) {
             buf.extend_from_slice(&[255, 128, 0, 0x13]);
         }
-        let slice = PixelView::new(&buf, w, h, (w * 4) as usize, ImageSpec::rgbx8_srgb()).unwrap();
+        let slice =
+            PixelView::new(&buf, w, h, (w * 4) as usize, &zenpixels::specs::RGBX8_SRGB).unwrap();
 
         let config = JxlEncoderConfig::new().with_lossless(true);
         let encoder = config.job().encoder().unwrap();
@@ -3808,7 +3809,7 @@ mod tests {
     fn encode_bgrx8_roundtrip() {
         use zencodec::decode::Decode;
         use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
-        use zenpixels::{ImageSpec, PixelView};
+        use zenpixels::PixelView;
 
         let w = 16u32;
         let h = 16u32;
@@ -3817,7 +3818,8 @@ mod tests {
             // BGR order with padding: B=0, G=128, R=255, pad
             buf.extend_from_slice(&[0, 128, 255, 0x42]);
         }
-        let slice = PixelView::new(&buf, w, h, (w * 4) as usize, ImageSpec::bgrx8_srgb()).unwrap();
+        let slice =
+            PixelView::new(&buf, w, h, (w * 4) as usize, &zenpixels::specs::BGRX8_SRGB).unwrap();
 
         let config = JxlEncoderConfig::new().with_lossless(true);
         let encoder = config.job().encoder().unwrap();
@@ -3842,7 +3844,7 @@ mod tests {
         // with non-opaque alpha bytes stored in byte 3 would be larger or
         // different. Confirm RGBX output matches RGB output byte-for-byte.
         use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
-        use zenpixels::{ImageSpec, PixelView};
+        use zenpixels::PixelView;
 
         let w = 16u32;
         let h = 16u32;
@@ -3857,9 +3859,9 @@ mod tests {
         }
 
         let rgbx_slice =
-            PixelView::new(&rgbx, w, h, (w * 4) as usize, ImageSpec::rgbx8_srgb()).unwrap();
+            PixelView::new(&rgbx, w, h, (w * 4) as usize, &zenpixels::specs::RGBX8_SRGB).unwrap();
         let rgb_slice =
-            PixelView::new(&rgb, w, h, (w * 3) as usize, ImageSpec::rgb8_srgb()).unwrap();
+            PixelView::new(&rgb, w, h, (w * 3) as usize, &zenpixels::specs::RGB8_SRGB).unwrap();
 
         let rgbx_out = JxlEncoderConfig::new()
             .with_lossless(true)
@@ -3893,11 +3895,11 @@ mod tests {
             use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
             let pixels: Vec<rgb::Rgb<u8>> = vec![rgb::Rgb { r: 0, g: 0, b: 0 }; 4];
-            let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+            let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
                 pixels,
                 2,
                 2,
-                zenpixels::ImageSpec::rgb8_srgb(),
+                zenpixels::ImageSpec::RGB8_SRGB,
             )
             .unwrap();
 
@@ -3933,11 +3935,11 @@ mod tests {
                 }
             })
             .collect();
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgb8_srgb(),
+            zenpixels::ImageSpec::RGB8_SRGB,
         )
         .unwrap();
 
@@ -3971,11 +3973,11 @@ mod tests {
 
         for cicp in [Cicp::DISPLAY_P3, Cicp::new(12, 16, 0, true)] {
             let pixels = vec![rgb::Rgb::new(17u8, 93, 211); 4];
-            let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+            let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
                 pixels,
                 2,
                 2,
-                zenpixels::ImageSpec::rgb8_srgb(),
+                zenpixels::ImageSpec::RGB8_SRGB,
             )
             .unwrap();
             let encoder = JxlEncoderConfig::new()
@@ -4008,7 +4010,7 @@ mod tests {
             assert_eq!(*rendering_intent as u8, 1, "Relative intent for {cicp:?}");
             let decoded = crate::decode(output.data(), None, &[]).unwrap();
             assert_eq!(
-                decoded.pixels.try_into_vec::<u8>().unwrap(),
+                decoded.pixels.into_vec::<u8>().unwrap(),
                 [17u8, 93, 211].repeat(4)
             );
         }
@@ -4034,11 +4036,11 @@ mod tests {
                 rgb::Rgb { r: v, g: v, b: v }
             })
             .collect();
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgb8_srgb(),
+            zenpixels::ImageSpec::RGB8_SRGB,
         )
         .unwrap();
 
@@ -4230,11 +4232,11 @@ mod tests {
                 rgb::Rgb { r: v, g: v, b: v }
             })
             .collect();
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgb8_srgb(),
+            zenpixels::ImageSpec::RGB8_SRGB,
         )
         .unwrap();
 
@@ -4263,11 +4265,11 @@ mod tests {
                 rgb::Rgb { r: v, g: v, b: v }
             })
             .collect();
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgb8_srgb(),
+            zenpixels::ImageSpec::RGB8_SRGB,
         )
         .unwrap();
 
@@ -4346,11 +4348,11 @@ mod tests {
             };
             16
         ];
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgb8_srgb(),
+            zenpixels::ImageSpec::RGB8_SRGB,
         )
         .unwrap();
         let config = JxlEncoderConfig::new().with_lossless(true);
@@ -4383,7 +4385,7 @@ mod tests {
         use zencodec::decode::{AnimationFrameDecoder, DecodeJob, DecoderConfig};
         use zencodec::encode::{AnimationFrameEncoder, EncodeJob, EncoderConfig};
         use zencodec::{ResourceLimits, ThreadingPolicy};
-        use zenpixels::{ImageSpec, PixelView};
+        use zenpixels::PixelView;
 
         // Encode a 4-frame 8x8 RGB animation with lossless to keep deps low.
         let width = 8u32;
@@ -4404,8 +4406,8 @@ mod tests {
             .unwrap();
         for seed in 0u8..4 {
             let frame = make_frame(seed * 17);
-            let slice =
-                PixelView::new(&frame, width, height, stride, ImageSpec::rgb8_srgb()).unwrap();
+            let slice = PixelView::new(&frame, width, height, stride, &zenpixels::specs::RGB8_SRGB)
+                .unwrap();
             enc.push_frame(slice, 100, None).unwrap();
         }
         let encoded = AnimationFrameEncoder::finish(enc, None).unwrap();
@@ -4439,7 +4441,7 @@ mod tests {
         use zencodec::decode::{AnimationFrameDecoder, DecodeJob, DecoderConfig};
         use zencodec::encode::{AnimationFrameEncoder, EncodeJob, EncoderConfig};
         use zencodec::{ResourceLimits, ThreadingPolicy};
-        use zenpixels::{ImageSpec, PixelView};
+        use zenpixels::PixelView;
 
         let width = 4u32;
         let height = 4u32;
@@ -4459,8 +4461,8 @@ mod tests {
             .unwrap();
         for seed in 0u8..3 {
             let frame = make_frame(seed * 23);
-            let slice =
-                PixelView::new(&frame, width, height, stride, ImageSpec::rgb8_srgb()).unwrap();
+            let slice = PixelView::new(&frame, width, height, stride, &zenpixels::specs::RGB8_SRGB)
+                .unwrap();
             enc.push_frame(slice, 50, None).unwrap();
         }
         let encoded = AnimationFrameEncoder::finish(enc, None).unwrap();
@@ -4514,12 +4516,8 @@ mod tests {
         let xmp_data: &[u8] = b"<xmp>anim</xmp>";
 
         for (descriptor, bytes_per_sample, layout) in [
-            (ImageSpec::rgb8_srgb(), 1usize, vec![*b"JXL ", *b"ftyp"]),
-            (
-                ImageSpec::rgb16_srgb(),
-                2,
-                vec![*b"JXL ", *b"ftyp", *b"jxll"],
-            ),
+            (ImageSpec::RGB8_SRGB, 1usize, vec![*b"JXL ", *b"ftyp"]),
+            (ImageSpec::RGB16_SRGB, 2, vec![*b"JXL ", *b"ftyp", *b"jxll"]),
         ] {
             let stride = (width as usize) * 3 * bytes_per_sample;
             let frame_bytes = stride * height as usize;
@@ -4542,8 +4540,7 @@ mod tests {
                 .unwrap();
             for seed in 0u8..2 {
                 let frame = make_frame(seed.wrapping_mul(41));
-                let slice =
-                    PixelView::new(&frame, width, height, stride, descriptor.clone()).unwrap();
+                let slice = PixelView::new(&frame, width, height, stride, &descriptor).unwrap();
                 enc.push_frame(slice, 50, None).unwrap();
             }
             let encoded = AnimationFrameEncoder::finish(enc, None).unwrap();
@@ -4604,11 +4601,11 @@ mod tests {
                 b: ((i / 7) % 256) as u8,
             })
             .collect();
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgb8_srgb(),
+            zenpixels::ImageSpec::RGB8_SRGB,
         )
         .unwrap();
 
@@ -4703,11 +4700,11 @@ mod tests {
                 b: ((i / 11) % 256) as u8,
             })
             .collect();
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgb8_srgb(),
+            zenpixels::ImageSpec::RGB8_SRGB,
         )
         .unwrap();
 
@@ -4735,7 +4732,7 @@ mod tests {
     fn animation_encode_memory_cap_delegates_to_core() {
         use zencodec::encode::{AnimationFrameEncoder, EncodeJob, EncoderConfig};
         use zencodec::{CategorizedError, ErrorCategory, LimitKind, ResourceError, ResourceLimits};
-        use zenpixels::{ImageSpec, PixelView};
+        use zenpixels::PixelView;
 
         let width = 256u32;
         let height = 256u32;
@@ -4756,8 +4753,8 @@ mod tests {
             .unwrap();
         for seed in 0u8..2 {
             let frame = make_frame(seed * 31);
-            let slice =
-                PixelView::new(&frame, width, height, stride, ImageSpec::rgb8_srgb()).unwrap();
+            let slice = PixelView::new(&frame, width, height, stride, &zenpixels::specs::RGB8_SRGB)
+                .unwrap();
             enc.push_frame(slice, 100, None)
                 .expect("accumulated input bytes are under the cap — push_frame must admit");
         }
@@ -4792,11 +4789,11 @@ mod tests {
                 rgb::Rgb { r: v, g: v, b: v }
             })
             .collect();
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgb8_srgb(),
+            zenpixels::ImageSpec::RGB8_SRGB,
         )
         .unwrap();
 
@@ -4904,11 +4901,11 @@ mod tests {
         let width = 4u32;
         let height = 4u32;
         let pixels: Vec<rgb::Rgb<u8>> = vec![rgb::Rgb { r: 0, g: 0, b: 0 }; 16];
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgb8_srgb(),
+            zenpixels::ImageSpec::RGB8_SRGB,
         )
         .unwrap();
 
@@ -4952,11 +4949,11 @@ mod tests {
         let width = 8u32;
         let height = 8u32;
         let pixels: Vec<rgb::Rgb<u8>> = vec![rgb::Rgb { r: 0, g: 0, b: 0 }; 64];
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgb8_srgb(),
+            zenpixels::ImageSpec::RGB8_SRGB,
         )
         .unwrap();
 
@@ -4999,11 +4996,11 @@ mod tests {
         let width = 8u32;
         let height = 8u32;
         let pixels: Vec<rgb::Rgb<u8>> = vec![rgb::Rgb { r: 0, g: 0, b: 0 }; 64];
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgb8_srgb(),
+            zenpixels::ImageSpec::RGB8_SRGB,
         )
         .unwrap();
 
@@ -5041,11 +5038,11 @@ mod tests {
         let width = 4u32;
         let height = 4u32;
         let pixels: Vec<rgb::Rgb<u8>> = vec![rgb::Rgb { r: 0, g: 0, b: 0 }; 16];
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgb8_srgb(),
+            zenpixels::ImageSpec::RGB8_SRGB,
         )
         .unwrap();
 
@@ -5085,11 +5082,11 @@ mod tests {
         let width = 4u32;
         let height = 4u32;
         let pixels: Vec<rgb::Rgb<u8>> = vec![rgb::Rgb { r: 0, g: 0, b: 0 }; 16];
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgb8_srgb(),
+            zenpixels::ImageSpec::RGB8_SRGB,
         )
         .unwrap();
 
@@ -5121,11 +5118,11 @@ mod tests {
         let width = 4u32;
         let height = 4u32;
         let pixels: Vec<rgb::Rgb<u8>> = vec![rgb::Rgb { r: 0, g: 0, b: 0 }; 16];
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgb8_srgb(),
+            zenpixels::ImageSpec::RGB8_SRGB,
         )
         .unwrap();
 
@@ -5151,11 +5148,11 @@ mod tests {
         let width = 8u32;
         let height = 8u32;
         let pixels: Vec<rgb::Rgb<u8>> = vec![rgb::Rgb { r: 0, g: 0, b: 0 }; 64];
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgb8_srgb(),
+            zenpixels::ImageSpec::RGB8_SRGB,
         )
         .unwrap();
 
@@ -5214,11 +5211,11 @@ mod tests {
                 a: 255,
             })
             .collect();
-        let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgba<u8>>(
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgba<u8>>(
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::rgba8_srgb(),
+            zenpixels::ImageSpec::RGBA8_SRGB,
         )
         .unwrap();
 
@@ -5234,11 +5231,7 @@ mod tests {
             }
             let decoder = job.decoder(Cow::Borrowed(encoded.data()), &[]).unwrap();
             let decoded = decoder.decode().unwrap();
-            decoded
-                .pixels()
-                .try_contiguous_bytes()
-                .unwrap()
-                .into_owned()
+            decoded.pixels().contiguous_bytes().unwrap().into_owned()
         };
 
         let default_bytes = decode_with(None);
@@ -5273,8 +5266,8 @@ mod tests {
 
         let cfg = JxlDecoderConfig::new();
         let compute = ComputeEnvironment::new();
-        let small = ImageCharacteristics::new(256, 256, zenpixels::ImageSpec::rgba8_srgb());
-        let large = ImageCharacteristics::new(2048, 2048, zenpixels::ImageSpec::rgba8_srgb());
+        let small = ImageCharacteristics::new(256, 256, zenpixels::ImageSpec::RGBA8_SRGB);
+        let large = ImageCharacteristics::new(2048, 2048, zenpixels::ImageSpec::RGBA8_SRGB);
 
         let es = cfg.estimate_decode_resources(&small, &compute);
         let el = cfg.estimate_decode_resources(&large, &compute);

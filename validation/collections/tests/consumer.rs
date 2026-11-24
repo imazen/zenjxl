@@ -81,7 +81,7 @@ fn replacement_releases_native_color_and_keeps_exact_independent_auxiliary_owner
                 self.width,
                 self.rows,
                 self.stride,
-                self.descriptor.clone(),
+                &self.descriptor,
             )
             .unwrap();
             Ok(pixels)

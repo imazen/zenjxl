@@ -10,7 +10,7 @@ const SOURCE: &[u8] = include_bytes!("fixtures/orientation5_transpose.jxl");
 
 #[test]
 fn integer_grid_survives_native_and_adapter_orientation() {
-    for descriptor in [ImageSpec::rgb8_srgb(), ImageSpec::rgb16_srgb()] {
+    for descriptor in [ImageSpec::RGB8_SRGB, ImageSpec::RGB16_SRGB] {
         let native = zenjxl::decode_with_options(
             SOURCE,
             None,
@@ -65,15 +65,10 @@ fn integer_grid_survives_native_and_adapter_orientation() {
 
 #[test]
 fn float_output_has_no_integer_grid_claim() {
-    let pixels = zenjxl::decode_with_options(
-        SOURCE,
-        None,
-        &[ImageSpec::rgbf32_linear()],
-        Some(false),
-        None,
-    )
-    .unwrap()
-    .pixels;
+    let pixels =
+        zenjxl::decode_with_options(SOURCE, None, &[ImageSpec::RGBF32_LINEAR], Some(false), None)
+            .unwrap()
+            .pixels;
     assert_eq!(pixels.spec().layout.sample, SampleType::F32);
     assert_eq!(pixels.facts().depth, None);
 }
@@ -83,12 +78,12 @@ fn float_output_has_no_integer_grid_claim() {
 fn lossless_deep_samples_do_not_inherit_a_coarser_grid() {
     use zencodec::encode::{EncodeJob, EncoderConfig};
     use zenpixels::PixelView;
-    for descriptor in [ImageSpec::rgb16_srgb(), ImageSpec::rgba16_srgb()] {
+    for descriptor in [ImageSpec::RGB16_SRGB, ImageSpec::RGBA16_SRGB] {
         let channels = descriptor.layout.channels();
         let bytes: Vec<u8> = (0..8 * 4 * channels)
             .flat_map(|i| [0u16, 65, 32768, 65535][i % 4].to_ne_bytes())
             .collect();
-        let slice = PixelView::new(&bytes, 8, 4, 8 * channels * 2, descriptor.clone()).unwrap();
+        let slice = PixelView::new(&bytes, 8, 4, 8 * channels * 2, &descriptor).unwrap();
         let encoded = zenjxl::JxlEncoderConfig::new()
             .with_lossless(true)
             .job()
@@ -103,12 +98,7 @@ fn lossless_deep_samples_do_not_inherit_a_coarser_grid() {
         )
         .unwrap();
         assert_eq!(
-            native
-                .pixels
-                .as_view()
-                .try_contiguous_bytes()
-                .unwrap()
-                .as_ref(),
+            native.pixels.as_view().contiguous_bytes().unwrap().as_ref(),
             bytes.as_slice()
         );
         let exact = native.pixels.facts().depth.unwrap();

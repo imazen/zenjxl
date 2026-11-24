@@ -205,7 +205,7 @@ impl PackedImageOwner for Packed {
             self.color.width as u32,
             self.color.height as u32,
             self.color.stride,
-            self.descriptor.clone(),
+            &self.descriptor,
         )
         .map_err(|e| {
             zencodec::At::wrap(OutputError::Mapping(zencodec::frame::MapError::Backend(

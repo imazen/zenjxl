@@ -1089,7 +1089,7 @@ fn output_primaries(primaries: &JxlPrimaries, white: &JxlWhitePoint) -> Primarie
         (JxlPrimaries::P3, JxlWhitePoint::DCI) => Primaries::DciP3,
         _ => {
             let [r, g, b] = primaries.to_xy_coords();
-            CustomPrimaries::try_new(r, g, b, white.to_xy_coords())
+            CustomPrimaries::new(r, g, b, white.to_xy_coords())
                 .map_or(Primaries::Unknown, Primaries::Custom)
         }
     }
@@ -1188,7 +1188,7 @@ pub(crate) fn alloc_pixel_storage(
     pref: zencodec::AllocPreference,
     bytes: usize,
 ) -> Result<PixelStorage, At<JxlError>> {
-    PixelStorage::try_zeroed(sample, bytes).map_err(|_| {
+    PixelStorage::zeroed(sample, bytes).map_err(|_| {
         if !crate::alloc_util::resolve_fallible(pref, true) {
             let layout = core::alloc::Layout::from_size_align(bytes, sample.min_alignment())
                 .expect("pixel capacity overflow");
@@ -1207,13 +1207,13 @@ pub(crate) fn adopt_pixels(
     stride: usize,
     spec: ImageSpec,
 ) -> Result<PixelBuf, At<JxlError>> {
-    PixelBuf::from_parts(storage, 0, width, height, stride, spec)
+    PixelBuf::from_storage_parts(storage, 0, width, height, stride, spec)
         .map_err(|e| whereat::at!(JxlError::InvalidInput(e.to_string())))
 }
 
 fn measure_integer_depth(pixels: &mut PixelBuf) {
     let depth = zenpixels::sample::ExactDepth::measure(&pixels.as_view()).ok();
-    pixels.set_facts(zenpixels::SampleFacts::NONE.with_depth_opt(depth));
+    pixels.assume_facts(zenpixels::SampleFacts::NONE.with_depth_opt(depth));
 }
 
 #[cfg(test)]

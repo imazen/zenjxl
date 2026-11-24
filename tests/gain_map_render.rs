@@ -24,11 +24,11 @@ fn encode_codestream(w: u32, h: u32, seed: u8) -> Vec<u8> {
             rgb::Rgb { r: v, g: v, b: v }
         })
         .collect();
-    let buf = zenpixels::PixelBuf::from_vec::<rgb::Rgb<u8>>(
+    let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
         pixels,
         w,
         h,
-        zenpixels::ImageSpec::rgb8_srgb(),
+        zenpixels::ImageSpec::RGB8_SRGB,
     )
     .unwrap();
     zenjxl::JxlEncoderConfig::new()
@@ -199,7 +199,7 @@ fn assert_f32_rows(out: &zencodec::decode::DecodeOutput, expected: &[f32]) {
         zenpixels::SampleType::F32
     );
     let bytes: Vec<_> = expected.iter().flat_map(|v| v.to_ne_bytes()).collect();
-    assert_eq!(out.pixels().try_contiguous_bytes().unwrap().as_ref(), bytes);
+    assert_eq!(out.pixels().contiguous_bytes().unwrap().as_ref(), bytes);
 }
 
 // X1: independent lane equations at full weight and exact bypass at zero weight.
@@ -273,16 +273,10 @@ fn hdr_base_passthrough_preserves_pq_and_refuses_lower_target() {
     let pq = Cicp::new(9, 16, 0, true);
     let cll = ContentLightLevel::new(1700, 601);
     let mastering = zenpixels::hdr::MasteringDisplay::HDR10_REFERENCE;
-    let pixels = zenpixels::PixelView::new(
-        &rows,
-        2,
-        1,
-        12,
-        ImageSpec::rgb16_srgb()
-            .with_primaries(Primaries::Bt2020)
-            .with_transfer(Transfer::Pq),
-    )
-    .unwrap();
+    let spec = ImageSpec::RGB16_SRGB
+        .with_primaries(Primaries::Bt2020)
+        .with_transfer(Transfer::Pq);
+    let pixels = zenpixels::PixelView::new(&rows, 2, 1, 12, &spec).unwrap();
     use zencodec::encode::{EncodeJob as _, EncoderConfig as _};
     let base = zenjxl::JxlEncoderConfig::new()
         .with_lossless(true)
@@ -380,11 +374,7 @@ fn rgba_gain_preserves_alpha_and_registered_samples() {
         .extras::<zencodec::decode::DecodedGainMap>()
         .unwrap();
     assert_eq!(
-        gain.pixels
-            .as_view()
-            .try_contiguous_bytes()
-            .unwrap()
-            .as_ref(),
+        gain.pixels.as_view().contiguous_bytes().unwrap().as_ref(),
         gain_codes
     );
 

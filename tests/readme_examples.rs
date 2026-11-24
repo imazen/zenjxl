@@ -1,7 +1,7 @@
 //! Compile-checks for the code examples in `README.md`.
 //!
 //! The README's "Quick start" snippets reach across crate boundaries
-//! (`zenpixels` for `PixelBuf`, `zenpixels-convert` for `convert_buf`,
+//! (`zenpixels` for `PixelBuf`, `zenpixels-convert` for `convert_to_buf_with_peak`,
 //! `whereat` for the `At<JxlError>` wrapper, `almost-enough` for a concrete
 //! `Stop` token). Those types aren't visible from a plain `cargo test --doc`
 //! run, so the README examples used to drift out of sync with the real API
@@ -39,15 +39,15 @@ fn decode_to_rgba8() {
 
     // Convert the actual output color and sample layout to packed RGBA8.
     use zenpixels::PeakSource;
-    use zenpixels_convert::{ConvertPolicy, convert_buf};
-    let converted = convert_buf(
+    use zenpixels_convert::{ConvertPolicy, convert_to_buf_with_peak};
+    let converted = convert_to_buf_with_peak(
         &output.pixels.as_view(),
-        ImageSpec::rgba8_srgb(),
+        &ImageSpec::RGBA8_SRGB,
         &ConvertPolicy::permissive(),
         PeakSource::Measured,
     )
     .unwrap();
-    let rgba: Vec<u8> = converted.try_into_vec().unwrap();
+    let rgba: Vec<u8> = converted.into_vec().unwrap();
 
     // Native layout straight off the PixelBuf.
     let (w, h) = (output.pixels.width(), output.pixels.height());
