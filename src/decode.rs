@@ -156,6 +156,7 @@ pub struct JxlInfo {
     /// Default is 255.0 (SDR). Higher values (e.g. 4000, 10000) indicate HDR content.
     /// From the JXL codestream `ToneMapping.intensity_target`.
     pub intensity_target: f32,
+    pub(crate) hdr: HdrMetadata,
     /// Minimum display luminance in nits. Default is 0.0.
     ///
     /// From the JXL codestream `ToneMapping.min_nits`.
@@ -718,6 +719,7 @@ pub(crate) fn probe_output(
             preview_size,
             xyb_encoded,
             intensity_target: tm.intensity_target,
+            hdr: hdr_metadata(data, tm.intensity_target),
             min_nits: tm.min_nits,
             relative_to_max_display: tm.relative_to_max_display,
             linear_below: tm.linear_below,
@@ -988,13 +990,19 @@ pub(crate) fn decode_with_options_oriented(
     // Lossy JXL can produce values slightly outside range as compression artifacts.
     // HDR (PQ/HLG) and wide gamut (BT.2020/P3) content is left unclamped.
     // When CICP is absent (ICC-only images), we don't know the gamut — don't clamp.
-    if chosen.channel_type == SampleType::F32 && cicp.is_some() && !is_hdr_or_wide_gamut(cicp) {
+    let hdr = hdr_metadata(data, intensity_target);
+    if chosen.channel_type == SampleType::F32
+        && hdr.cll.is_none()
+        && hdr.mastering.is_none()
+        && cicp.is_some()
+        && !is_hdr_or_wide_gamut(cicp)
+    {
         clamp_f32_buf(buf.as_bytes_mut());
     }
 
     let mut pixels = adopt_pixels(buf, width_u32, height_u32, bytes_per_row, spec)?
         .with_origin(origin)
-        .with_hdr(hdr_metadata(intensity_target));
+        .with_hdr(hdr);
     measure_integer_depth(&mut pixels);
 
     completion_stop
@@ -1022,6 +1030,7 @@ pub(crate) fn decode_with_options_oriented(
             preview_size,
             xyb_encoded,
             intensity_target,
+            hdr,
             min_nits,
             relative_to_max_display,
             linear_below,
@@ -1165,13 +1174,13 @@ pub(crate) fn color_origin(
     }
 }
 
-pub(crate) fn hdr_metadata(intensity_target: f32) -> HdrMetadata {
-    HdrMetadata {
+pub(crate) fn hdr_metadata(data: &[u8], intensity_target: f32) -> HdrMetadata {
+    crate::hdr::from_container(data).unwrap_or_else(|| HdrMetadata {
         cll: (intensity_target > 255.0).then(|| {
             zenpixels::ContentLightLevel::new(intensity_target.min(u16::MAX as f32) as u16, 0)
         }),
         mastering: None,
-    }
+    })
 }
 
 pub(crate) fn alloc_pixel_storage(
@@ -1203,48 +1212,8 @@ pub(crate) fn adopt_pixels(
 }
 
 fn measure_integer_depth(pixels: &mut PixelBuf) {
-    let view = pixels.as_view();
-    let storage_bits = match view.spec().layout.sample {
-        SampleType::U8 => 8,
-        SampleType::U16 => 16,
-        _ => return,
-    };
-    let storage_max = (1u32 << storage_bits) - 1;
-    let mut candidates = (1u32 << storage_bits) - 1;
-    // JXL output is full-range. Keep only depths whose canonical widening
-    // reproduces every active sample, including alpha.
-    'rows: for y in 0..view.rows() {
-        let row = view.row(y);
-        let samples = row.chunks_exact(storage_bits / 8).map(|bytes| {
-            if storage_bits == 8 {
-                u32::from(bytes[0])
-            } else {
-                u32::from(u16::from_ne_bytes([bytes[0], bytes[1]]))
-            }
-        });
-        for sample in samples {
-            if sample == 0 || sample == storage_max {
-                continue;
-            }
-            let mut remaining = candidates & ((1 << (storage_bits - 1)) - 1);
-            while remaining != 0 {
-                let bit = remaining.trailing_zeros();
-                let mask = 1 << bit;
-                remaining &= !mask;
-                let max = (2 << bit) - 1;
-                let narrowed = (sample * max + storage_max / 2) / storage_max;
-                if (narrowed * storage_max + max / 2) / max != sample {
-                    candidates &= !mask;
-                }
-            }
-            if candidates.is_power_of_two() {
-                break 'rows;
-            }
-        }
-    }
-    let mut facts = zenpixels::SampleFacts::NONE;
-    facts.exact.effective_bits = candidates.trailing_zeros() as u8 + 1;
-    pixels.set_facts(facts);
+    let depth = zenpixels::sample::ExactDepth::measure(&pixels.as_view()).ok();
+    pixels.set_facts(zenpixels::SampleFacts::NONE.with_depth_opt(depth));
 }
 
 #[cfg(test)]

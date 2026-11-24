@@ -56,12 +56,15 @@ use jxl_encoder::{calibrated_jxl_quality, quality_to_distance};
 #[cfg(feature = "encode")]
 mod encoding {
     use super::*;
+    use alloc::borrow::Cow;
     use alloc::string::ToString;
     use alloc::vec::Vec;
     use jxl_encoder::{AnimationFrame, AnimationParams, LosslessConfig, LossyConfig, PixelLayout};
     use zencodec::encode::{EncodeCapabilities, EncodeOutput, EncodePolicy};
     use zencodec::{Metadata, ResourceLimits, UnsupportedOperation};
-    use zenpixels::{ChannelOrder, PixelView, SampleType};
+    use zenpixels::{
+        ChannelOrder, ColorSpace, HdrMetadata, PixelView, SampleLayout, SampleType, Transfer,
+    };
 
     use enough::Stop;
 
@@ -742,7 +745,9 @@ mod encoding {
                 stream: StreamState::Empty,
                 declaration: None,
                 gain_map: self.config.gain_map.clone(),
-                pixels_cicp: None,
+                pixels_color: None,
+                pixels_origin: None,
+                pixels_hdr: HdrMetadata::default(),
             })
         }
 
@@ -795,7 +800,9 @@ mod encoding {
         gain_map: Option<Arc<GainMapData>>,
         /// The colour the pixel descriptor states, for when the metadata
         /// describes none.
-        pixels_cicp: Option<zencodec::Cicp>,
+        pixels_color: Option<ColorSpace>,
+        pixels_origin: Option<zenpixels::ColorOrigin>,
+        pixels_hdr: HdrMetadata,
     }
 
     impl JxlEncoder {
@@ -849,108 +856,175 @@ mod encoding {
         }
     }
 
+    enum JxlColorCarrier<'a> {
+        Default,
+        Native(jxl_encoder::ColorEncoding),
+        Icc(Cow<'a, [u8]>),
+    }
+
     impl JxlEncoder {
-        /// Build jxl-encoder ImageMetadata from the zencodec Metadata.
-        ///
-        /// `embed_icc` is resolved by [`resolve_jxl_color`](Self::resolve_jxl_color)
-        /// — it is `false` when the color is carried by the codestream enum
-        /// encoding and the ICC was a redundant duplicate (the JXL Balanced
-        /// default). EXIF/XMP still follow the [`EncodePolicy`].
-        fn build_jxl_metadata(&self, embed_icc: bool) -> Option<jxl_encoder::ImageMetadata<'_>> {
-            let meta = self.metadata.as_ref()?;
-            let mut jxl_meta = jxl_encoder::ImageMetadata::new();
-            let mut has_any = false;
-
-            if embed_icc && let Some(ref icc) = meta.icc_profile {
-                jxl_meta = jxl_meta.with_icc_profile(icc);
-                has_any = true;
+        fn build_jxl_metadata<'a>(
+            &'a self,
+            icc: Option<&'a [u8]>,
+            hdr_payload: &'a [u8],
+            hdr: HdrMetadata,
+        ) -> jxl_encoder::ImageMetadata<'a> {
+            let mut metadata = jxl_encoder::ImageMetadata::new();
+            if let Some(icc) = icc {
+                metadata = metadata.with_icc_profile(icc);
             }
-            if self.policy.resolve_exif(true)
-                && let Some(ref exif) = meta.exif
+            if let Some(meta) = &self.metadata {
+                metadata = metadata.with_orientation(meta.orientation);
+                if self.policy.resolve_exif(true)
+                    && let Some(exif) = &meta.exif
+                {
+                    metadata = metadata.with_exif(exif.strip_prefix(b"Exif\0\0").unwrap_or(exif));
+                }
+                if self.policy.resolve_xmp(true)
+                    && let Some(xmp) = &meta.xmp
+                {
+                    metadata = metadata.with_xmp(xmp);
+                }
+            }
+            if !hdr_payload.is_empty() {
+                metadata = metadata.with_hcdr_payload(hdr_payload);
+            }
+            // JXL's native headroom and measured content levels are distinct.
+            // Legacy inputs may only carry a peak, which still drives the tone mapping.
+            if let Some(peak) = hdr
+                .mastering
+                .map(|m| m.max_luminance)
+                .or_else(|| hdr.cll.map(|cll| f32::from(cll.max_content_light_level)))
+                && peak > 0.0
             {
-                // A JPEG APP1 payload starts `Exif\0\0`; the JXL Exif box
-                // holds the TIFF stream itself.
-                jxl_meta = jxl_meta.with_exif(exif.strip_prefix(b"Exif\0\0").unwrap_or(exif));
-                has_any = true;
+                metadata = metadata.with_intensity_target(peak);
             }
-            if self.policy.resolve_xmp(true)
-                && let Some(ref xmp) = meta.xmp
-            {
-                jxl_meta = jxl_meta.with_xmp(xmp);
-                has_any = true;
-            }
-
-            // HDR: forward the content peak (MaxCLL) as JXL's
-            // `intensity_target` — the symmetric inverse of the decode-side
-            // `intensity_target → MaxCLL` mapping, which was otherwise dropped
-            // on encode so HDR peak signaling did not round-trip. (The
-            // `diffuse_white` anchor is the *linear* reference used by
-            // `quantize_to`; JXL signals the *peak*, not SDR white, so the
-            // peak is what flows here.)
-            if let Some(cll) = meta.content_light_level
-                && cll.max_content_light_level > 0
-            {
-                jxl_meta = jxl_meta.with_intensity_target(f32::from(cll.max_content_light_level));
-                has_any = true;
-            }
-
-            has_any.then_some(jxl_meta)
+            metadata
         }
 
-        /// Resolve JXL color emission: whether to drive the codestream enum
-        /// color encoding from `Metadata::cicp` (or an ICC that maps to CICP),
-        /// and whether the ICC is then a redundant duplicate to drop.
-        ///
-        /// Routes through [`zencodec::resolve_color_emit`] under the caller's
-        /// color preset (`self.policy.resolve_color`, default
-        /// [`Balanced`](zencodec::ColorEmitPolicy::Balanced)). JXL is
-        /// `cicp_safe_sole_carrier`, so a representable color drops the ICC
-        /// (matching libjxl's `want_icc=false`). Returns the enum encoding to
-        /// apply (if any) and whether to embed the ICC.
         fn resolve_jxl_color(
             &self,
             layout: PixelLayout,
-        ) -> (Option<jxl_encoder::ColorEncoding>, bool) {
-            let policy_icc = self.policy.resolve_icc(true);
-            let described = self
-                .metadata
-                .as_ref()
-                .is_some_and(|m| m.cicp.is_some() || m.icc_profile.is_some());
-            // Metadata silent: the descriptor's colour, when it is one the
-            // JXL default (sRGB, or linear sRGB for float) doesn't already
-            // say. Without this, PQ/HLG or wide-gamut pixels were tagged sRGB.
-            let from_pixels = self.pixels_cicp.filter(|c| {
-                !(described
-                    || Self::layout_is_gray(layout)
-                    || (c.color_primaries == 1 && matches!(c.transfer_characteristics, 8 | 13)))
+        ) -> Result<JxlColorCarrier<'_>, At<JxlError>> {
+            use zencodec::{ColorAuthority, ColorEmitPolicy, IccDisposition, SourceColor};
+            use zenpixels_convert::icc_profiles::SynthesizedIcc;
+
+            let gray = Self::layout_is_gray(layout);
+            let channel_count = if gray { 1 } else { 3 };
+            let mut source = SourceColor::default().with_channel_count(channel_count);
+            let metadata_icc = self.metadata.as_ref().and_then(|m| m.icc_profile.as_ref());
+            let metadata_cicp = self.metadata.as_ref().and_then(|m| m.cicp);
+            let default_transfer = if layout.is_f32() {
+                Transfer::Linear
+            } else {
+                Transfer::Srgb
+            };
+            let fallback = if gray {
+                ColorSpace::GRAY_SRGB
+            } else {
+                ColorSpace::SRGB
+            };
+            let fallback = fallback.with_transfer(default_transfer);
+            let mut color = self.pixels_color.clone().unwrap_or(fallback.clone());
+            if let Some(icc) = metadata_icc {
+                source = source.with_icc_profile(icc.clone());
+            }
+            // The legacy with_metadata entry point can explicitly supply the color
+            // of caller-provided bytes. Checked callers reconcile those claims upstream.
+            if let Some(cicp) = metadata_cicp {
+                if cicp.matrix_coefficients != 0 || !cicp.full_range {
+                    return Err(whereat::at!(JxlError::UnsupportedOperation(
+                        UnsupportedOperation::PixelFormat,
+                    )));
+                }
+                source = source
+                    .with_cicp(cicp)
+                    .with_color_authority(ColorAuthority::Cicp);
+            }
+            let metadata_is_provenance = self.pixels_origin.as_ref().is_some_and(|origin| {
+                metadata_cicp.is_some_and(|cicp| origin.cicp == Some(cicp))
+                    || metadata_icc.is_some_and(|icc| origin.icc.as_ref() == Some(icc))
             });
-            if !described && from_pixels.is_none() {
-                return (None, policy_icc);
+            if !metadata_is_provenance && (metadata_cicp.is_some() || metadata_icc.is_some()) {
+                let samples = if gray {
+                    SampleLayout::GRAY8
+                } else {
+                    SampleLayout::RGB8
+                };
+                color = zencodec::helpers::descriptor_for_decoded_pixels_v2(samples, &source, None)
+                    .map_err(|e| whereat::at!(JxlError::InvalidInput(e.to_string())))?
+                    .color;
+            } else if let ColorSpace::Icc { profile, .. } = &color {
+                source = source.with_icc_profile(profile.clone());
             }
-            let channel_count = if Self::layout_is_gray(layout) { 1 } else { 3 };
-            let mut src = zencodec::SourceColor::default().with_channel_count(channel_count);
-            if let Some(cicp) = self.metadata.as_ref().and_then(|m| m.cicp).or(from_pixels) {
-                src = src.with_cicp(cicp);
+            if let ColorSpace::Rgb { white, .. } | ColorSpace::Gray { white, .. } = &mut color {
+                // The luminance envelope belongs to the HDR metadata, not to the
+                // CICP tuple used by the codestream color encoding.
+                *white = None;
             }
-            if let Some(icc) = self.metadata.as_ref().and_then(|m| m.icc_profile.clone()) {
-                src = src.with_icc_profile(icc);
+            if source.cicp.is_none() {
+                source.cicp = color.to_cicp();
+            }
+            if metadata_cicp.is_none()
+                && source.icc_profile.is_none()
+                && color.clone().with_alpha(zenpixels::AlphaMode::None) == fallback
+            {
+                return Ok(JxlColorCarrier::Default);
+            }
+
+            let mut caps = JXL_ENCODE_CAPS.clone();
+            if !self.policy.resolve_icc(true) {
+                caps = caps.with_icc(false);
             }
             let plan = zencodec::resolve_color_emit(
-                &src,
-                &JXL_ENCODE_CAPS,
-                self.policy
-                    .resolve_color(zencodec::ColorEmitPolicy::Balanced),
-            );
+                &source,
+                &color,
+                &caps,
+                self.policy.resolve_color(ColorEmitPolicy::Balanced),
+            )
+            .map_err(|e| whereat::at!(JxlError::InvalidInput(e.to_string())))?;
             let color_encoding = plan
                 .cicp
                 .as_ref()
                 .and_then(Self::cicp_to_jxl_color_encoding);
-            // Drop the ICC only when the enum color actually carries the color
-            // *and* the plan judged it redundant.
-            let embed_icc = policy_icc
-                && !(color_encoding.is_some()
-                    && matches!(plan.icc, zencodec::IccDisposition::Drop));
-            (color_encoding, embed_icc)
+            let icc = match plan.icc {
+                IccDisposition::Drop => None,
+                IccDisposition::KeepSource => metadata_icc
+                    .map(|p| Cow::Borrowed(p.as_ref()))
+                    .or_else(|| source.icc_profile.as_ref().map(|p| Cow::Owned(p.to_vec()))),
+                IccDisposition::SynthesizeFrom(cicp) | IccDisposition::SynthesizeGrayFrom(cicp) => {
+                    let synthesized = if gray {
+                        SynthesizedIcc::for_gray_cicp(cicp)
+                    } else {
+                        SynthesizedIcc::for_cicp(cicp)
+                    };
+                    match synthesized {
+                        SynthesizedIcc::Profile(profile) => Some(profile),
+                        SynthesizedIcc::NotNeeded => None,
+                        _ => {
+                            return Err(whereat::at!(JxlError::UnsupportedOperation(
+                                UnsupportedOperation::MetadataRetention,
+                            )));
+                        }
+                    }
+                }
+                _ => {
+                    return Err(whereat::at!(JxlError::UnsupportedOperation(
+                        UnsupportedOperation::MetadataRetention,
+                    )));
+                }
+            };
+            if let Some(icc) = icc {
+                Ok(JxlColorCarrier::Icc(icc))
+            } else if let Some(encoding) = color_encoding {
+                Ok(JxlColorCarrier::Native(encoding))
+            } else if color.with_alpha(zenpixels::AlphaMode::None) == fallback {
+                Ok(JxlColorCarrier::Default)
+            } else {
+                Err(whereat::at!(JxlError::UnsupportedOperation(
+                    UnsupportedOperation::PixelFormat,
+                )))
+            }
         }
 
         /// Whether a pixel layout is grayscale (CICP is RGB-centric and must be
@@ -1054,8 +1128,24 @@ mod encoding {
             height: u32,
             layout: PixelLayout,
         ) -> Result<Vec<u8>, At<JxlError>> {
-            let (color_encoding, embed_icc) = self.resolve_jxl_color(layout);
-            let jxl_meta = self.build_jxl_metadata(embed_icc);
+            let carrier = self.resolve_jxl_color(layout)?;
+            let icc = match &carrier {
+                JxlColorCarrier::Icc(icc) => Some(icc.as_ref()),
+                _ => None,
+            };
+            let hdr = self
+                .metadata
+                .as_ref()
+                .map_or(self.pixels_hdr, |meta| HdrMetadata {
+                    cll: meta.content_light_level.or(self.pixels_hdr.cll),
+                    mastering: meta.mastering_display.or(self.pixels_hdr.mastering),
+                });
+            let (hdr_bytes, hdr_len) = crate::hdr::encode(hdr).ok_or_else(|| {
+                whereat::at!(JxlError::InvalidInput(
+                    "HDR mastering display is outside the hCdR grid".into()
+                ))
+            })?;
+            let jxl_meta = self.build_jxl_metadata(icc, &hdr_bytes[..hdr_len], hdr);
 
             // Thread the caller's memory budget AND allocation preference into
             // the encoder (see `to_jxl_encode_limits`). The budget drives
@@ -1067,16 +1157,12 @@ mod encoding {
             let jxl_limits = to_jxl_encode_limits(&self.limits);
 
             let encode = |req: jxl_encoder::EncodeRequest<'_>| -> Result<Vec<u8>, At<JxlError>> {
-                let req = if let Some(ref ce) = color_encoding {
-                    req.with_color_encoding(ce.clone())
+                let req = if let JxlColorCarrier::Native(encoding) = &carrier {
+                    req.with_color_encoding(encoding.clone())
                 } else {
                     req
                 };
-                let req = if let Some(ref meta) = jxl_meta {
-                    req.with_metadata(meta)
-                } else {
-                    req
-                };
+                let req = req.with_metadata(&jxl_meta);
                 let req = if let Some(ref lim) = jxl_limits {
                     req.with_limits(lim)
                 } else {
@@ -1150,7 +1236,9 @@ mod encoding {
             pixels: PixelView<'_>,
         ) -> Result<EncodeOutput, At<zencodec::CodecError>> {
             self.check_one_shot().map_err(zencodec::CodecError::of)?;
-            self.pixels_cicp = pixels.spec().color.to_cicp();
+            self.pixels_color = Some(pixels.spec().color.clone());
+            self.pixels_origin = pixels.origin().cloned();
+            self.pixels_hdr = pixels.hdr();
             // The fallible body stays `At<JxlError>` (internal `?` sites
             // untouched); convert once at the boundary, preserving the trace.
             (move || -> Result<EncodeOutput, At<JxlError>> {
@@ -1379,7 +1467,7 @@ mod encoding {
                         *rows_pushed = total;
                     }
                 }
-                self.pixels_cicp = desc.color.to_cicp();
+                self.pixels_color = Some(desc.color.clone());
                 Ok(())
             })()
             .map_err(zencodec::CodecError::of)
@@ -1906,10 +1994,9 @@ mod decoding {
         stop: &dyn Stop,
         alloc_pref: zencodec::AllocPreference,
     ) -> Result<(zenpixels::PixelBuf, ImageInfo), At<JxlError>> {
-        use ultrahdr_core::gainmap::{HdrOutputFormat, apply_gainmap};
+        use ultrahdr_core::gainmap::{HdrOutputFormat, apply_gainmap_slice};
 
-        /// SDR reference white (cd/m²) — 1.0 in the linear output maps here.
-        const SDR_WHITE_NITS: f32 = 203.0;
+        let white = zenpixels::DiffuseWhite::BT2408;
 
         // `bundle.metadata` is the raw `jhgm` box bytes the decoder extracted
         // from the JXL container, not a caller-supplied parameter — a parse
@@ -1925,10 +2012,27 @@ mod decoding {
             ))
         })?;
 
-        if params.direction() == zencodec::gainmap::GainMapDirection::BaseIsHdr {
-            // The base image IS the HDR rendition (alternate is SDR) —
-            // nothing to apply; the base carries its own HDR signaling.
+        if target_headroom.is_some_and(|target| !target.is_finite() || target <= 0.0) {
+            return Err(whereat::at!(JxlError::InvalidInput(
+                "ReconstructHdr: target headroom must be positive and finite".into()
+            )));
+        }
+        if params.backward_direction
+            || params.direction() == zencodec::gainmap::GainMapDirection::BaseIsHdr
+        {
+            if target_headroom.is_some_and(|target| target < params.linear_base_headroom() as f32) {
+                // The lower-display path needs a verified HDR-base EOTF and
+                // gain-application basis before accepting the request.
+                return Err(whereat::at!(JxlError::UnsupportedOperation(
+                    UnsupportedOperation::DecodePolicy
+                )));
+            }
             return Ok((base, info));
+        }
+        if !params.use_base_color_space {
+            return Err(whereat::at!(JxlError::UnsupportedOperation(
+                UnsupportedOperation::PixelFormat
+            )));
         }
 
         // SDR-base bundle: decode the gain-map codestream (same resource
@@ -1977,39 +2081,82 @@ mod decoding {
             HdrOutputFormat::LinearFloat
         };
 
-        // `None` = full reconstruction at the gain map's encoded maximum.
-        let capacity_max = params.linear_alternate_headroom() as f32;
-        let display_boost = target_headroom.unwrap_or(capacity_max).max(1.0);
-
-        let hdr = apply_gainmap(&base, &gm, &params, display_boost, format, stop).map_err(|e| {
-            whereat::at!(JxlError::InvalidInput(alloc::format!(
-                "ReconstructHdr: gain-map apply failed: {e}"
-            )))
-        })?;
-
-        // Envelope: derived peak (capped at the reconstruction boost) +
-        // mastering display matching the base image's primaries
-        // (`apply_gainmap` preserves them).
-        let peak_nits = SDR_WHITE_NITS * capacity_max.min(display_boost);
-        let primaries = match info.source_color.cicp.map(|c| c.color_primaries) {
-            Some(12) => [[0.680, 0.320], [0.265, 0.690], [0.150, 0.060]], // Display P3
-            Some(9) => [[0.708, 0.292], [0.170, 0.797], [0.131, 0.046]],  // BT.2020
-            _ => [[0.640, 0.330], [0.300, 0.600], [0.150, 0.060]],        // BT.709/sRGB
+        let capacity = ultrahdr_core::full_reconstruction_boost(&params);
+        let display_boost = target_headroom.unwrap_or(capacity).max(1.0);
+        // Ultra HDR's F32 kernel takes RGBA. Fill the alpha lane without a
+        // transfer, gamut change, or quantization for native linear RGB bases.
+        let view = base.as_view();
+        let rgba;
+        let view = if view.spec().layout == zenpixels::SampleLayout::RGBF32 {
+            use zenpixels_convert::{ConvertPolicy, convert_buf};
+            let spec = ImageSpec::new(
+                zenpixels::SampleLayout::RGBAF32,
+                view.spec()
+                    .color
+                    .clone()
+                    .with_alpha(zenpixels::AlphaMode::Straight),
+            );
+            rgba = convert_buf(
+                &view,
+                spec,
+                &ConvertPolicy::default(),
+                zenpixels::PeakSource::Measured,
+            )
+            .map_err(|e| {
+                if matches!(e.error(), zenpixels_convert::ConvertError::AllocationFailed) {
+                    whereat::at!(JxlError::OutOfMemory(e.to_string()))
+                } else {
+                    whereat::at!(JxlError::InvalidInput(e.to_string()))
+                }
+            })?;
+            rgba.as_view()
+        } else {
+            view
         };
-        info.source_color.content_light_level =
-            Some(zenpixels::hdr::ContentLightLevel::new(peak_nits as u16, 0));
-        info.source_color.mastering_display = Some(zenpixels::hdr::MasteringDisplay::new(
-            primaries,
-            [0.3127, 0.3290],
-            peak_nits,
-            0.005,
-        ));
+        let hdr =
+            apply_gainmap_slice(view, &gm, &params, display_boost, format, stop).map_err(|e| {
+                whereat::at!(JxlError::InvalidInput(alloc::format!(
+                    "ReconstructHdr: gain-map apply failed: {e}"
+                )))
+            })?;
+
+        // CTA-861 / H.274 MaxCLL and MaxFALL measure MaxRGB in the output's
+        // native primaries. The mastering peak is the nominal alternate-image
+        // capacity and is independent of both the measured raster and target.
+        use zenpixels_convert::measure::{LightLevelMethod, measure_cll};
+        let cll = measure_cll(&hdr.as_view(), white, None, LightLevelMethod::MaxRgb)
+            .map_err(|e| whereat::at!(JxlError::InvalidInput(e.to_string())))?;
+        let zenpixels::ColorSpace::Rgb { primaries, .. } = hdr.spec().color else {
+            return Err(whereat::at!(JxlError::UnsupportedOperation(
+                UnsupportedOperation::PixelFormat
+            )));
+        };
+        let (Some((r, g, b)), Some(w)) = (primaries.chromaticity(), primaries.white_point()) else {
+            return Err(whereat::at!(JxlError::UnsupportedOperation(
+                UnsupportedOperation::PixelFormat
+            )));
+        };
+        let xy = |(x, y)| [x, y];
+        let mastering = zenpixels::hdr::MasteringDisplay::new(
+            [xy(r), xy(g), xy(b)],
+            xy(w),
+            white.nits() * capacity,
+            0.0,
+        );
+        info.source_color.content_light_level = Some(cll);
+        info.source_color.mastering_display = Some(mastering);
+        info.source_color.diffuse_white = Some(white);
+        let color = hdr.spec().color.clone().with_white(white);
         let hdr = hdr
+            .with_color(color)
+            .map_err(|e| whereat::at!(JxlError::InvalidInput(e.to_string())))?
             .with_origin(base.origin().clone())
             .with_hdr(zenpixels::HdrMetadata {
-                cll: info.source_color.content_light_level,
-                mastering: info.source_color.mastering_display,
+                cll: Some(cll),
+                mastering: Some(mastering),
             });
+        stop.check()
+            .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
         Ok((hdr, info))
     }
 
@@ -2313,7 +2460,9 @@ mod decoding {
                 .with_orientation(Orientation::from_exif(info.orientation).unwrap_or_default());
 
             if let Some((cp, tc, mc, fr)) = info.cicp {
-                image_info = image_info.with_cicp(Cicp::new(cp, tc, mc, fr));
+                image_info = image_info
+                    .with_cicp(Cicp::new(cp, tc, mc, fr))
+                    .with_color_authority(zencodec::ColorAuthority::Cicp);
             }
 
             if let Some(ref icc) = info.icc_profile {
@@ -2328,17 +2477,8 @@ mod decoding {
                 image_info = image_info.with_xmp(xmp.clone());
             }
 
-            // JXL ToneMapping.intensity_target = peak luminance the content was
-            // mastered for. Default 255.0 = SDR; >255 indicates HDR. Surface as
-            // MaxCLL so downstream HDR-aware code (tone-mapping policy, encode
-            // negotiation) sees the peak. JXL has no MaxFALL signal — leave 0.
-            // JXL also has no separate cLLi-style box; this is the closest
-            // semantic match in the zencodec metadata model.
-            if info.intensity_target > 255.0 {
-                let max_cll = info.intensity_target.min(u16::MAX as f32) as u16;
-                image_info = image_info
-                    .with_content_light_level(zenpixels::hdr::ContentLightLevel::new(max_cll, 0));
-            }
+            image_info.source_color.content_light_level = info.hdr.cll;
+            image_info.source_color.mastering_display = info.hdr.mastering;
 
             image_info
         }
@@ -2544,8 +2684,7 @@ mod decoding {
                     } else {
                         whereat::at!(JxlError::InvalidInput(error.to_string()))
                     }
-                })?
-                .with_origin(pixels.origin().clone());
+                })?;
             // `ImageInfo` has no dimension setter; the fields are public. Report the
             // baked buffer's geometry + Identity (pixels are now final, so no
             // consumer can double-apply a stale tag).
@@ -2980,12 +3119,35 @@ mod decoding {
                             false,
                             alloc_pref,
                         )?;
-                        let source = bundle_to_gain_map_source(gm);
-                        let gm_info = source.metadata.clone();
-                        output = output.with_extras(zencodec::decode::DecodedGainMap::new(
-                            gm_result.pixels,
-                            gm_info,
-                        ));
+                        let params = zencodec::gainmap::parse_iso21496_fmt(
+                            &gm.metadata,
+                            zencodec::gainmap::Iso21496Format::JxlJhgm,
+                        )
+                        .map_err(|e| whereat::at!(JxlError::MalformedImage(e.to_string())))?;
+                        let mut source = bundle_to_gain_map_source(gm);
+                        source.metadata.params = params;
+                        let mut gm_info = source.metadata.clone();
+                        let order = gm_result.pixels.spec().layout.order;
+                        let channels = match order {
+                            zenpixels::ChannelOrder::Gray => 1,
+                            zenpixels::ChannelOrder::Rgb => 3,
+                            _ => {
+                                return Err(whereat::at!(JxlError::MalformedImage(
+                                    "jhgm: expected gray or RGB gain samples".into()
+                                )));
+                            }
+                        };
+                        gm_info.bit_depth = gm_result.info.bit_depth.unwrap_or(8);
+                        let gain_pixels = gm_result
+                            .pixels
+                            .with_color(zenpixels::ColorSpace::Untagged {
+                                channels,
+                                alpha: zenpixels::AlphaMode::None,
+                            })
+                            .map_err(|e| whereat::at!(JxlError::MalformedImage(e.to_string())))?;
+                        let gain = zencodec::decode::DecodedGainMap::try_new(gain_pixels, gm_info)
+                            .map_err(|e| whereat::at!(JxlError::MalformedImage(e.to_string())))?;
+                        output = output.with_extras(gain);
                         output = output.with_extras(source);
                     } else {
                         output = output.with_extras(bundle_to_gain_map_source(gm));
@@ -3111,6 +3273,7 @@ mod decoding {
             let preview_size = basic_info.preview_size.map(|(w, h)| (w as u32, h as u32));
             let intrinsic_size = basic_info.intrinsic_size.map(|(w, h)| (w as u32, h as u32));
             let intensity_target = basic_info.tone_mapping.intensity_target;
+            let hdr = hdr_metadata(&self.data, intensity_target);
             let min_nits = basic_info.tone_mapping.min_nits;
             let relative_to_max_display = basic_info.tone_mapping.relative_to_max_display;
             let linear_below = basic_info.tone_mapping.linear_below;
@@ -3157,7 +3320,11 @@ mod decoding {
             );
             // Only clamp when CICP explicitly tells us it's SDR.
             // When CICP is absent (ICC-only), we don't know the gamut.
-            let clamp = is_f32 && cicp.is_some() && !is_hdr_or_wide_gamut(cicp);
+            let clamp = is_f32
+                && hdr.cll.is_none()
+                && hdr.mastering.is_none()
+                && cicp.is_some()
+                && !is_hdr_or_wide_gamut(cicp);
 
             let mut frames = VecDeque::new();
             let mut frame_index = 0u32;
@@ -3252,7 +3419,7 @@ mod decoding {
                     let pixel_buf =
                         adopt_pixels(buf, width_u32, height_u32, bytes_per_row, spec.clone())?
                             .with_origin(origin.clone())
-                            .with_hdr(hdr_metadata(intensity_target));
+                            .with_hdr(hdr);
                     frames.push_back(OwnedAnimationFrame::with_duration(
                         pixel_buf,
                         duration,
@@ -3312,6 +3479,7 @@ mod decoding {
                 preview_size,
                 xyb_encoded,
                 intensity_target,
+                hdr,
                 min_nits,
                 relative_to_max_display,
                 linear_below,
@@ -3874,7 +4042,7 @@ mod tests {
         )
         .unwrap();
 
-        let meta = Metadata::none().with_cicp(Cicp::BT2100_PQ);
+        let meta = Metadata::none().with_cicp(Cicp::BT2100_PQ_RGB);
         let config = JxlEncoderConfig::new().with_lossless(true);
         let encoder = config
             .job()

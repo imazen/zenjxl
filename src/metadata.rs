@@ -220,6 +220,9 @@ fn plan<'a>(req: &ScrubRequest<'a>) -> Result<Plan<'a>, Error> {
                     _ => out.remove(req, range, "compressed private JXL box")?,
                 }
             }
+            b"hCdR" if matches!(data.len(), 4 | 24 | 28) => {
+                out.keep(req, range, "JXL HDR content description")?;
+            }
             b"jhgm" => {
                 if gainmap {
                     return Err(Error::Malformed("duplicate JXL gain map"));

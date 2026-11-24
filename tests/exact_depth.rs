@@ -19,10 +19,11 @@ fn integer_grid_survives_native_and_adapter_orientation() {
             None,
         )
         .unwrap();
-        let exact = native.pixels.facts().exact;
+        let exact = native.pixels.facts().depth.unwrap();
         assert_eq!(native.info.bit_depth, Some(8));
         assert_eq!(
-            exact.effective_bits, 1,
+            exact.color_bits(),
+            1,
             "fixture contains only black and white"
         );
         let slice = native.pixels.as_view();
@@ -39,7 +40,7 @@ fn integer_grid_survives_native_and_adapter_orientation() {
                 _ => unreachable!(),
             }
         }
-        assert!(holds_for(exact.effective_bits, &native.pixels.as_view()));
+        assert!(holds_for(exact.color_bits(), &native.pixels.as_view()));
         for hint in [
             OrientationHint::Preserve,
             OrientationHint::Correct,
@@ -55,9 +56,9 @@ fn integer_grid_survives_native_and_adapter_orientation() {
                 .unwrap();
             let pixels = output.pixels();
             assert_eq!(pixels.spec().layout.sample, descriptor.layout.sample);
-            let exact = pixels.facts().exact;
-            assert_eq!(exact.effective_bits, 1);
-            assert!(holds_for(exact.effective_bits, &pixels));
+            let exact = pixels.facts().depth.unwrap();
+            assert_eq!(exact.color_bits(), 1);
+            assert!(holds_for(exact.color_bits(), &pixels));
         }
     }
 }
@@ -74,7 +75,7 @@ fn float_output_has_no_integer_grid_claim() {
     .unwrap()
     .pixels;
     assert_eq!(pixels.spec().layout.sample, SampleType::F32);
-    assert_eq!(pixels.facts().exact.effective_bits, 0);
+    assert_eq!(pixels.facts().depth, None);
 }
 
 #[cfg(feature = "encode")]
@@ -110,9 +111,12 @@ fn lossless_deep_samples_do_not_inherit_a_coarser_grid() {
                 .as_ref(),
             bytes.as_slice()
         );
-        let exact = native.pixels.facts().exact;
-        assert_eq!(exact.effective_bits, 16);
-        assert!(holds_for(exact.effective_bits, &native.pixels.as_view()));
+        let exact = native.pixels.facts().depth.unwrap();
+        assert_eq!(exact.color_bits(), 16);
+        if descriptor.layout.order.has_alpha_slot() {
+            assert_eq!(exact.alpha_bits(), 1);
+        }
+        assert!(holds_for(exact.color_bits(), &native.pixels.as_view()));
     }
 }
 

@@ -888,7 +888,7 @@ impl Walker<'_> {
                 _ => {}
             }
         }
-        if mode == GainMapMode::Reconstruct
+        if matches!(mode, GainMapMode::Components | GainMapMode::Reconstruct)
             && zencodec::gainmap::parse_iso21496_fmt(
                 &bundle.metadata,
                 zencodec::gainmap::Iso21496Format::JxlJhgm,

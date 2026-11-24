@@ -43,15 +43,23 @@ fn encode_codestream(w: u32, h: u32, seed: u8) -> Vec<u8> {
 
 /// Container with a `jhgm` gain-map box wrapping the given ISO 21496-1 params.
 fn jhgm_fixture_with(params: &zencodec::gainmap::GainMapParams) -> Vec<u8> {
-    use zenjxl::{GainMapBundle, append_gain_map_box};
-
     let base = encode_codestream(16, 16, 7);
     let gain_map_codestream = encode_codestream(8, 8, 101);
 
+    bundle(&base, gain_map_codestream, params)
+}
+
+fn bundle(
+    base: &[u8],
+    gain_map_codestream: Vec<u8>,
+    params: &zencodec::gainmap::GainMapParams,
+) -> Vec<u8> {
+    use zenjxl::{GainMapBundle, append_gain_map_box};
     let metadata = zencodec::gainmap::serialize_iso21496_fmt(
         params,
         zencodec::gainmap::Iso21496Format::JxlJhgm,
-    );
+    )
+    .unwrap();
 
     let bundle = GainMapBundle {
         metadata,
@@ -59,7 +67,7 @@ fn jhgm_fixture_with(params: &zencodec::gainmap::GainMapParams) -> Vec<u8> {
         alt_icc_compressed: None,
         gain_map_codestream,
     };
-    append_gain_map_box(&base, &bundle.serialize()).expect("container with jhgm box")
+    append_gain_map_box(base, &bundle.serialize()).expect("container with jhgm box")
 }
 
 /// SDR-base fixture: 2x (1 stop) alternate headroom, real per-channel gain.
@@ -137,129 +145,343 @@ fn reconstruct_downgrades_to_components() {
     assert!(out.extras::<zencodec::decode::DecodedGainMap>().is_some());
 }
 
-/// Max linear value over every f32 channel (RGBA — alpha is ≤ 1 so it never
-/// wins) of a decoded output.
 #[cfg(feature = "reconstruct-hdr")]
-fn max_linear_f32(out: &zencodec::decode::DecodeOutput) -> f32 {
-    out.pixels()
-        .try_contiguous_bytes()
+fn linear_base(
+    dims: (u32, u32),
+    values: &[f32],
+    alpha: bool,
+    primaries: jxl_encoder::Primaries,
+    orientation: zencodec::Orientation,
+) -> Vec<u8> {
+    use jxl_encoder::{ColorEncoding, ImageMetadata, LosslessConfig, PixelLayout};
+    let layout = if alpha {
+        PixelLayout::RgbaLinearF32
+    } else {
+        PixelLayout::RgbLinearF32
+    };
+    let bytes: Vec<_> = values.iter().flat_map(|v| v.to_ne_bytes()).collect();
+    let mut encoding = ColorEncoding::linear_srgb();
+    encoding.primaries = primaries;
+    LosslessConfig::default()
+        .encode_request(dims.0, dims.1, layout)
+        .with_metadata(&ImageMetadata::new().with_orientation(orientation))
+        .with_color_encoding(encoding)
+        .encode(&bytes)
         .unwrap()
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|c| f32::from_ne_bytes([c[0], c[1], c[2], c[3]]))
-        .fold(0.0f32, f32::max)
 }
 
-/// With the `reconstruct-hdr` feature, an SDR-base bundle gets the gain map
-/// applied: linear f32 output brighter than SDR white, with the
-/// content-light-level / mastering-display envelope populated, and no
-/// Components extras (the gain map was consumed).
 #[cfg(feature = "reconstruct-hdr")]
-#[test]
-fn reconstruct_applies_gain_map_on_sdr_base() {
-    assert!(
-        <JxlDecoderConfig as zencodec::decode::DecoderConfig>::capabilities().reconstructs_hdr()
-    );
-    let data = jhgm_fixture();
-    let out = JxlDecoderConfig::new()
+fn gray_gain(w: u32, h: u32, codes: &[u8]) -> Vec<u8> {
+    jxl_encoder::LosslessConfig::default()
+        .encode_request(w, h, jxl_encoder::PixelLayout::Gray8)
+        .encode(codes)
+        .unwrap()
+}
+
+#[cfg(feature = "reconstruct-hdr")]
+fn render(
+    data: &[u8],
+    mode: zencodec::GainMapRender,
+    hint: zencodec::OrientationHint,
+) -> Result<zencodec::decode::DecodeOutput, whereat::At<zencodec::CodecError>> {
+    JxlDecoderConfig::new()
         .job()
-        .with_gain_map_render(zencodec::GainMapRender::ReconstructHdr {
-            target_headroom: None,
-        })
-        .decoder(data.as_slice().into(), &[])
-        .unwrap()
+        .with_orientation(hint)
+        .with_gain_map_render(mode)
+        .decoder(data.into(), &[])?
         .decode()
-        .unwrap();
-
-    let pixels = out.pixels();
-    let desc = pixels.spec();
-    assert_eq!(desc.layout.sample, zenpixels::SampleType::F32);
-    assert!(matches!(
-        desc.color,
-        zenpixels::ColorSpace::Rgb {
-            transfer: zenpixels::Transfer::Linear,
-            ..
-        }
-    ));
-
-    let max = max_linear_f32(&out);
-    assert!(max > 1.05, "expected headroom above SDR white, max={max}");
-
-    let info = out.info();
-    let cll = info
-        .source_color
-        .content_light_level
-        .expect("ReconstructHdr must populate the content light level");
-    assert!(cll.max_content_light_level > 203);
-    assert!(info.source_color.mastering_display.is_some());
-
-    assert!(out.extras::<zencodec::decode::DecodedGainMap>().is_none());
-    assert!(out.extras::<zencodec::gainmap::GainMapSource>().is_none());
 }
 
-/// `target_headroom: Some(1.0)` clamps the boost to SDR — linear output stays
-/// at (or barely above) SDR white.
 #[cfg(feature = "reconstruct-hdr")]
-#[test]
-fn reconstruct_honors_target_headroom() {
-    let data = jhgm_fixture();
-    let out = JxlDecoderConfig::new()
-        .job()
-        .with_gain_map_render(zencodec::GainMapRender::ReconstructHdr {
-            target_headroom: Some(1.0),
-        })
-        .decoder(data.as_slice().into(), &[])
-        .unwrap()
-        .decode()
-        .unwrap();
-    let max = max_linear_f32(&out);
-    assert!(
-        max <= 1.01,
-        "boost clamped to 1.0 must not exceed SDR white, max={max}"
+fn assert_f32_rows(out: &zencodec::decode::DecodeOutput, expected: &[f32]) {
+    assert_eq!(
+        out.pixels().spec().layout.sample,
+        zenpixels::SampleType::F32
     );
+    let bytes: Vec<_> = expected.iter().flat_map(|v| v.to_ne_bytes()).collect();
+    assert_eq!(out.pixels().try_contiguous_bytes().unwrap().as_ref(), bytes);
 }
 
-/// An HDR-base bundle (alternate is the SDR rendition) needs nothing applied:
-/// ReconstructHdr returns the base exactly as BaseOnly would.
+// X1: independent lane equations at full weight and exact bypass at zero weight.
 #[cfg(feature = "reconstruct-hdr")]
 #[test]
-fn reconstruct_returns_base_when_base_is_hdr() {
+fn reconstructs_mono_gain_using_all_three_iso_records() {
+    use zencodec::{GainMapRender, Orientation, OrientationHint};
+    assert!(JxlDecoderConfig::capabilities().reconstructs_hdr());
+    let src = [0.5, 0.25, 0.75, 0.25, 0.5, 0.25];
+    let base = linear_base(
+        (2, 1),
+        &src,
+        false,
+        jxl_encoder::Primaries::Srgb,
+        Orientation::Identity,
+    );
     let mut params = zencodec::gainmap::GainMapParams::default();
-    params.base_hdr_headroom = 2.0; // base brighter than alternate → BaseIsHdr
-    params.alternate_hdr_headroom = 0.0;
-    let data = jhgm_fixture_with(&params);
-
-    let reconstructed = JxlDecoderConfig::new()
-        .job()
-        .with_gain_map_render(zencodec::GainMapRender::ReconstructHdr {
+    params.alternate_hdr_headroom = 2.0;
+    for (ch, (gain, base_offset, alternate_offset)) in params.channels.iter_mut().zip([
+        (1.0, 0.125, 0.25),
+        (0.0, 0.25, 0.125),
+        (-1.0, 0.375, 0.0625),
+    ]) {
+        ch.min = gain;
+        ch.max = gain;
+        ch.base_offset = base_offset;
+        ch.alternate_offset = alternate_offset;
+    }
+    let bytes = bundle(&base, gray_gain(2, 1, &[0, 255]), &params);
+    let components = render(&bytes, GainMapRender::Components, OrientationHint::Preserve).unwrap();
+    let gain = components
+        .extras::<zencodec::decode::DecodedGainMap>()
+        .unwrap();
+    assert_eq!(gain.metadata.params.iso_channel_count(), Some(3));
+    assert_eq!(gain.pixels.as_view().row(0), &[0, 255]);
+    let zero = render(
+        &bytes,
+        GainMapRender::ReconstructHdr {
+            target_headroom: Some(1.0),
+        },
+        OrientationHint::Preserve,
+    )
+    .unwrap();
+    assert_f32_rows(
+        &zero,
+        &[src[0], src[1], src[2], 1.0, src[3], src[4], src[5], 1.0],
+    );
+    let full = render(
+        &bytes,
+        GainMapRender::ReconstructHdr {
             target_headroom: None,
-        })
-        .decoder(data.as_slice().into(), &[])
-        .unwrap()
-        .decode()
-        .unwrap();
-    let base_only = JxlDecoderConfig::new()
-        .job()
-        .decoder(data.as_slice().into(), &[])
-        .unwrap()
-        .decode()
-        .unwrap();
+        },
+        OrientationHint::Preserve,
+    )
+    .unwrap();
+    // (base + base_offset) * exp2(stops) - alternate_offset.
+    assert_f32_rows(&full, &[1.0, 0.375, 0.5, 1.0, 0.5, 0.625, 0.25, 1.0]);
+    assert!(full.extras::<zencodec::decode::DecodedGainMap>().is_none());
+    assert!(full.extras::<zencodec::gainmap::GainMapSource>().is_none());
+}
 
-    assert_eq!(
-        reconstructed.pixels().spec(),
-        base_only.pixels().spec(),
-        "HDR-base reconstruction must not re-render the base"
+// X2: the shortcut preserves real PQ code precision, color, and HDR.
+#[cfg(feature = "reconstruct-hdr")]
+#[test]
+#[allow(deprecated)] // JXL currently exposes best-effort metadata retention.
+fn hdr_base_passthrough_preserves_pq_and_refuses_lower_target() {
+    use zencodec::{Cicp, GainMapRender, OrientationHint};
+    use zenpixels::{ContentLightLevel, ImageSpec, Primaries, Transfer};
+    let values = [17u16, 32771, 60117, 64003, 9181, 1029];
+    let rows: Vec<_> = values.into_iter().flat_map(u16::to_ne_bytes).collect();
+    let pq = Cicp::new(9, 16, 0, true);
+    let cll = ContentLightLevel::new(1700, 601);
+    let mastering = zenpixels::hdr::MasteringDisplay::HDR10_REFERENCE;
+    let pixels = zenpixels::PixelView::new(
+        &rows,
+        2,
+        1,
+        12,
+        ImageSpec::rgb16_srgb()
+            .with_primaries(Primaries::Bt2020)
+            .with_transfer(Transfer::Pq),
+    )
+    .unwrap();
+    use zencodec::encode::{EncodeJob as _, EncoderConfig as _};
+    let base = zenjxl::JxlEncoderConfig::new()
+        .with_lossless(true)
+        .job()
+        .with_metadata_policy(
+            zencodec::Metadata::none()
+                .with_cicp(pq)
+                .with_content_light_level(cll)
+                .with_mastering_display(mastering),
+            zencodec::MetadataPolicy::PreserveExact,
+        )
+        .encode(pixels)
+        .unwrap();
+    let mut params = zencodec::gainmap::GainMapParams::default();
+    params.base_hdr_headroom = 2.0;
+    let data = bundle(base.data(), gray_gain(2, 1, &[9, 239]), &params);
+    let base_only = render(&data, GainMapRender::BaseOnly, OrientationHint::Preserve).unwrap();
+    for target in [None, Some(4.0)] {
+        let output = render(
+            &data,
+            GainMapRender::ReconstructHdr {
+                target_headroom: target,
+            },
+            OrientationHint::Preserve,
+        )
+        .unwrap();
+        assert_eq!(output.pixels().row(0), rows);
+        assert_eq!(output.pixels().row(0), base_only.pixels().row(0));
+        assert_eq!(output.pixels().spec(), base_only.pixels().spec());
+        assert_eq!(
+            output.pixels().facts().depth,
+            base_only.pixels().facts().depth
+        );
+        assert_eq!(output.pixels().facts().depth.unwrap().color_bits(), 16);
+        assert_eq!(output.info().source_color.cicp, Some(pq));
+        assert_eq!(output.pixels().hdr(), base_only.pixels().hdr());
+        assert_eq!(output.pixels().hdr().cll, Some(cll));
+        assert_eq!(output.pixels().hdr().mastering, Some(mastering));
+        assert!(
+            output
+                .extras::<zencodec::decode::DecodedGainMap>()
+                .is_none()
+        );
+    }
+    let lower = render(
+        &data,
+        GainMapRender::ReconstructHdr {
+            target_headroom: Some(2.0),
+        },
+        OrientationHint::Preserve,
     );
     assert_eq!(
-        reconstructed.pixels().try_contiguous_bytes().unwrap(),
-        base_only.pixels().try_contiguous_bytes().unwrap(),
+        lower.unwrap_err().error().category(),
+        zencodec::ErrorCategory::Request(zencodec::RequestError::Unsupported(
+            zencodec::UnsupportedOperation::DecodePolicy
+        )),
     );
-    assert!(
-        reconstructed
-            .extras::<zencodec::decode::DecodedGainMap>()
-            .is_none()
+}
+
+// X3: register gains against the stored RGBA grid, and then rotate the result.
+#[cfg(feature = "reconstruct-hdr")]
+#[test]
+fn rgba_gain_preserves_alpha_and_registered_samples() {
+    use zencodec::{GainMapRender, Orientation, OrientationHint};
+    let samples = [
+        [0.25, 0.5, 0.75, 0.125],
+        [0.625, 0.125, 0.25, 0.25],
+        [0.375, 0.75, 0.125, 0.5],
+        [0.75, 0.25, 0.5, 0.875],
+    ];
+    let base = linear_base(
+        (2, 2),
+        samples.as_flattened(),
+        true,
+        jxl_encoder::Primaries::Srgb,
+        Orientation::Rotate90,
     );
+    let gain_codes = [0, 255, 255, 255];
+    let mut params = zencodec::gainmap::GainMapParams::default();
+    params.alternate_hdr_headroom = 1.0;
+    for ch in &mut params.channels {
+        ch.max = 1.0;
+        ch.base_offset = 0.0;
+        ch.alternate_offset = 0.0;
+    }
+    let code = gray_gain(2, 2, &gain_codes);
+    let data = bundle(&base, code.clone(), &params);
+    let components = render(&data, GainMapRender::Components, OrientationHint::Preserve).unwrap();
+    assert_f32_rows(&components, samples.as_flattened());
+    let raw = components
+        .extras::<zencodec::gainmap::GainMapSource>()
+        .unwrap();
+    assert_eq!(raw.data.as_slice(), code);
+    let gain = components
+        .extras::<zencodec::decode::DecodedGainMap>()
+        .unwrap();
+    assert_eq!(
+        gain.pixels
+            .as_view()
+            .try_contiguous_bytes()
+            .unwrap()
+            .as_ref(),
+        gain_codes
+    );
+
+    let expected = [
+        samples[0],
+        [1.25, 0.25, 0.5, 0.25],
+        [0.75, 1.5, 0.25, 0.5],
+        [1.5, 0.5, 1.0, 0.875],
+    ];
+    let mode = GainMapRender::ReconstructHdr {
+        target_headroom: None,
+    };
+    let stored = render(&data, mode, OrientationHint::Preserve).unwrap();
+    assert_f32_rows(&stored, expected.as_flattened());
+    assert_eq!(stored.info().orientation, Orientation::Rotate90);
+    let upright = render(&data, mode, OrientationHint::Correct).unwrap();
+    assert_f32_rows(
+        &upright,
+        [expected[2], expected[0], expected[3], expected[1]].as_flattened(),
+    );
+    assert_eq!(upright.info().orientation, Orientation::Identity);
+}
+
+// X4: native MaxRGB on a known saturated P3 raster; capacity is not a sample statistic.
+#[cfg(feature = "reconstruct-hdr")]
+#[test]
+#[allow(deprecated)] // JXL currently exposes best-effort metadata retention.
+fn measured_hdr_envelope_survives_native_encode() {
+    use jxl_encoder::{ColorEncoding, LosslessConfig, PixelLayout, Primaries};
+    use zencodec::encode::{EncodeJob as _, EncoderConfig as _};
+    use zencodec::{GainMapRender, OrientationHint};
+    let mut p3 = ColorEncoding::srgb();
+    p3.primaries = Primaries::P3;
+    let base = LosslessConfig::default()
+        .encode_request(2, 1, PixelLayout::Rgb8)
+        .with_color_encoding(p3)
+        .encode(&[255, 0, 0, 0, 255, 0])
+        .unwrap();
+    let mut params = zencodec::gainmap::GainMapParams::default();
+    params.alternate_hdr_headroom = 2.0;
+    for ch in &mut params.channels {
+        ch.max = 1.0;
+        ch.base_offset = 0.0;
+        ch.alternate_offset = 0.0;
+    }
+    let bytes = bundle(&base, gray_gain(2, 1, &[255, 0]), &params);
+    let full = render(
+        &bytes,
+        GainMapRender::ReconstructHdr {
+            target_headroom: None,
+        },
+        OrientationHint::Preserve,
+    )
+    .unwrap();
+    let expected = [2.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0];
+    assert_f32_rows(&full, &expected);
+    // MaxRGB at 203 cd/m² per linear unit → max(406, 203), ceil(304.5).
+    let cll = zenpixels::ContentLightLevel::new(406, 305);
+    let mastering = zenpixels::hdr::MasteringDisplay::new(
+        [[0.680, 0.320], [0.265, 0.690], [0.150, 0.060]],
+        [0.3127, 0.3290],
+        812.0,
+        0.0,
+    );
+    assert_eq!(
+        full.info().source_color.diffuse_white,
+        Some(zenpixels::DiffuseWhite::BT2408)
+    );
+    let native = zenjxl::JxlEncoderConfig::new()
+        .with_lossless(true)
+        .job()
+        .with_metadata_policy(
+            zencodec::Metadata::from(full.info()),
+            zencodec::MetadataPolicy::PreserveExact,
+        )
+        .encode(full.pixels())
+        .unwrap();
+    assert_eq!(
+        zenjxl::probe(native.data()).unwrap().intensity_target,
+        812.0
+    );
+    let back = render(
+        native.data(),
+        GainMapRender::BaseOnly,
+        OrientationHint::Preserve,
+    )
+    .unwrap();
+    assert_f32_rows(&back, &expected);
+    for output in [&full, &back] {
+        assert_eq!(output.info().source_color.content_light_level, Some(cll));
+        assert_eq!(
+            output.info().source_color.mastering_display,
+            Some(mastering)
+        );
+        assert_eq!(output.pixels().hdr().cll, Some(cll));
+        assert_eq!(output.pixels().hdr().mastering, Some(mastering));
+    }
 }
 
 /// Components on a plain (no-jhgm) JXL surfaces nothing and decodes normally.
