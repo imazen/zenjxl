@@ -18,7 +18,7 @@ fn ordinary_rounding_preserves_total_and_rejection_preserves_phase() {
         vec![rgb::Rgb::new(20, 40, 60); 16 * 16],
         16,
         16,
-        zenpixels::ImageSpec::RGB8_SRGB,
+        zenpixels::PixelFormat::RGB8_SRGB,
     )
     .unwrap();
     let duration = FrameDuration::new(1, 30).unwrap();
@@ -112,7 +112,7 @@ fn exact_encoding_rescales_buffered_frames() {
         vec![rgb::Rgb::new(20, 40, 60); 256],
         16,
         16,
-        zenpixels::ImageSpec::RGB8_SRGB,
+        zenpixels::PixelFormat::RGB8_SRGB,
     )
     .unwrap();
     let durations = [

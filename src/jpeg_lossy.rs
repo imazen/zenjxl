@@ -35,7 +35,7 @@ use alloc::{string::ToString, vec::Vec};
 
 use jxl_encoder::jpeg::encode_jpeg_recompress_auto_codestream;
 use zenjpeg::decoder::extract_icc_profile;
-use zenpixels::ImageSpec;
+use zenpixels::PixelFormat;
 
 use crate::decode::decode;
 use crate::error::JxlError;
@@ -423,7 +423,7 @@ fn run_loop(
 
 /// Decode a bare JXL codestream to tightly-packed RGB8 + dimensions.
 fn decode_rgb8(codestream: &[u8]) -> Result<(Vec<u8>, u32, u32), At<JxlError>> {
-    let out = decode(codestream, None, &[ImageSpec::RGB8_SRGB])?;
+    let out = decode(codestream, None, &[PixelFormat::RGB8_SRGB])?;
     let w = out.info.width;
     let h = out.info.height;
     let pixels = out

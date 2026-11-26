@@ -38,7 +38,7 @@ fn lossless(w: u32, h: u32, noisy: bool) -> Vec<u8> {
         pixels,
         w,
         h,
-        zenpixels::ImageSpec::RGB8_SRGB,
+        zenpixels::PixelFormat::RGB8_SRGB,
     )
     .expect("buffer");
     JxlEncoderConfig::new()
@@ -66,7 +66,7 @@ fn lossy(w: u32, h: u32) -> Vec<u8> {
         pixels,
         w,
         h,
-        zenpixels::ImageSpec::RGB8_SRGB,
+        zenpixels::PixelFormat::RGB8_SRGB,
     )
     .expect("buffer");
     JxlEncoderConfig::new()
@@ -1252,7 +1252,7 @@ fn animation(w: u32, h: u32, frames: u32) -> Vec<u8> {
             pixels,
             w,
             h,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )
         .expect("buffer");
         enc.push_frame(buf.as_view(), 100, None).expect("push");

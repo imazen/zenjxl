@@ -24,7 +24,7 @@ fn valid_jxl() -> Vec<u8> {
         pixels,
         w,
         h,
-        zenpixels::ImageSpec::RGB8_SRGB,
+        zenpixels::PixelFormat::RGB8_SRGB,
     )
     .expect("pixel buffer");
     JxlEncoderConfig::new()

@@ -31,14 +31,14 @@ fn mse(a: &[u8], b: &[u8], _w: u32, _h: u32) -> f32 {
 
 /// Decode a bare codestream to RGB8 + dims via the public decode API.
 fn decode_dims(cs: &[u8]) -> (u32, u32) {
-    let out = zenjxl::decode(cs, None, &[zenpixels::ImageSpec::RGB8_SRGB])
+    let out = zenjxl::decode(cs, None, &[zenpixels::PixelFormat::RGB8_SRGB])
         .expect("decode recompressed output");
     (out.info.width, out.info.height)
 }
 
 /// Decode a JXL codestream and return its embedded ICC profile (if any).
 fn decode_icc(cs: &[u8]) -> Option<Vec<u8>> {
-    let out = zenjxl::decode(cs, None, &[zenpixels::ImageSpec::RGB8_SRGB])
+    let out = zenjxl::decode(cs, None, &[zenpixels::PixelFormat::RGB8_SRGB])
         .expect("decode recompressed output");
     out.info.icc_profile
 }

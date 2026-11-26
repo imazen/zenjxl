@@ -209,7 +209,7 @@ fn oriented_pq_rows_and_hdr_envelope_survive_reencode() {
         assert_eq!((pixels.width(), pixels.rows()), dims);
         assert_eq!(pixels.contiguous_bytes().unwrap().as_ref(), bytes(indexes));
         assert!(matches!(
-            pixels.spec().color,
+            pixels.format().color,
             zenpixels::ColorSpace::Rgb {
                 primaries: zenpixels::Primaries::Bt2020,
                 transfer: Transfer::Pq,
@@ -316,7 +316,7 @@ impl zencodec::decode::DecodeRowSink for CompletedRows {
         y: u32,
         height: u32,
         width: u32,
-        spec: zenpixels::ImageSpec,
+        spec: zenpixels::PixelFormat,
     ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
         assert_eq!(y, 0);
         let pixels = self
@@ -330,7 +330,7 @@ impl zencodec::decode::DecodeRowSink for CompletedRows {
         batch: zencodec::decode::BatchMeta,
         height: u32,
         width: u32,
-        spec: zenpixels::ImageSpec,
+        spec: zenpixels::PixelFormat,
         metadata: &zencodec::decode::RowMetadata,
     ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
         assert!(batch.is_final);

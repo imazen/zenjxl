@@ -13,7 +13,7 @@ use zencodec::image::{
     ValueSlice,
 };
 use zenpixels::{
-    AlphaMode, ChannelOrder, ImageSpec, Orientation, PixelView, SampleLayout, SampleType,
+    AlphaMode, ChannelOrder, Orientation, PixelFormat, PixelView, SampleLayout, SampleType,
 };
 
 /// Retain native source facts without treating them as an output profile or
@@ -196,7 +196,7 @@ pub(super) fn adopt(
 struct Packed {
     color: Plane,
     extras: Arc<Extras>,
-    descriptor: ImageSpec,
+    descriptor: PixelFormat,
 }
 impl PackedImageOwner for Packed {
     fn pixels(&self) -> Result<PixelView<'_>, zencodec::At<OutputError>> {

@@ -20,7 +20,7 @@ use alloc::sync::Arc;
 #[cfg(any(feature = "encode", feature = "decode"))]
 use zencodec::ImageFormat;
 #[cfg(any(feature = "encode", feature = "decode"))]
-use zenpixels::ImageSpec;
+use zenpixels::PixelFormat;
 
 #[cfg(any(feature = "encode", feature = "decode"))]
 const GRAY_SRGB_ALPHA: zenpixels::ColorSpace = zenpixels::ColorSpace::Gray {
@@ -161,20 +161,20 @@ mod encoding {
     ///
     /// jxl-encoder supports U8/U16/F32 × RGB/RGBA/Gray/GrayAlpha + BGRA8.
     /// F32 layouts are linear-light (jxl-encoder assumes linear for float input).
-    static JXL_ENCODE_DESCRIPTORS: &[ImageSpec] = &[
+    static JXL_ENCODE_DESCRIPTORS: &[PixelFormat] = &[
         // 8-bit sRGB
-        ImageSpec::RGB8_SRGB,
-        ImageSpec::RGBA8_SRGB,
-        ImageSpec::BGRA8_SRGB,
-        ImageSpec::RGBX8_SRGB,
-        ImageSpec::BGRX8_SRGB,
-        ImageSpec::GRAY8_SRGB,
-        ImageSpec::GRAYA8_SRGB,
+        PixelFormat::RGB8_SRGB,
+        PixelFormat::RGBA8_SRGB,
+        PixelFormat::BGRA8_SRGB,
+        PixelFormat::RGBX8_SRGB,
+        PixelFormat::BGRX8_SRGB,
+        PixelFormat::GRAY8_SRGB,
+        PixelFormat::GRAYA8_SRGB,
         // 16-bit sRGB
-        ImageSpec::RGB16_SRGB,
-        ImageSpec::RGBA16_SRGB,
-        ImageSpec::GRAY16_SRGB,
-        zenpixels::ImageSpec::new(
+        PixelFormat::RGB16_SRGB,
+        PixelFormat::RGBA16_SRGB,
+        PixelFormat::GRAY16_SRGB,
+        zenpixels::PixelFormat::new(
             zenpixels::SampleLayout::new(
                 zenpixels::SampleType::U16,
                 zenpixels::ChannelOrder::GrayAlpha,
@@ -182,10 +182,10 @@ mod encoding {
             GRAY_SRGB_ALPHA,
         ),
         // f32 linear
-        ImageSpec::RGBF32_LINEAR,
-        ImageSpec::RGBAF32_LINEAR,
-        ImageSpec::GRAYF32_LINEAR,
-        zenpixels::ImageSpec::new(
+        PixelFormat::RGBF32_LINEAR,
+        PixelFormat::RGBAF32_LINEAR,
+        PixelFormat::GRAYF32_LINEAR,
+        zenpixels::PixelFormat::new(
             zenpixels::SampleLayout::new(
                 zenpixels::SampleType::F32,
                 zenpixels::ChannelOrder::GrayAlpha,
@@ -541,7 +541,7 @@ mod encoding {
             ImageFormat::Jxl
         }
 
-        fn supported_descriptors() -> &'static [ImageSpec] {
+        fn supported_descriptors() -> &'static [PixelFormat] {
             JXL_ENCODE_DESCRIPTORS
         }
 
@@ -776,7 +776,7 @@ mod encoding {
         Accumulating {
             width: u32,
             layout: PixelLayout,
-            descriptor: ImageSpec,
+            descriptor: PixelFormat,
             data: Vec<u8>,
             rows_pushed: u32,
         },
@@ -796,7 +796,7 @@ mod encoding {
         /// The job's control; the native encoder polls it for cancellation.
         pulse: Option<zencodec::SharedPulse>,
         stream: StreamState,
-        declaration: Option<(u32, u32, ImageSpec)>,
+        declaration: Option<(u32, u32, PixelFormat)>,
         gain_map: Option<Arc<GainMapData>>,
         /// The colour the pixel descriptor states, for when the metadata
         /// describes none.
@@ -823,8 +823,8 @@ mod encoding {
             Ok(())
         }
 
-        /// Map a ImageSpec to the jxl-encoder PixelLayout.
-        fn descriptor_to_layout(desc: &ImageSpec) -> Result<PixelLayout, At<JxlError>> {
+        /// Map a PixelFormat to the jxl-encoder PixelLayout.
+        fn descriptor_to_layout(desc: &PixelFormat) -> Result<PixelLayout, At<JxlError>> {
             if !desc.layout.packing.is_full() {
                 return Err(whereat::at!(JxlError::UnsupportedOperation(
                     UnsupportedOperation::PixelFormat
@@ -1208,7 +1208,7 @@ mod encoding {
             &mut self,
             width: u32,
             height: u32,
-            descriptor: ImageSpec,
+            descriptor: PixelFormat,
         ) -> Result<zencodec::encode::OutputTiming, Self::Error> {
             (|| -> Result<_, At<JxlError>> {
                 self.check_one_shot()?;
@@ -1236,7 +1236,7 @@ mod encoding {
             pixels: PixelView<'_>,
         ) -> Result<EncodeOutput, At<zencodec::CodecError>> {
             self.check_one_shot().map_err(zencodec::CodecError::of)?;
-            self.pixels_color = Some(pixels.spec().color.clone());
+            self.pixels_color = Some(pixels.format().color.clone());
             self.pixels_origin = pixels.origin().cloned();
             self.pixels_hdr = pixels.hdr();
             // The fallible body stays `At<JxlError>` (internal `?` sites
@@ -1247,8 +1247,8 @@ mod encoding {
 
                 // Rgbx8 / Bgrx8: byte 3 is undefined padding — strip to 3-channel RGB
                 // so the encoder doesn't treat the padding as alpha.
-                let pf = pixels.spec().layout.order;
-                if pixels.spec().layout.sample == SampleType::U8
+                let pf = pixels.format().layout.order;
+                if pixels.format().layout.sample == SampleType::U8
                     && matches!(pf, ChannelOrder::Rgbx | ChannelOrder::Bgrx)
                 {
                     self.check_limits(width, height)?;
@@ -1276,7 +1276,7 @@ mod encoding {
                         .with_extension("jxl"));
                 }
 
-                let layout = Self::descriptor_to_layout(pixels.spec())?;
+                let layout = Self::descriptor_to_layout(pixels.format())?;
                 self.check_limits(width, height)?;
 
                 let data = pixels
@@ -1365,7 +1365,7 @@ mod encoding {
 
         fn push_rows(&mut self, rows: PixelView<'_>) -> Result<(), At<zencodec::CodecError>> {
             (move || -> Result<(), At<JxlError>> {
-                let desc = rows.spec();
+                let desc = rows.format();
                 let width = rows.width();
                 let num_rows = rows.rows();
 
@@ -1566,7 +1566,7 @@ mod encoding {
                         .map_err(|e| whereat::at!(JxlError::Cancelled(e)))?;
                 }
 
-                let desc = pixels.spec();
+                let desc = pixels.format();
                 let pf = desc.layout.order;
                 let strip_padding = desc.layout.sample == SampleType::U8
                     && matches!(pf, ChannelOrder::Rgbx | ChannelOrder::Bgrx);
@@ -1988,7 +1988,7 @@ mod decoding {
         mut info: ImageInfo,
         bundle: &jxl::api::GainMapBundle,
         target_headroom: Option<f32>,
-        preferred: &[ImageSpec],
+        preferred: &[PixelFormat],
         native_limits: Option<&JxlLimits>,
         parallel: Option<bool>,
         stop: &dyn Stop,
@@ -2051,8 +2051,8 @@ mod decoding {
         )?;
         let gm_pixels = gm_result.pixels;
         let channels = match (
-            gm_pixels.spec().layout.order,
-            gm_pixels.spec().layout.sample,
+            gm_pixels.format().layout.order,
+            gm_pixels.format().layout.sample,
         ) {
             (zenpixels::ChannelOrder::Gray, zenpixels::SampleType::U8) => 1u8,
             (zenpixels::ChannelOrder::Rgb, zenpixels::SampleType::U8) => 3u8,
@@ -2087,11 +2087,11 @@ mod decoding {
         // transfer, gamut change, or quantization for native linear RGB bases.
         let view = base.as_view();
         let rgba;
-        let view = if view.spec().layout == zenpixels::SampleLayout::RGBF32 {
+        let view = if view.format().layout == zenpixels::SampleLayout::RGBF32 {
             use zenpixels_convert::{ConvertPolicy, convert_to_buf_with_peak};
-            let spec = ImageSpec::new(
+            let spec = PixelFormat::new(
                 zenpixels::SampleLayout::RGBAF32,
-                view.spec()
+                view.format()
                     .color
                     .clone()
                     .with_alpha(zenpixels::AlphaMode::Straight),
@@ -2126,7 +2126,7 @@ mod decoding {
         use zenpixels_convert::measure::{LightLevelMethod, measure_cll};
         let cll = measure_cll(&hdr.as_view(), white, None, LightLevelMethod::MaxRgb)
             .map_err(|e| whereat::at!(JxlError::InvalidInput(e.to_string())))?;
-        let zenpixels::ColorSpace::Rgb { primaries, .. } = hdr.spec().color else {
+        let zenpixels::ColorSpace::Rgb { primaries, .. } = hdr.format().color else {
             return Err(whereat::at!(JxlError::UnsupportedOperation(
                 UnsupportedOperation::PixelFormat
             )));
@@ -2146,7 +2146,7 @@ mod decoding {
         info.source_color.content_light_level = Some(cll);
         info.source_color.mastering_display = Some(mastering);
         info.source_color.diffuse_white = Some(white);
-        let color = hdr.spec().color.clone().with_white(white);
+        let color = hdr.format().color.clone().with_white(white);
         let hdr = hdr
             .relabel_color(color)
             .map_err(|e| whereat::at!(JxlError::InvalidInput(e.to_string())))?
@@ -2198,17 +2198,17 @@ mod decoding {
     /// Supported pixel descriptors for decoding.
     ///
     /// jxl-rs can decode to U8/U16/F32 × Gray/GrayAlpha/RGB/RGBA.
-    static JXL_DECODE_DESCRIPTORS: &[ImageSpec] = &[
+    static JXL_DECODE_DESCRIPTORS: &[PixelFormat] = &[
         // 8-bit
-        ImageSpec::RGB8_SRGB,
-        ImageSpec::RGBA8_SRGB,
-        ImageSpec::GRAY8_SRGB,
-        ImageSpec::GRAYA8_SRGB,
+        PixelFormat::RGB8_SRGB,
+        PixelFormat::RGBA8_SRGB,
+        PixelFormat::GRAY8_SRGB,
+        PixelFormat::GRAYA8_SRGB,
         // 16-bit
-        ImageSpec::RGB16_SRGB,
-        ImageSpec::RGBA16_SRGB,
-        ImageSpec::GRAY16_SRGB,
-        zenpixels::ImageSpec::new(
+        PixelFormat::RGB16_SRGB,
+        PixelFormat::RGBA16_SRGB,
+        PixelFormat::GRAY16_SRGB,
+        zenpixels::PixelFormat::new(
             zenpixels::SampleLayout::new(
                 zenpixels::SampleType::U16,
                 zenpixels::ChannelOrder::GrayAlpha,
@@ -2216,10 +2216,10 @@ mod decoding {
             GRAY_SRGB_ALPHA,
         ),
         // f32 linear
-        ImageSpec::RGBF32_LINEAR,
-        ImageSpec::RGBAF32_LINEAR,
-        ImageSpec::GRAYF32_LINEAR,
-        zenpixels::ImageSpec::new(
+        PixelFormat::RGBF32_LINEAR,
+        PixelFormat::RGBAF32_LINEAR,
+        PixelFormat::GRAYF32_LINEAR,
+        zenpixels::PixelFormat::new(
             zenpixels::SampleLayout::new(
                 zenpixels::SampleType::F32,
                 zenpixels::ChannelOrder::GrayAlpha,
@@ -2266,7 +2266,7 @@ mod decoding {
             &[ImageFormat::Jxl]
         }
 
-        fn supported_descriptors() -> &'static [ImageSpec] {
+        fn supported_descriptors() -> &'static [PixelFormat] {
             JXL_DECODE_DESCRIPTORS
         }
 
@@ -2861,7 +2861,7 @@ mod decoding {
         fn decoder(
             self,
             data: Cow<'a, [u8]>,
-            preferred: &[ImageSpec],
+            preferred: &[PixelFormat],
         ) -> Result<JxlDecoder<'a>, At<zencodec::CodecError>> {
             (move || -> Result<JxlDecoder<'a>, At<JxlError>> {
                 // Enforce input size limit before decoding.
@@ -2887,7 +2887,7 @@ mod decoding {
         fn streaming_decoder(
             self,
             _data: Cow<'a, [u8]>,
-            _preferred: &[ImageSpec],
+            _preferred: &[PixelFormat],
         ) -> Result<Unsupported<At<zencodec::CodecError>>, At<zencodec::CodecError>> {
             Err(JxlError::from(UnsupportedOperation::RowLevelDecode).into())
         }
@@ -2896,7 +2896,7 @@ mod decoding {
             self,
             data: Cow<'a, [u8]>,
             sink: &mut dyn zencodec::decode::DecodeRowSink,
-            preferred: &[ImageSpec],
+            preferred: &[PixelFormat],
         ) -> Result<OutputInfo, At<zencodec::CodecError>> {
             // The helper drives the typed decode path and yields `Self::Error`
             // (now `At<CodecError>`); the sink-error closure bridges via `From`.
@@ -2912,7 +2912,7 @@ mod decoding {
         /// is a follow-up.
         fn dyn_incremental_decoder(
             self,
-            preferred: &[ImageSpec],
+            preferred: &[PixelFormat],
         ) -> Result<
             alloc::boxed::Box<zencodec::decode::DynIncrementalDecoder>,
             zencodec::decode::BoxedError,
@@ -2925,7 +2925,7 @@ mod decoding {
         fn animation_frame_decoder(
             self,
             data: Cow<'a, [u8]>,
-            preferred: &[ImageSpec],
+            preferred: &[PixelFormat],
         ) -> Result<JxlAnimationFrameDecoder, At<zencodec::CodecError>> {
             (move || -> Result<JxlAnimationFrameDecoder, At<JxlError>> {
                 if !self.policy.resolve_animation(true) {
@@ -2977,7 +2977,7 @@ mod decoding {
         limits: Option<ResourceLimits>,
         policy: DecodePolicy,
         pulse: Option<zencodec::SharedPulse>,
-        preferred: Vec<ImageSpec>,
+        preferred: Vec<PixelFormat>,
         extract_gain_map: bool,
         gain_map_render: zencodec::GainMapRender,
         /// Orientation handling inherited from the [`JxlDecodeJob`].
@@ -3127,7 +3127,7 @@ mod decoding {
                         let mut source = bundle_to_gain_map_source(gm);
                         source.metadata.params = params;
                         let mut gm_info = source.metadata.clone();
-                        let order = gm_result.pixels.spec().layout.order;
+                        let order = gm_result.pixels.format().layout.order;
                         let channels = match order {
                             zenpixels::ChannelOrder::Gray => 1,
                             zenpixels::ChannelOrder::Rgb => 3,
@@ -3171,7 +3171,7 @@ mod decoding {
         limits: Option<ResourceLimits>,
         policy: DecodePolicy,
         pulse: Option<zencodec::SharedPulse>,
-        preferred: Vec<ImageSpec>,
+        preferred: Vec<PixelFormat>,
         /// Pre-decoded frames (lazily populated on first render_next_frame call).
         frames: Option<DecodedFrames>,
         /// Image info, set after decoding.
@@ -3689,7 +3689,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )
         .unwrap();
 
@@ -3735,7 +3735,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGBA8_SRGB,
+            zenpixels::PixelFormat::RGBA8_SRGB,
         )
         .unwrap();
 
@@ -3762,11 +3762,11 @@ mod tests {
         use zencodec::encode::EncoderConfig;
         let desc = JxlEncoderConfig::supported_descriptors();
         assert!(
-            desc.contains(&zenpixels::ImageSpec::RGBX8_SRGB),
+            desc.contains(&zenpixels::PixelFormat::RGBX8_SRGB),
             "RGBX8_SRGB must be in supported_descriptors"
         );
         assert!(
-            desc.contains(&zenpixels::ImageSpec::BGRX8_SRGB),
+            desc.contains(&zenpixels::PixelFormat::BGRX8_SRGB),
             "BGRX8_SRGB must be in supported_descriptors"
         );
     }
@@ -3784,8 +3784,14 @@ mod tests {
         for _ in 0..(w * h) {
             buf.extend_from_slice(&[255, 128, 0, 0x13]);
         }
-        let slice =
-            PixelView::new(&buf, w, h, (w * 4) as usize, &zenpixels::specs::RGBX8_SRGB).unwrap();
+        let slice = PixelView::new(
+            &buf,
+            w,
+            h,
+            (w * 4) as usize,
+            &zenpixels::formats::RGBX8_SRGB,
+        )
+        .unwrap();
 
         let config = JxlEncoderConfig::new().with_lossless(true);
         let encoder = config.job().encoder().unwrap();
@@ -3818,8 +3824,14 @@ mod tests {
             // BGR order with padding: B=0, G=128, R=255, pad
             buf.extend_from_slice(&[0, 128, 255, 0x42]);
         }
-        let slice =
-            PixelView::new(&buf, w, h, (w * 4) as usize, &zenpixels::specs::BGRX8_SRGB).unwrap();
+        let slice = PixelView::new(
+            &buf,
+            w,
+            h,
+            (w * 4) as usize,
+            &zenpixels::formats::BGRX8_SRGB,
+        )
+        .unwrap();
 
         let config = JxlEncoderConfig::new().with_lossless(true);
         let encoder = config.job().encoder().unwrap();
@@ -3858,10 +3870,16 @@ mod tests {
             rgb.extend_from_slice(&[r, g, b]);
         }
 
-        let rgbx_slice =
-            PixelView::new(&rgbx, w, h, (w * 4) as usize, &zenpixels::specs::RGBX8_SRGB).unwrap();
+        let rgbx_slice = PixelView::new(
+            &rgbx,
+            w,
+            h,
+            (w * 4) as usize,
+            &zenpixels::formats::RGBX8_SRGB,
+        )
+        .unwrap();
         let rgb_slice =
-            PixelView::new(&rgb, w, h, (w * 3) as usize, &zenpixels::specs::RGB8_SRGB).unwrap();
+            PixelView::new(&rgb, w, h, (w * 3) as usize, &zenpixels::formats::RGB8_SRGB).unwrap();
 
         let rgbx_out = JxlEncoderConfig::new()
             .with_lossless(true)
@@ -3899,7 +3917,7 @@ mod tests {
                 pixels,
                 2,
                 2,
-                zenpixels::ImageSpec::RGB8_SRGB,
+                zenpixels::PixelFormat::RGB8_SRGB,
             )
             .unwrap();
 
@@ -3939,7 +3957,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )
         .unwrap();
 
@@ -3977,7 +3995,7 @@ mod tests {
                 pixels,
                 2,
                 2,
-                zenpixels::ImageSpec::RGB8_SRGB,
+                zenpixels::PixelFormat::RGB8_SRGB,
             )
             .unwrap();
             let encoder = JxlEncoderConfig::new()
@@ -4040,7 +4058,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )
         .unwrap();
 
@@ -4077,7 +4095,7 @@ mod tests {
             .unwrap();
         let buf = decoded.into_buffer();
         assert!(matches!(
-            buf.spec().color,
+            buf.format().color,
             zenpixels::ColorSpace::Rgb {
                 transfer: Transfer::Pq,
                 primaries: Primaries::Bt2020,
@@ -4236,7 +4254,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )
         .unwrap();
 
@@ -4269,7 +4287,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )
         .unwrap();
 
@@ -4352,7 +4370,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )
         .unwrap();
         let config = JxlEncoderConfig::new().with_lossless(true);
@@ -4406,8 +4424,14 @@ mod tests {
             .unwrap();
         for seed in 0u8..4 {
             let frame = make_frame(seed * 17);
-            let slice = PixelView::new(&frame, width, height, stride, &zenpixels::specs::RGB8_SRGB)
-                .unwrap();
+            let slice = PixelView::new(
+                &frame,
+                width,
+                height,
+                stride,
+                &zenpixels::formats::RGB8_SRGB,
+            )
+            .unwrap();
             enc.push_frame(slice, 100, None).unwrap();
         }
         let encoded = AnimationFrameEncoder::finish(enc, None).unwrap();
@@ -4461,8 +4485,14 @@ mod tests {
             .unwrap();
         for seed in 0u8..3 {
             let frame = make_frame(seed * 23);
-            let slice = PixelView::new(&frame, width, height, stride, &zenpixels::specs::RGB8_SRGB)
-                .unwrap();
+            let slice = PixelView::new(
+                &frame,
+                width,
+                height,
+                stride,
+                &zenpixels::formats::RGB8_SRGB,
+            )
+            .unwrap();
             enc.push_frame(slice, 50, None).unwrap();
         }
         let encoded = AnimationFrameEncoder::finish(enc, None).unwrap();
@@ -4496,7 +4526,7 @@ mod tests {
         use zencodec::decode::{AnimationFrameDecoder, DecodeJob, DecoderConfig};
         use zencodec::encode::{AnimationFrameEncoder, EncodeJob, EncoderConfig};
         use zencodec::{ResourceLimits, ThreadingPolicy};
-        use zenpixels::{ImageSpec, PixelView};
+        use zenpixels::{PixelFormat, PixelView};
 
         /// Top-level box types of a container.
         fn box_types(data: &[u8]) -> Vec<[u8; 4]> {
@@ -4516,8 +4546,12 @@ mod tests {
         let xmp_data: &[u8] = b"<xmp>anim</xmp>";
 
         for (descriptor, bytes_per_sample, layout) in [
-            (ImageSpec::RGB8_SRGB, 1usize, vec![*b"JXL ", *b"ftyp"]),
-            (ImageSpec::RGB16_SRGB, 2, vec![*b"JXL ", *b"ftyp", *b"jxll"]),
+            (PixelFormat::RGB8_SRGB, 1usize, vec![*b"JXL ", *b"ftyp"]),
+            (
+                PixelFormat::RGB16_SRGB,
+                2,
+                vec![*b"JXL ", *b"ftyp", *b"jxll"],
+            ),
         ] {
             let stride = (width as usize) * 3 * bytes_per_sample;
             let frame_bytes = stride * height as usize;
@@ -4605,7 +4639,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )
         .unwrap();
 
@@ -4704,7 +4738,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )
         .unwrap();
 
@@ -4753,8 +4787,14 @@ mod tests {
             .unwrap();
         for seed in 0u8..2 {
             let frame = make_frame(seed * 31);
-            let slice = PixelView::new(&frame, width, height, stride, &zenpixels::specs::RGB8_SRGB)
-                .unwrap();
+            let slice = PixelView::new(
+                &frame,
+                width,
+                height,
+                stride,
+                &zenpixels::formats::RGB8_SRGB,
+            )
+            .unwrap();
             enc.push_frame(slice, 100, None)
                 .expect("accumulated input bytes are under the cap — push_frame must admit");
         }
@@ -4793,7 +4833,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )
         .unwrap();
 
@@ -4905,7 +4945,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )
         .unwrap();
 
@@ -4953,7 +4993,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )
         .unwrap();
 
@@ -5000,7 +5040,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )
         .unwrap();
 
@@ -5042,7 +5082,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )
         .unwrap();
 
@@ -5086,7 +5126,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )
         .unwrap();
 
@@ -5122,7 +5162,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )
         .unwrap();
 
@@ -5152,7 +5192,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )
         .unwrap();
 
@@ -5215,7 +5255,7 @@ mod tests {
             pixels,
             width,
             height,
-            zenpixels::ImageSpec::RGBA8_SRGB,
+            zenpixels::PixelFormat::RGBA8_SRGB,
         )
         .unwrap();
 
@@ -5266,8 +5306,8 @@ mod tests {
 
         let cfg = JxlDecoderConfig::new();
         let compute = ComputeEnvironment::new();
-        let small = ImageCharacteristics::new(256, 256, zenpixels::ImageSpec::RGBA8_SRGB);
-        let large = ImageCharacteristics::new(2048, 2048, zenpixels::ImageSpec::RGBA8_SRGB);
+        let small = ImageCharacteristics::new(256, 256, zenpixels::PixelFormat::RGBA8_SRGB);
+        let large = ImageCharacteristics::new(2048, 2048, zenpixels::PixelFormat::RGBA8_SRGB);
 
         let es = cfg.estimate_decode_resources(&small, &compute);
         let el = cfg.estimate_decode_resources(&large, &compute);

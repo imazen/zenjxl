@@ -17,7 +17,7 @@ To read decoded pixels back out as packed RGBA8 bytes (see the Decode example),
 also add the pixel crates and — for cancellation — `almost-enough`:
 
 ```toml
-zenpixels = "0.5"               # PixelBuf and ImageSpec
+zenpixels = "0.5"               # PixelBuf and PixelFormat
 zenpixels-convert = "0.5"       # convert_to_buf_with_peak
 almost-enough = "0.4.4"        # a ready-made cancellation token (optional)
 ```
@@ -32,7 +32,7 @@ into the consuming workspace.
 
 ```rust
 use zenjxl::{decode, probe, JxlLimits};
-use zenpixels::{ImageSpec, PeakSource};
+use zenpixels::{PeakSource, PixelFormat};
 
 let jxl_bytes: &[u8] = &std::fs::read("photo.jxl").unwrap();
 
@@ -41,7 +41,7 @@ let info = probe(jxl_bytes).unwrap();
 println!("{}x{}, alpha={}, gray={}", info.width, info.height, info.has_alpha, info.is_gray);
 
 // Full decode with resource limits. The 3rd arg is a pixel-format preference
-// list (`&[zenpixels::ImageSpec]`); `&[]` lets the decoder pick natively.
+// list (`&[zenpixels::PixelFormat]`); `&[]` lets the decoder pick natively.
 let limits = JxlLimits {
     max_pixels: Some(120_000_000),                  // 108 MP photos are common
     max_memory_bytes: Some(2 * 1024 * 1024 * 1024),
@@ -52,7 +52,7 @@ let output = decode(jxl_bytes, Some(&limits), &[]).unwrap();
 use zenpixels_convert::{ConvertPolicy, convert_to_buf_with_peak};
 let rgba: Vec<u8> = convert_to_buf_with_peak(
     &output.pixels.as_view(),
-    &ImageSpec::RGBA8_SRGB,
+    &PixelFormat::RGBA8_SRGB,
     &ConvertPolicy::permissive(),
     PeakSource::Measured,
 ).unwrap().into_vec().unwrap();
@@ -60,7 +60,7 @@ let rgba: Vec<u8> = convert_to_buf_with_peak(
 // Borrow the native pixels or take ownership of their backing storage.
 let (w, h) = (output.pixels.width(), output.pixels.height());
 let view = output.pixels.as_view();
-let spec = view.spec();                           // layout and active color
+let format = view.format();                       // layout and active color
 let borrowed = view.as_contiguous_bytes();        // Some for tight rows
 let native = output.pixels.into_parts();          // storage, stride, origin and HDR metadata
 ```
@@ -74,7 +74,7 @@ itself — so it caps both the early estimate and the live decode, not just the
 output buffer. Pass `None` for `limits` to use the decoder's built-in defaults.
 
 **Dependencies & errors.** Besides `zenjxl`, add `zenpixels` (`PixelBuf`
-and `ImageSpec`), `zenpixels-convert` (`convert_to_buf_with_peak`), and `enough`
+and `PixelFormat`), `zenpixels-convert` (`convert_to_buf_with_peak`), and `enough`
 (cancellation). `decode`/`probe`/`encode_*` return `Result<_, whereat::At<E>>`
 (`At<JxlError>`): the `At<…>` adds a build-time source location for logs — print
 the error with its captured frames via `err.full_trace()` (a `Display`, e.g.

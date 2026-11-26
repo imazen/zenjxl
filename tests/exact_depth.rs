@@ -4,13 +4,13 @@ use std::borrow::Cow;
 use zencodec::decode::{Decode, DecodeJob, DecoderConfig};
 use zencodec::{Orientation, OrientationHint};
 use zenjxl::JxlDecoderConfig;
-use zenpixels::{ImageSpec, SampleType};
+use zenpixels::{PixelFormat, SampleType};
 
 const SOURCE: &[u8] = include_bytes!("fixtures/orientation5_transpose.jxl");
 
 #[test]
 fn integer_grid_survives_native_and_adapter_orientation() {
-    for descriptor in [ImageSpec::RGB8_SRGB, ImageSpec::RGB16_SRGB] {
+    for descriptor in [PixelFormat::RGB8_SRGB, PixelFormat::RGB16_SRGB] {
         let native = zenjxl::decode_with_options(
             SOURCE,
             None,
@@ -55,7 +55,7 @@ fn integer_grid_survives_native_and_adapter_orientation() {
                 .decode()
                 .unwrap();
             let pixels = output.pixels();
-            assert_eq!(pixels.spec().layout.sample, descriptor.layout.sample);
+            assert_eq!(pixels.format().layout.sample, descriptor.layout.sample);
             let exact = pixels.facts().depth.unwrap();
             assert_eq!(exact.color_bits(), 1);
             assert!(holds_for(exact.color_bits(), &pixels));
@@ -65,11 +65,16 @@ fn integer_grid_survives_native_and_adapter_orientation() {
 
 #[test]
 fn float_output_has_no_integer_grid_claim() {
-    let pixels =
-        zenjxl::decode_with_options(SOURCE, None, &[ImageSpec::RGBF32_LINEAR], Some(false), None)
-            .unwrap()
-            .pixels;
-    assert_eq!(pixels.spec().layout.sample, SampleType::F32);
+    let pixels = zenjxl::decode_with_options(
+        SOURCE,
+        None,
+        &[PixelFormat::RGBF32_LINEAR],
+        Some(false),
+        None,
+    )
+    .unwrap()
+    .pixels;
+    assert_eq!(pixels.format().layout.sample, SampleType::F32);
     assert_eq!(pixels.facts().depth, None);
 }
 
@@ -78,7 +83,7 @@ fn float_output_has_no_integer_grid_claim() {
 fn lossless_deep_samples_do_not_inherit_a_coarser_grid() {
     use zencodec::encode::{EncodeJob, EncoderConfig};
     use zenpixels::PixelView;
-    for descriptor in [ImageSpec::RGB16_SRGB, ImageSpec::RGBA16_SRGB] {
+    for descriptor in [PixelFormat::RGB16_SRGB, PixelFormat::RGBA16_SRGB] {
         let channels = descriptor.layout.channels();
         let bytes: Vec<u8> = (0..8 * 4 * channels)
             .flat_map(|i| [0u16, 65, 32768, 65535][i % 4].to_ne_bytes())
@@ -111,7 +116,7 @@ fn lossless_deep_samples_do_not_inherit_a_coarser_grid() {
 }
 
 fn holds_for(bits: u8, view: &zenpixels::PixelView<'_>) -> bool {
-    let storage = view.spec().layout.sample.bits();
+    let storage = view.format().layout.sample.bits();
     let wide = (1u32 << storage) - 1;
     let narrow = (1u32 << bits) - 1;
     (0..view.rows()).all(|y| {

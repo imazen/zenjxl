@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 
 use zenpixels::{
     AlphaMode, ByteStorageMut, ChannelOrder, Cicp, ColorOrigin, ColorSpace, CustomPrimaries, Gamma,
-    HdrMetadata, ImageSpec, PixelBuf, PixelStorage, Primaries, RenderingIntent, SampleLayout,
+    HdrMetadata, PixelBuf, PixelFormat, PixelStorage, Primaries, RenderingIntent, SampleLayout,
     SampleType, SignalRange, Transfer,
 };
 
@@ -156,6 +156,7 @@ pub struct JxlInfo {
     /// Default is 255.0 (SDR). Higher values (e.g. 4000, 10000) indicate HDR content.
     /// From the JXL codestream `ToneMapping.intensity_target`.
     pub intensity_target: f32,
+    #[cfg_attr(not(feature = "zencodec"), allow(dead_code))]
     pub(crate) hdr: HdrMetadata,
     /// Minimum display luminance in nits. Default is 0.0.
     ///
@@ -400,7 +401,7 @@ pub(crate) fn choose_pixel_format(
     has_alpha: bool,
     is_gray: bool,
     num_extra: usize,
-    preferred: &[ImageSpec],
+    preferred: &[PixelFormat],
 ) -> ChosenFormat {
     let is_float = matches!(bit_depth, JxlBitDepth::Float { .. });
     let bps = bit_depth.bits_per_sample();
@@ -634,7 +635,7 @@ pub(crate) fn probe_with_orientation(
 pub(crate) fn probe_output(
     data: &[u8],
     adjust_orientation: bool,
-) -> Result<(JxlInfo, ImageSpec), At<JxlError>> {
+) -> Result<(JxlInfo, PixelFormat), At<JxlError>> {
     let mut options = JxlDecoderOptions::default();
     options.adjust_orientation = adjust_orientation;
     // Probe-specific limits: only header parsing is needed, so use tight bounds.
@@ -737,7 +738,7 @@ pub(crate) fn probe_output(
 pub fn decode(
     data: &[u8],
     limits: Option<&JxlLimits>,
-    preferred: &[ImageSpec],
+    preferred: &[PixelFormat],
 ) -> Result<JxlDecodeOutput, At<JxlError>> {
     decode_with_parallel(data, limits, preferred, None)
 }
@@ -751,7 +752,7 @@ pub fn decode(
 pub fn decode_with_parallel(
     data: &[u8],
     limits: Option<&JxlLimits>,
-    preferred: &[ImageSpec],
+    preferred: &[PixelFormat],
     parallel: Option<bool>,
 ) -> Result<JxlDecodeOutput, At<JxlError>> {
     decode_with_options(data, limits, preferred, parallel, None)
@@ -774,7 +775,7 @@ pub fn decode_with_parallel(
 pub fn decode_with_options(
     data: &[u8],
     limits: Option<&JxlLimits>,
-    preferred: &[ImageSpec],
+    preferred: &[PixelFormat],
     parallel: Option<bool>,
     stop: Option<alloc::sync::Arc<dyn enough::Stop>>,
 ) -> Result<JxlDecodeOutput, At<JxlError>> {
@@ -823,7 +824,7 @@ pub fn decode_with_options(
 pub(crate) fn decode_with_options_oriented(
     data: &[u8],
     limits: Option<&JxlLimits>,
-    preferred: &[ImageSpec],
+    preferred: &[PixelFormat],
     parallel: Option<bool>,
     stop: Option<alloc::sync::Arc<dyn enough::Stop>>,
     adjust_orientation: bool,
@@ -1041,7 +1042,7 @@ pub(crate) fn decode_with_options_oriented(
 }
 
 impl ChosenFormat {
-    pub(crate) fn image_spec(&self, profile: &JxlColorProfile, alpha: AlphaMode) -> ImageSpec {
+    pub(crate) fn image_spec(&self, profile: &JxlColorProfile, alpha: AlphaMode) -> PixelFormat {
         let order = match self.color_type {
             JxlColorType::Grayscale => ChannelOrder::Gray,
             JxlColorType::GrayscaleAlpha => ChannelOrder::GrayAlpha,
@@ -1099,7 +1100,7 @@ pub(crate) fn output_spec(
     layout: SampleLayout,
     profile: &JxlColorProfile,
     alpha: AlphaMode,
-) -> ImageSpec {
+) -> PixelFormat {
     let order = layout.order;
     let alpha = if order.has_alpha_slot() {
         alpha
@@ -1157,7 +1158,7 @@ pub(crate) fn output_spec(
             }
         }
     };
-    ImageSpec::new(layout, color)
+    PixelFormat::new(layout, color)
 }
 
 pub(crate) fn color_origin(
@@ -1205,7 +1206,7 @@ pub(crate) fn adopt_pixels(
     width: u32,
     height: u32,
     stride: usize,
-    spec: ImageSpec,
+    spec: PixelFormat,
 ) -> Result<PixelBuf, At<JxlError>> {
     PixelBuf::from_storage_parts(storage, 0, width, height, stride, spec)
         .map_err(|e| whereat::at!(JxlError::InvalidInput(e.to_string())))
@@ -1213,7 +1214,7 @@ pub(crate) fn adopt_pixels(
 
 fn measure_integer_depth(pixels: &mut PixelBuf) {
     let depth = zenpixels::sample::ExactDepth::measure(&pixels.as_view()).ok();
-    pixels.assume_facts(zenpixels::SampleFacts::NONE.with_depth_opt(depth));
+    pixels.assume_facts(zenpixels::SampleFacts::NONE.with_depth(depth));
 }
 
 #[cfg(test)]

@@ -22,7 +22,7 @@
 // ── Decode → packed RGBA8 (README "Decode") ─────────────────────────────────
 fn decode_to_rgba8() {
     use zenjxl::{JxlLimits, decode, probe};
-    use zenpixels::ImageSpec;
+    use zenpixels::PixelFormat;
 
     let jxl_bytes: &[u8] = &[];
 
@@ -42,7 +42,7 @@ fn decode_to_rgba8() {
     use zenpixels_convert::{ConvertPolicy, convert_to_buf_with_peak};
     let converted = convert_to_buf_with_peak(
         &output.pixels.as_view(),
-        &ImageSpec::RGBA8_SRGB,
+        &PixelFormat::RGBA8_SRGB,
         &ConvertPolicy::permissive(),
         PeakSource::Measured,
     )
@@ -51,7 +51,7 @@ fn decode_to_rgba8() {
 
     // Native layout straight off the PixelBuf.
     let (w, h) = (output.pixels.width(), output.pixels.height());
-    let desc = output.pixels.spec();
+    let desc = output.pixels.format();
     let _bpp = desc.layout.bytes_per_pixel();
     let view = output.pixels.as_view();
     let borrowed: Option<&[u8]> = view.as_contiguous_bytes();

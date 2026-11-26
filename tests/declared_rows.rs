@@ -1,14 +1,14 @@
 #![cfg(all(feature = "encode", feature = "decode", feature = "zencodec"))]
 use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 use zenjxl::{JxlDecoderConfig, JxlEncoderConfig};
-use zenpixels::{ImageSpec, PixelView};
+use zenpixels::{PixelFormat, PixelView};
 
 #[test]
 fn jxl_admits_declared_rows_and_preserves_padded_input() {
     for desc in [
-        ImageSpec::RGB8_SRGB,
-        ImageSpec::RGBA8_SRGB,
-        ImageSpec::RGBX8_SRGB,
+        PixelFormat::RGB8_SRGB,
+        PixelFormat::RGBA8_SRGB,
+        PixelFormat::RGBX8_SRGB,
     ] {
         let data: Vec<u8> = (0..96).map(|n| (n * 13) as u8).collect();
         let image = || PixelView::new(&data, 5, 4, 24, &desc).unwrap();
@@ -97,7 +97,7 @@ fn declared_jxl_keeps_timeout_reasons_at_each_row_boundary() {
             .with_pulse(zencodec::SharedPulse::new(Deadline(expired.clone())))
             .encoder()
             .unwrap();
-        let desc = ImageSpec::RGB8_SRGB;
+        let desc = PixelFormat::RGB8_SRGB;
         if stage > 0 {
             e.begin(1, 1, desc.clone()).unwrap();
         }

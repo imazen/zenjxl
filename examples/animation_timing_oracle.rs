@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             vec![rgb::Rgb::new(index * 40, 20, 60); 16 * 16],
             16,
             16,
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         )?;
         encoder.push_frame_timed(pixels.as_view(), FrameDuration::new(1, 30)?, None)?;
     }

@@ -72,7 +72,7 @@ fn replacement_releases_native_color_and_keeps_exact_independent_auxiliary_owner
         width: u32,
         rows: u32,
         stride: usize,
-        descriptor: zenpixels::ImageSpec,
+        descriptor: zenpixels::PixelFormat,
     }
     impl PackedImageOwner for Color {
         fn pixels(&self) -> Result<zenpixels::PixelView<'_>, At<zencodec::image::OutputError>> {
@@ -139,7 +139,7 @@ fn replacement_releases_native_color_and_keeps_exact_independent_auxiliary_owner
                     width: pixels.width(),
                     rows: pixels.rows(),
                     stride,
-                    descriptor: pixels.spec().clone(),
+                    descriptor: pixels.format().clone(),
                 }
             })
             .unwrap();
@@ -292,7 +292,7 @@ fn public_collection_retains_views_interpretation_and_owned_samples() {
                     image
                         .with_pixels(|p| {
                             assert_eq!(
-                                p.spec().layout,
+                                p.format().layout,
                                 zenpixels::SampleLayout::new(
                                     zenpixels::SampleType::F32,
                                     zenpixels::ChannelOrder::CmykInverted

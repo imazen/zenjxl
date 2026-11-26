@@ -9,10 +9,10 @@ use zencodec::decode::{Decode, DecodeJob, DecoderConfig};
 use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 use zencodec::{Metadata, MetadataPolicy};
 use zenjxl::{JxlDecoderConfig, JxlEncoderConfig};
-use zenpixels::{ImageSpec, PixelView};
+use zenpixels::{PixelFormat, PixelView};
 
 #[allow(deprecated)] // Exercise retained best-effort metadata behavior.
-fn encode(desc: ImageSpec, meta: Option<Metadata>) -> Vec<u8> {
+fn encode(desc: PixelFormat, meta: Option<Metadata>) -> Vec<u8> {
     let (w, h) = (8u32, 4u32);
     let bpp = desc.layout.bytes_per_pixel();
     let bytes: Vec<u8> = (0..w as usize * h as usize * bpp)
@@ -39,10 +39,10 @@ fn decode(bytes: &[u8]) -> zencodec::decode::DecodeOutput {
 #[test]
 fn hdr_and_wide_gamut_descriptors_are_signalled_without_metadata() {
     for (desc, primaries, transfer) in [
-        (ImageSpec::RGB16_BT2100_PQ, 9, 16),
-        (ImageSpec::RGB16_BT2100_HLG_SCENE, 9, 18),
+        (PixelFormat::RGB16_BT2100_PQ, 9, 16),
+        (PixelFormat::RGB16_BT2100_HLG_SCENE, 9, 18),
         (
-            ImageSpec::RGB8_SRGB.with_primaries(zenpixels::Primaries::DisplayP3),
+            PixelFormat::RGB8_SRGB.with_primaries(zenpixels::Primaries::DisplayP3),
             12,
             13,
         ),
@@ -73,7 +73,7 @@ fn a_jpeg_exif_prefix_is_not_boxed() {
     let mut app1 = b"Exif\0\0".to_vec();
     app1.extend_from_slice(&tiff);
     let out = decode(&encode(
-        ImageSpec::RGB8_SRGB,
+        PixelFormat::RGB8_SRGB,
         Some(Metadata::none().with_exif(app1)),
     ));
     let exif = out.metadata().exif.expect("EXIF kept");

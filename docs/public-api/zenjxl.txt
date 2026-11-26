@@ -110,9 +110,9 @@ pub JxlInfo::xyb_encoded: bool
 pub struct JxlLimits
 pub JxlLimits::max_memory_bytes: core::option::Option<u64>
 pub JxlLimits::max_pixels: core::option::Option<u64>
-pub fn decode(&[u8], core::option::Option<&JxlLimits>, &[zenpixels::color::ImageSpec]) -> core::result::Result<JxlDecodeOutput, whereat::at::At<JxlError>>
-pub fn decode_with_options(&[u8], core::option::Option<&JxlLimits>, &[zenpixels::color::ImageSpec], core::option::Option<bool>, core::option::Option<alloc::rcs::arc::Arc<dyn enough::Stop>>) -> core::result::Result<JxlDecodeOutput, whereat::at::At<JxlError>>
-pub fn decode_with_parallel(&[u8], core::option::Option<&JxlLimits>, &[zenpixels::color::ImageSpec], core::option::Option<bool>) -> core::result::Result<JxlDecodeOutput, whereat::at::At<JxlError>>
+pub fn decode(&[u8], core::option::Option<&JxlLimits>, &[zenpixels::color::PixelFormat]) -> core::result::Result<JxlDecodeOutput, whereat::at::At<JxlError>>
+pub fn decode_with_options(&[u8], core::option::Option<&JxlLimits>, &[zenpixels::color::PixelFormat], core::option::Option<bool>, core::option::Option<alloc::rcs::arc::Arc<dyn enough::Stop>>) -> core::result::Result<JxlDecodeOutput, whereat::at::At<JxlError>>
+pub fn decode_with_parallel(&[u8], core::option::Option<&JxlLimits>, &[zenpixels::color::PixelFormat], core::option::Option<bool>) -> core::result::Result<JxlDecodeOutput, whereat::at::At<JxlError>>
 pub fn probe(&[u8]) -> core::result::Result<JxlInfo, whereat::at::At<JxlError>>
 
 ## trait impls (8 types)

@@ -5,9 +5,9 @@
 ### QUEUED BREAKING CHANGES
 
 - The zenpixels 0.5 cohort replaces `PixelBuffer`, `PixelSlice` and
-  `PixelDescriptor` with `PixelBuf`, `PixelView` and `ImageSpec`.
+  `PixelDescriptor` with `PixelBuf`, `PixelView` and `PixelFormat`.
   Whole-image and animation decode adopt native-aligned output storage
-  directly. The output spec describes the decoder's active color profile.
+  directly. The output format describes the decoder's active color profile.
   Integer evidence reports a full-range grid common to the delivered channels.
 - Reconstruct a `jhgm` gain map in stored coordinates before correcting the
   base orientation. The final byte permutation retains HDR metadata and

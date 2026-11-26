@@ -28,7 +28,7 @@ fn encode_codestream(w: u32, h: u32, seed: u8) -> Vec<u8> {
         pixels,
         w,
         h,
-        zenpixels::ImageSpec::RGB8_SRGB,
+        zenpixels::PixelFormat::RGB8_SRGB,
     )
     .unwrap();
     zenjxl::JxlEncoderConfig::new()
@@ -195,7 +195,7 @@ fn render(
 #[cfg(feature = "reconstruct-hdr")]
 fn assert_f32_rows(out: &zencodec::decode::DecodeOutput, expected: &[f32]) {
     assert_eq!(
-        out.pixels().spec().layout.sample,
+        out.pixels().format().layout.sample,
         zenpixels::SampleType::F32
     );
     let bytes: Vec<_> = expected.iter().flat_map(|v| v.to_ne_bytes()).collect();
@@ -267,13 +267,13 @@ fn reconstructs_mono_gain_using_all_three_iso_records() {
 #[allow(deprecated)] // JXL currently exposes best-effort metadata retention.
 fn hdr_base_passthrough_preserves_pq_and_refuses_lower_target() {
     use zencodec::{Cicp, GainMapRender, OrientationHint};
-    use zenpixels::{ContentLightLevel, ImageSpec, Primaries, Transfer};
+    use zenpixels::{ContentLightLevel, PixelFormat, Primaries, Transfer};
     let values = [17u16, 32771, 60117, 64003, 9181, 1029];
     let rows: Vec<_> = values.into_iter().flat_map(u16::to_ne_bytes).collect();
     let pq = Cicp::new(9, 16, 0, true);
     let cll = ContentLightLevel::new(1700, 601);
     let mastering = zenpixels::hdr::MasteringDisplay::HDR10_REFERENCE;
-    let spec = ImageSpec::RGB16_SRGB
+    let spec = PixelFormat::RGB16_SRGB
         .with_primaries(Primaries::Bt2020)
         .with_transfer(Transfer::Pq);
     let pixels = zenpixels::PixelView::new(&rows, 2, 1, 12, &spec).unwrap();
@@ -305,7 +305,7 @@ fn hdr_base_passthrough_preserves_pq_and_refuses_lower_target() {
         .unwrap();
         assert_eq!(output.pixels().row(0), rows);
         assert_eq!(output.pixels().row(0), base_only.pixels().row(0));
-        assert_eq!(output.pixels().spec(), base_only.pixels().spec());
+        assert_eq!(output.pixels().format(), base_only.pixels().format());
         assert_eq!(
             output.pixels().facts().depth,
             base_only.pixels().facts().depth
