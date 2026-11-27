@@ -48,20 +48,20 @@ ultrahdr-core = { version = "0.6.0", optional = true, default-features = false, 
 # Unpublished paired contract and native backends, pinned for reproducible CI.
 # Consumer roots must carry the matching patches until registry publication.
 [patch.crates-io]
-zenpng = { git = "https://github.com/imazen/zenpng", rev = "c55a2ff702d765312d7855bcb6ab477c5f24363d" }
-zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "d40a957e95d19ea3fb5c29472820c86e8a34b09e" }
-zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "d40a957e95d19ea3fb5c29472820c86e8a34b09e" }
-ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "5643769d70487be50f16ebf9ac58bcb8bf191bd7" }
-jxl-encoder = { git = "https://github.com/imazen/jxl-encoder", rev = "5fbcd73597439ddfcc132df43c0caa51a2b8b3a8" }
-zenjpeg = { git = "https://github.com/imazen/zenjpeg", rev = "4b37b7670735adb06488789a7b67721bc2d85756" }
+zenpng = { git = "https://github.com/imazen/zenpng", rev = "af5d24b89d91efb3db91a632047a0e0c835fe007" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "7fa068834f8074c2630a352b25f355f7c90751f8" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "7fa068834f8074c2630a352b25f355f7c90751f8" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "76e9aad431e1faf7782b0654857325246b15c28b" }
+jxl-encoder = { git = "https://github.com/imazen/jxl-encoder", rev = "7fdd3ea2839b5a0ccd73dd61c9a99b8fe95857fe" }
+zenjpeg = { git = "https://github.com/imazen/zenjpeg", rev = "80dac328d0b9279413d037c0291477c8df6ae53b" }
 zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "e1c366b089b29511ef66f1b5af5d9e208dbff5d1" }
 zenflate = { git = "https://github.com/imazen/zenflate", rev = "7270e38faca9cdbae793938fa229d40ac4fe4c39" }
 butteraugli = { git = "https://github.com/imazen/butteraugli", rev = "48387382c3b3086f8c23548598afcd4066ea9f5f" }
 garb = { git = "https://github.com/imazen/garb", rev = "457ff8b9153e9d675a39dc098052b2ffeb6206fa" }
 linear-srgb = { git = "https://github.com/imazen/linear-srgb", rev = "ae83f19426737635fee3dd16f228681019f52585" }
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "26326a6e1ab59086c7f8683eb27f4c8e054d5e54" }
-zenmeta = { git = "https://github.com/imazen/zencodec", rev = "26326a6e1ab59086c7f8683eb27f4c8e054d5e54" }
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "26326a6e1ab59086c7f8683eb27f4c8e054d5e54" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "5d4f6c473404c09c95f404543f8a16a1e3cb8477" }
+zenmeta = { git = "https://github.com/imazen/zencodec", rev = "5d4f6c473404c09c95f404543f8a16a1e3cb8477" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "5d4f6c473404c09c95f404543f8a16a1e3cb8477" }
 
 [dev-dependencies]
 # Raw-frame capture + lazy symbolization for the per-site allocation profiler
@@ -84,7 +84,7 @@ moxcms = { version = ">=0.8.1, <0.10" }
 fast-ssim2 = "0.8.2"
 # Corpus loading (CID22-512) + synthetic generators for the same harness.
 # Test data helpers share the exact native JPEG revision above.
-zenjpeg-bench-utils = { git = "https://github.com/imazen/zenjpeg", rev = "4b37b7670735adb06488789a7b67721bc2d85756", default-features = false }
+zenjpeg-bench-utils = { git = "https://github.com/imazen/zenjpeg", rev = "80dac328d0b9279413d037c0291477c8df6ae53b", default-features = false }
 
 [features]
 # Checked image collections; separate from metadata inventory and legacy decode jobs.

@@ -480,13 +480,15 @@ fn only_the_last_exif_box_wins() {
 }
 
 #[test]
-#[allow(deprecated)] // Exercises the legacy best-effort `with_policy` setter.
 fn policy_and_gain_map_settings_change_dispositions() {
     use zencodec::decode::DecodePolicy;
     let (bytes, _) = kitchen_sink();
+    let mut policy = DecodePolicy::untrusted_minimal();
+    policy.strict = None;
     let strict = JxlDecoderConfig::new()
         .job()
-        .with_policy(DecodePolicy::strict())
+        .try_with_policy(policy)
+        .unwrap()
         .inventory(&bytes)
         .unwrap();
     assert_eq!(disposition_of(&strict, b"Exif", 0), Disposition::Dropped);

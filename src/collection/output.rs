@@ -9,7 +9,7 @@ use jxl::api::{
 use zencodec::collection::ImageId;
 use zencodec::image::{
     Auxiliary, AuxiliaryGrid, AuxiliaryImageOwner, AuxiliaryKind, ColorContribution, ImageGeometry,
-    ImageInterpretation, ImageOutput, OutputError, PackedImageOwner, Rect, SourcePrecision,
+    ImageInterpretation, ImageOutput, OutputError, PackedImageOwner, Rect, SourceSampleFormat,
     ValueSlice,
 };
 use zenpixels::{
@@ -123,15 +123,15 @@ pub(super) fn adopt(
         extras.push(Auxiliary {
             kind,
             name: ec.name.clone(),
-            source_precision: match details.bit_depth {
-                JxlBitDepth::Int { bits_per_sample } => SourcePrecision::Integer {
+            source_sample_format: match details.bit_depth {
+                JxlBitDepth::Int { bits_per_sample } => SourceSampleFormat::Integer {
                     bits: bits_per_sample,
                     signed: false,
                 },
                 JxlBitDepth::Float {
                     bits_per_sample,
                     exponent_bits_per_sample,
-                } => SourcePrecision::Float {
+                } => SourceSampleFormat::Float {
                     bits: bits_per_sample,
                     exponent_bits: exponent_bits_per_sample,
                 },

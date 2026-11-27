@@ -67,14 +67,14 @@ fn non_progressive_jxl() -> Vec<u8> {
 /// The adapter returns the envelope (`At<CodecError>`, Pattern B), not the
 /// typed `At<JxlError>`; the specific variant stays recoverable as the
 /// envelope's detail (asserted below).
-#[allow(deprecated)] // Exercises the legacy best-effort `with_policy` setter.
 fn decode_with_policy(
     data: Vec<u8>,
     policy: DecodePolicy,
 ) -> Result<zencodec::decode::DecodeOutput, whereat::At<zencodec::CodecError>> {
     JxlDecoderConfig::new()
         .job()
-        .with_policy(policy)
+        .try_with_policy(policy)
+        .expect("apply decode policy")
         .decoder(Cow::Owned(data), &[])
         .expect("build decoder")
         .decode()

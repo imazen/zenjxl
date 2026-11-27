@@ -151,7 +151,7 @@ fn assert_pixels_identical(
 }
 
 fn channels_of(out: &zencodec::decode::DecodeOutput) -> usize {
-    out.descriptor().layout.channels()
+    out.pixel_format().layout.channels()
 }
 
 // ── Preserve ─────────────────────────────────────────────────────────────

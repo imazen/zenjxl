@@ -264,7 +264,6 @@ fn reconstructs_mono_gain_using_all_three_iso_records() {
 // X2: the shortcut preserves real PQ code precision, color, and HDR.
 #[cfg(feature = "reconstruct-hdr")]
 #[test]
-#[allow(deprecated)] // JXL currently exposes best-effort metadata retention.
 fn hdr_base_passthrough_preserves_pq_and_refuses_lower_target() {
     use zencodec::{Cicp, GainMapRender, OrientationHint};
     use zenpixels::{ContentLightLevel, PixelFormat, Primaries, Transfer};
@@ -281,12 +280,12 @@ fn hdr_base_passthrough_preserves_pq_and_refuses_lower_target() {
     let base = zenjxl::JxlEncoderConfig::new()
         .with_lossless(true)
         .job()
-        .with_metadata_policy(
+        .with_unfiltered_metadata(
             zencodec::Metadata::none()
                 .with_cicp(pq)
                 .with_content_light_level(cll)
-                .with_mastering_display(mastering),
-            zencodec::MetadataPolicy::PreserveExact,
+                .with_mastering_display(mastering)
+                .filtered(&zencodec::MetadataPolicy::PreserveExact),
         )
         .encode(pixels)
         .unwrap();
@@ -405,7 +404,6 @@ fn rgba_gain_preserves_alpha_and_registered_samples() {
 // X4: native MaxRGB on a known saturated P3 raster; capacity is not a sample statistic.
 #[cfg(feature = "reconstruct-hdr")]
 #[test]
-#[allow(deprecated)] // JXL currently exposes best-effort metadata retention.
 fn measured_hdr_envelope_survives_native_encode() {
     use jxl_encoder::{ColorEncoding, LosslessConfig, PixelLayout, Primaries};
     use zencodec::encode::{EncodeJob as _, EncoderConfig as _};
@@ -450,9 +448,9 @@ fn measured_hdr_envelope_survives_native_encode() {
     let native = zenjxl::JxlEncoderConfig::new()
         .with_lossless(true)
         .job()
-        .with_metadata_policy(
-            zencodec::Metadata::from(full.info()),
-            zencodec::MetadataPolicy::PreserveExact,
+        .with_unfiltered_metadata(
+            zencodec::Metadata::from(full.info())
+                .filtered(&zencodec::MetadataPolicy::PreserveExact),
         )
         .encode(full.pixels())
         .unwrap();

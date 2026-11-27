@@ -60,7 +60,8 @@ fn checked_policy_defaults_and_inventory_feature_contract() {
         .metadata();
     for (policy, accepted) in [
         (EncodePolicy::none(), true),
-        (EncodePolicy::strip_all(), false),
+        (EncodePolicy::strip_all(), true),
+        (EncodePolicy::none().with_strict(true), false),
     ] {
         tk::check_encode_policy_admission(
             enc.clone(),
@@ -76,7 +77,7 @@ fn checked_policy_defaults_and_inventory_feature_contract() {
     }
     for (policy, accepted) in [
         (DecodePolicy::none(), true),
-        (DecodePolicy::strict(), false),
+        (DecodePolicy::untrusted_minimal(), false),
     ] {
         tk::check_decode_policy_admission(
             D::new(),
@@ -147,7 +148,6 @@ fn add_box(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
 }
 
 #[test]
-#[allow(deprecated)] // JXL currently exposes best-effort metadata retention.
 fn oriented_pq_rows_and_hdr_envelope_survive_reencode() {
     use jxl_encoder::{
         ColorEncoding, ImageMetadata, LosslessConfig, PixelLayout, Primaries, TransferFunction,
@@ -284,9 +284,8 @@ fn oriented_pq_rows_and_hdr_envelope_survive_reencode() {
         let encoded = E::new()
             .with_lossless(true)
             .job()
-            .with_metadata_policy(
-                Metadata::from(output.info()),
-                zencodec::MetadataPolicy::PreserveExact,
+            .with_unfiltered_metadata(
+                Metadata::from(output.info()).filtered(&zencodec::MetadataPolicy::PreserveExact),
             )
             .encode(output.pixels())
             .unwrap();
@@ -319,29 +318,26 @@ struct CompletedRows {
 impl zencodec::decode::DecodeRowSink for CompletedRows {
     fn provide_next_buffer(
         &mut self,
-        y: u32,
-        height: u32,
-        width: u32,
-        spec: zenpixels::PixelFormat,
+        strip: zencodec::decode::RowStrip,
+        format: zenpixels::PixelFormat,
     ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
-        assert_eq!(y, 0);
-        let pixels = self
-            .pixels
-            .insert(zenpixels::PixelBuf::new(width, height, spec)?);
+        assert_eq!(strip.y, 0);
+        let pixels =
+            self.pixels
+                .insert(zenpixels::PixelBuf::new(strip.width, strip.height, format)?);
         Ok(pixels.as_view_mut())
     }
 
     fn provide_buffer_with_metadata(
         &mut self,
         batch: zencodec::decode::BatchMeta,
-        height: u32,
-        width: u32,
-        spec: zenpixels::PixelFormat,
+        size: zencodec::decode::StripDimensions,
+        format: zenpixels::PixelFormat,
         metadata: &zencodec::decode::RowMetadata,
     ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
         assert!(batch.is_final);
         self.metadata = Some(metadata.clone());
-        self.provide_next_buffer(batch.y, height, width, spec)
+        self.provide_next_buffer(size.at_row(batch.y), format)
     }
 }
 

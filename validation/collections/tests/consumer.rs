@@ -143,7 +143,7 @@ fn replacement_releases_native_color_and_keeps_exact_independent_auxiliary_owner
                 }
             })
             .unwrap();
-        let color_bytes = color.data.charged_bytes();
+        let color_bytes = color.data.backing_allocation_bytes();
         let addresses = {
             let map = image.map().unwrap();
             (1..map.plane_count())

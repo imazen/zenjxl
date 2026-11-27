@@ -541,7 +541,7 @@ mod encoding {
             ImageFormat::Jxl
         }
 
-        fn supported_descriptors() -> &'static [PixelFormat] {
+        fn supported_pixel_formats() -> &'static [PixelFormat] {
             JXL_ENCODE_DESCRIPTORS
         }
 
@@ -651,7 +651,7 @@ mod encoding {
                 JxlEncMode::Lossy(c) => (false, c.effort()),
                 JxlEncMode::Lossless(c) => (true, c.effort()),
             };
-            let descriptor = image.descriptor();
+            let descriptor = image.pixel_format();
             let input_bpp = descriptor.layout.bytes_per_pixel() as u8;
             let has_alpha = descriptor.layout.order.has_alpha_slot();
             match jxl_encoder::estimate_encode(
@@ -670,7 +670,7 @@ mod encoding {
                         ThreadingInformation::SERIAL
                     };
                     ResourceEstimate::new(e.peak_memory_bytes, e.time_ms as u64)
-                        .with_peak_max(e.peak_memory_bytes_max)
+                        .with_peak_memory_bytes_max(e.peak_memory_bytes_max)
                         .with_threading(threading)
                         .at_cores(compute.cores())
                 }
@@ -717,14 +717,23 @@ mod encoding {
             self
         }
 
-        fn with_metadata(mut self, meta: Metadata) -> Self {
+        fn with_unfiltered_metadata(mut self, meta: Metadata) -> Self {
             self.metadata = Some(meta);
             self
         }
 
-        fn with_policy(mut self, policy: EncodePolicy) -> Self {
+        fn try_set_policy(&mut self, policy: EncodePolicy) -> Result<(), UnsupportedOperation> {
+            let mut admitted = EncodePolicy::none();
+            admitted.color = policy.color;
+            admitted.embed_icc = policy.embed_icc;
+            admitted.embed_exif = policy.embed_exif;
+            admitted.embed_xmp = policy.embed_xmp;
+            // `strict` and any future field added to `EncodePolicy` are not enforced.
+            if admitted != policy {
+                return Err(UnsupportedOperation::EncodePolicy);
+            }
             self.policy = policy;
-            self
+            Ok(())
         }
 
         fn with_loop_count(mut self, count: Option<u32>) -> Self {
@@ -928,7 +937,7 @@ mod encoding {
             if let Some(icc) = metadata_icc {
                 source = source.with_icc_profile(icc.clone());
             }
-            // The legacy with_metadata entry point can explicitly supply the color
+            // The with_unfiltered_metadata entry point can explicitly supply the color
             // of caller-provided bytes. Checked callers reconcile those claims upstream.
             if let Some(cicp) = metadata_cicp {
                 if cicp.matrix_coefficients != 0 || !cicp.full_range {
@@ -950,7 +959,7 @@ mod encoding {
                 } else {
                     SampleLayout::RGB8
                 };
-                color = zencodec::helpers::descriptor_for_decoded_pixels_v2(samples, &source, None)
+                color = zencodec::helpers::pixel_format_for_decoded_pixels(samples, &source, None)
                     .map_err(|e| whereat::at!(JxlError::InvalidInput(e.to_string())))?
                     .color;
             } else if let ColorSpace::Icc { profile, .. } = &color {
@@ -1290,76 +1299,6 @@ mod encoding {
                 Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
                     .with_mime_type("image/jxl")
                     .with_extension("jxl"))
-            })()
-            .map_err(zencodec::CodecError::of)
-        }
-
-        fn encode_srgba8(
-            self,
-            data: &mut [u8],
-            make_opaque: bool,
-            width: u32,
-            height: u32,
-            stride_pixels: u32,
-        ) -> Result<EncodeOutput, At<zencodec::CodecError>> {
-            (move || -> Result<EncodeOutput, At<JxlError>> {
-                self.check_one_shot()?;
-                let w = width as usize;
-                let h = height as usize;
-                let stride = stride_pixels as usize;
-
-                if make_opaque {
-                    // Encode as RGB — strip alpha entirely for smaller output.
-                    self.check_limits(width, height)?;
-                    // check_limits already gates dimensions, but use checked_mul
-                    // here so a degenerate width/height pair can't overflow the
-                    // capacity computation on its way to a panic. A size
-                    // overflow is not a configured cap, so it surfaces as
-                    // `OutOfMemory`, not `LimitExceeded`.
-                    let rgb_capacity =
-                        w.checked_mul(h)
-                            .and_then(|v| v.checked_mul(3))
-                            .ok_or_else(|| {
-                                whereat::at!(JxlError::OutOfMemory("RGB capacity overflow".into(),))
-                            })?;
-                    let mut rgb = Vec::with_capacity(rgb_capacity);
-                    for y in 0..h {
-                        let row_start = y * stride * 4;
-                        let row = &data[row_start..row_start + w * 4];
-                        for px in row.as_chunks::<4>().0.iter() {
-                            rgb.push(px[0]);
-                            rgb.push(px[1]);
-                            rgb.push(px[2]);
-                        }
-                    }
-                    let encoded =
-                        self.encode_with_metadata(&rgb, width, height, PixelLayout::Rgb8)?;
-                    let encoded = self.maybe_attach_gain_map(encoded)?;
-                    self.check_encoded_output_size(&encoded)?;
-                    Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
-                        .with_mime_type("image/jxl")
-                        .with_extension("jxl"))
-                } else {
-                    // RGBA path — copy contiguous if strided, otherwise zero-copy.
-                    self.check_limits(width, height)?;
-                    let pixel_data: alloc::borrow::Cow<'_, [u8]> = if stride == w {
-                        alloc::borrow::Cow::Borrowed(&data[..w * h * 4])
-                    } else {
-                        let mut buf = Vec::with_capacity(w * h * 4);
-                        for y in 0..h {
-                            let row_start = y * stride * 4;
-                            buf.extend_from_slice(&data[row_start..row_start + w * 4]);
-                        }
-                        alloc::borrow::Cow::Owned(buf)
-                    };
-                    let encoded =
-                        self.encode_with_metadata(&pixel_data, width, height, PixelLayout::Rgba8)?;
-                    let encoded = self.maybe_attach_gain_map(encoded)?;
-                    self.check_encoded_output_size(&encoded)?;
-                    Ok(EncodeOutput::new(encoded, ImageFormat::Jxl)
-                        .with_mime_type("image/jxl")
-                        .with_extension("jxl"))
-                }
             })()
             .map_err(zencodec::CodecError::of)
         }
@@ -1755,7 +1694,7 @@ mod encoding {
             duration: zencodec::animation::FrameDuration,
             pulse: Option<&dyn zencodec::Pulse>,
         ) -> Result<zencodec::animation::FrameDuration, Self::Error> {
-            let mut timing = self.timing;
+            let mut timing = self.timing.clone();
             let encoded = timing
                 .quantize(duration)
                 .map_err(|_| Self::reject(UnsupportedOperation::AnimationTiming))?;
@@ -2268,7 +2207,7 @@ mod decoding {
             &[ImageFormat::Jxl]
         }
 
-        fn supported_descriptors() -> &'static [PixelFormat] {
+        fn supported_pixel_formats() -> &'static [PixelFormat] {
             JXL_DECODE_DESCRIPTORS
         }
 
@@ -2288,7 +2227,7 @@ mod decoding {
             // overhead). Reported SERIAL: jxl-rs can thread, but the wrapper
             // does not characterize a scaling knee, so the estimate does not
             // promise core scaling.
-            let out_bpp = image.descriptor().layout.bytes_per_pixel() as u8;
+            let out_bpp = image.pixel_format().layout.bytes_per_pixel() as u8;
             match estimate_jxl_decode(image.width(), image.height(), out_bpp) {
                 Some((peak, wall_ms)) => ResourceEstimate::new(peak, wall_ms)
                     .with_threading(ThreadingInformation::SERIAL)
@@ -2725,9 +2664,22 @@ mod decoding {
             JxlDecodeJob::with_gain_map_render(self, render)
         }
 
-        fn with_policy(mut self, policy: DecodePolicy) -> Self {
+        fn try_set_policy(&mut self, policy: DecodePolicy) -> Result<(), UnsupportedOperation> {
+            let mut admitted = DecodePolicy::none();
+            admitted.allow_icc = policy.allow_icc;
+            admitted.allow_exif = policy.allow_exif;
+            admitted.allow_xmp = policy.allow_xmp;
+            admitted.allow_progressive = policy.allow_progressive;
+            admitted.allow_animation = policy.allow_animation;
+            if policy.allow_truncated == Some(false) {
+                admitted.allow_truncated = Some(false);
+            }
+            // `strict`, `allow_truncated: Some(true)`, and any future fields are not enforced.
+            if admitted != policy {
+                return Err(UnsupportedOperation::DecodePolicy);
+            }
             self.policy = policy;
-            self
+            Ok(())
         }
 
         fn with_orientation(mut self, hint: OrientationHint) -> Self {
@@ -3577,7 +3529,6 @@ pub use decoding::{JxlAnimationFrameDecoder, JxlDecodeJob, JxlDecoder, JxlDecode
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[allow(deprecated)] // Exercise the adapter's retained best-effort metadata path.
 mod tests {
     #[cfg(any(feature = "encode", feature = "decode"))]
     use super::*;
@@ -3594,7 +3545,7 @@ mod tests {
         use zencodec::encode::EncoderConfig;
         let config = JxlEncoderConfig::new();
         assert_eq!(JxlEncoderConfig::format(), ImageFormat::Jxl);
-        assert!(!JxlEncoderConfig::supported_descriptors().is_empty());
+        assert!(!JxlEncoderConfig::supported_pixel_formats().is_empty());
         assert!(config.generic_quality().is_none());
         assert!(config.generic_effort().is_none());
         assert_eq!(config.is_lossless(), Some(false));
@@ -3762,14 +3713,14 @@ mod tests {
     #[test]
     fn supported_descriptors_includes_rgbx_and_bgrx() {
         use zencodec::encode::EncoderConfig;
-        let desc = JxlEncoderConfig::supported_descriptors();
+        let desc = JxlEncoderConfig::supported_pixel_formats();
         assert!(
             desc.contains(&zenpixels::PixelFormat::RGBX8_SRGB),
-            "RGBX8_SRGB must be in supported_descriptors"
+            "RGBX8_SRGB must be in supported_pixel_formats"
         );
         assert!(
             desc.contains(&zenpixels::PixelFormat::BGRX8_SRGB),
-            "BGRX8_SRGB must be in supported_descriptors"
+            "BGRX8_SRGB must be in supported_pixel_formats"
         );
     }
 
@@ -3969,7 +3920,7 @@ mod tests {
         let config = JxlEncoderConfig::new().with_lossless(true);
         let encoder = config
             .job()
-            .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
+            .with_unfiltered_metadata(meta.filtered(&zencodec::MetadataPolicy::PreserveExact))
             .encoder()
             .unwrap();
         let output = encoder.encode(buf.as_view()).unwrap();
@@ -4003,9 +3954,10 @@ mod tests {
             let encoder = JxlEncoderConfig::new()
                 .with_lossless(true)
                 .job()
-                .with_metadata_policy(
-                    Metadata::none().with_cicp(cicp),
-                    zencodec::MetadataPolicy::PreserveExact,
+                .with_unfiltered_metadata(
+                    Metadata::none()
+                        .with_cicp(cicp)
+                        .filtered(&zencodec::MetadataPolicy::PreserveExact),
                 )
                 .encoder()
                 .unwrap();
@@ -4068,7 +4020,7 @@ mod tests {
         let config = JxlEncoderConfig::new().with_lossless(true);
         let encoder = config
             .job()
-            .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
+            .with_unfiltered_metadata(meta.filtered(&zencodec::MetadataPolicy::PreserveExact))
             .encoder()
             .unwrap();
         let output = encoder.encode(buf.as_view()).unwrap();
@@ -4223,7 +4175,7 @@ mod tests {
     #[test]
     fn encode_descriptors_cover_all_layouts() {
         use zencodec::encode::EncoderConfig;
-        let descs = JxlEncoderConfig::supported_descriptors();
+        let descs = JxlEncoderConfig::supported_pixel_formats();
         // Should include RGB, RGBA, BGRA, Gray, GrayAlpha across U8/U16/F32
         assert!(descs.len() >= 13);
     }
@@ -4232,7 +4184,7 @@ mod tests {
     #[test]
     fn decode_descriptors_cover_all_layouts() {
         use zencodec::decode::DecoderConfig;
-        let descs = JxlDecoderConfig::supported_descriptors();
+        let descs = JxlDecoderConfig::supported_pixel_formats();
         // Should include RGB, RGBA, Gray, GrayAlpha across U8/U16/F32
         assert!(descs.len() >= 12);
     }
@@ -4571,7 +4523,7 @@ mod tests {
             let mut enc = config
                 .job()
                 .with_limits(enc_limits)
-                .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
+                .with_unfiltered_metadata(meta.filtered(&zencodec::MetadataPolicy::PreserveExact))
                 .animation_frame_encoder()
                 .unwrap();
             for seed in 0u8..2 {
@@ -5006,7 +4958,7 @@ mod tests {
         let config = JxlEncoderConfig::new().with_lossless(true);
         let encoder = config
             .job()
-            .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
+            .with_unfiltered_metadata(meta.filtered(&zencodec::MetadataPolicy::PreserveExact))
             .encoder()
             .unwrap();
         let output = encoder.encode(buf.as_view()).unwrap();
@@ -5052,7 +5004,7 @@ mod tests {
         let config = JxlEncoderConfig::new().with_lossless(true);
         let encoder = config
             .job()
-            .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
+            .with_unfiltered_metadata(meta.filtered(&zencodec::MetadataPolicy::PreserveExact))
             .encoder()
             .unwrap();
         let output = encoder.encode(buf.as_view()).unwrap();
@@ -5097,7 +5049,7 @@ mod tests {
         let config = JxlEncoderConfig::new().with_lossless(true);
         let encoder = config
             .job()
-            .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
+            .with_unfiltered_metadata(meta.filtered(&zencodec::MetadataPolicy::PreserveExact))
             .encoder()
             .unwrap();
         let output = encoder.encode(buf.as_view()).unwrap();
@@ -5207,7 +5159,7 @@ mod tests {
         let config = JxlEncoderConfig::new().with_lossless(true);
         let encoder = config
             .job()
-            .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
+            .with_unfiltered_metadata(meta.filtered(&zencodec::MetadataPolicy::PreserveExact))
             .encoder()
             .unwrap();
         let output = encoder.encode(buf.as_view()).unwrap();
@@ -5301,13 +5253,12 @@ mod tests {
     /// grows with image area.
     #[cfg(feature = "decode")]
     #[test]
-    #[allow(deprecated)] // ComputeEnvironment::new is deprecated on zencodec feat/inventory; conservative() is not in 0.1.26
     fn estimate_decode_resources_is_sane() {
         use zencodec::decode::DecoderConfig;
         use zencodec::estimate::{ComputeEnvironment, ImageCharacteristics};
 
         let cfg = JxlDecoderConfig::new();
-        let compute = ComputeEnvironment::new();
+        let compute = ComputeEnvironment::conservative();
         let small = ImageCharacteristics::new(256, 256, zenpixels::PixelFormat::RGBA8_SRGB);
         let large = ImageCharacteristics::new(2048, 2048, zenpixels::PixelFormat::RGBA8_SRGB);
 

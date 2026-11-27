@@ -53,7 +53,12 @@ fn jxl_admits_declared_rows_and_preserves_padded_input() {
             let mut enc = cfg.clone().job().encoder().unwrap();
             enc.begin(5, 4, desc.clone()).unwrap();
             let mut rgba = data.clone();
-            assert!(enc.encode_srgba8(&mut rgba, false, 5, 4, 6).is_err());
+            assert!(
+                enc.encode_in_place(
+                    zenpixels::PixelViewMut::new(&mut rgba, 5, 4, 24, &desc).unwrap()
+                )
+                .is_err()
+            );
             zencodec_testkit::check_streaming_output_honesty(
                 cfg,
                 JxlDecoderConfig::new(),

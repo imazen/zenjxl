@@ -11,7 +11,6 @@ use zencodec::{Metadata, MetadataPolicy};
 use zenjxl::{JxlDecoderConfig, JxlEncoderConfig};
 use zenpixels::{PixelFormat, PixelView};
 
-#[allow(deprecated)] // Exercise retained best-effort metadata behavior.
 fn encode(desc: PixelFormat, meta: Option<Metadata>) -> Vec<u8> {
     let (w, h) = (8u32, 4u32);
     let bpp = desc.layout.bytes_per_pixel();
@@ -21,7 +20,7 @@ fn encode(desc: PixelFormat, meta: Option<Metadata>) -> Vec<u8> {
     let slice = PixelView::new(&bytes, w, h, w as usize * bpp, &desc).unwrap();
     let mut job = JxlEncoderConfig::new().with_generic_quality(90.0).job();
     if let Some(m) = meta {
-        job = job.with_metadata_policy(m, MetadataPolicy::PreserveExact);
+        job = job.with_unfiltered_metadata(m.filtered(&MetadataPolicy::PreserveExact));
     }
     job.encoder().unwrap().encode(slice).unwrap().into_vec()
 }
