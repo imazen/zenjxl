@@ -54,7 +54,7 @@ fn decode_with_hint(hint: OrientationHint) -> zencodec::decode::DecodeOutput {
 /// Map a destination pixel `(dx, dy)` (in the output of `orientation` applied to
 /// a `src`-sized buffer) back to the source pixel it came from. Built
 /// independently of the production `apply_orientation` via the zenpixels
-/// `forward_map`, so the oracle does not merely re-run the implementation.
+/// `map_pixel_coordinates`, so the oracle does not merely re-run the implementation.
 ///
 /// `src` is the source `(w, h)` (pre-orientation) geometry.
 fn source_pixel_for_dest(
@@ -62,7 +62,7 @@ fn source_pixel_for_dest(
     dest: (u32, u32),
     src: (u32, u32),
 ) -> (u32, u32) {
-    // forward_map sends a source pixel to its destination; invert by scanning is
+    // map_pixel_coordinates sends a source pixel to its destination; invert by scanning is
     // O(N), but for the small fixture we instead invert analytically per the
     // group. Easiest robust route: build the forward map and look the dest up.
     // The fixture is tiny, so an O(N) inverse is fine and keeps this independent
@@ -70,7 +70,7 @@ fn source_pixel_for_dest(
     let (w, h) = src;
     for sy in 0..h {
         for sx in 0..w {
-            if orientation.forward_map(sx, sy, w, h) == dest {
+            if orientation.map_pixel_coordinates((sx, sy), (w, h)) == dest {
                 return (sx, sy);
             }
         }
@@ -79,7 +79,7 @@ fn source_pixel_for_dest(
 }
 
 /// Assert that `transformed` equals `base` remapped through `orientation`, bit
-/// for bit. Reads both buffers row-by-row via `PixelSlice::row`, so it is
+/// for bit. Reads both buffers row-by-row via `PixelView::row`, so it is
 /// correct for strided buffers (per the strided-rows discipline) and does not
 /// assume a contiguous backing.
 fn assert_equals_under_orientation(
@@ -151,7 +151,7 @@ fn assert_pixels_identical(
 }
 
 fn channels_of(out: &zencodec::decode::DecodeOutput) -> usize {
-    out.descriptor().channels()
+    out.pixel_format().layout.channels()
 }
 
 // ── Preserve ─────────────────────────────────────────────────────────────

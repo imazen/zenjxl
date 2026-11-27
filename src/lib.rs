@@ -27,6 +27,8 @@ pub mod collection;
 #[cfg(feature = "decode")]
 mod decode;
 mod error;
+#[cfg(any(feature = "decode", all(feature = "encode", feature = "zencodec")))]
+mod hdr;
 #[cfg(feature = "inventory")]
 mod inventory;
 #[cfg(feature = "jpeg-lossy")]

@@ -34,13 +34,19 @@ fn lossless(w: u32, h: u32, noisy: bool) -> Vec<u8> {
             }
         })
         .collect();
-    let buf = zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, w, h).expect("buffer");
+    let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
+        pixels,
+        w,
+        h,
+        zenpixels::PixelFormat::RGB8_SRGB,
+    )
+    .expect("buffer");
     JxlEncoderConfig::new()
         .with_lossless(true)
         .job()
         .encoder()
         .expect("encoder")
-        .encode(buf.as_slice().into())
+        .encode(buf.as_view())
         .expect("encode")
         .into_vec()
 }
@@ -56,13 +62,19 @@ fn lossy(w: u32, h: u32) -> Vec<u8> {
             }
         })
         .collect();
-    let buf = zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, w, h).expect("buffer");
+    let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
+        pixels,
+        w,
+        h,
+        zenpixels::PixelFormat::RGB8_SRGB,
+    )
+    .expect("buffer");
     JxlEncoderConfig::new()
         .with_generic_quality(60.0)
         .job()
         .encoder()
         .expect("encoder")
-        .encode(buf.as_slice().into())
+        .encode(buf.as_view())
         .expect("encode")
         .into_vec()
 }
@@ -468,13 +480,15 @@ fn only_the_last_exif_box_wins() {
 }
 
 #[test]
-#[allow(deprecated)] // Exercises the legacy best-effort `with_policy` setter.
 fn policy_and_gain_map_settings_change_dispositions() {
     use zencodec::decode::DecodePolicy;
     let (bytes, _) = kitchen_sink();
+    let mut policy = DecodePolicy::untrusted_minimal();
+    policy.strict = None;
     let strict = JxlDecoderConfig::new()
         .job()
-        .with_policy(DecodePolicy::strict())
+        .try_with_policy(policy)
+        .unwrap()
         .inventory(&bytes)
         .unwrap();
     assert_eq!(disposition_of(&strict, b"Exif", 0), Disposition::Dropped);
@@ -1236,10 +1250,14 @@ fn animation(w: u32, h: u32, frames: u32) -> Vec<u8> {
                 }
             })
             .collect();
-        let buf =
-            zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, w, h).expect("buffer");
-        enc.push_frame(buf.as_slice().into(), 100, None)
-            .expect("push");
+        let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
+            pixels,
+            w,
+            h,
+            zenpixels::PixelFormat::RGB8_SRGB,
+        )
+        .expect("buffer");
+        enc.push_frame(buf.as_view(), 100, None).expect("push");
     }
     enc.finish(None).expect("finish").into_vec()
 }
@@ -1298,9 +1316,13 @@ fn broken_gain_map_in_components_mode_fails_the_decode() {
     let cs = lossless(16, 16, false);
     let mut bad_cs = vec![0xFF, 0x0A];
     bad_cs.extend([0xAB; 40]);
-    let bundle = |gm: Vec<u8>| {
+    use zencodec::gainmap::{GainMapParams, Iso21496Format, serialize_iso21496_fmt};
+    let mut params = GainMapParams::default();
+    params.alternate_hdr_headroom = 1.0;
+    let valid_iso = serialize_iso21496_fmt(&params, Iso21496Format::JxlJhgm).unwrap();
+    let bundle = |gm: Vec<u8>, metadata: Vec<u8>| {
         GainMapBundle {
-            metadata: vec![1, 2, 3],
+            metadata,
             color_encoding: None,
             alt_icc_compressed: None,
             gain_map_codestream: gm,
@@ -1331,7 +1353,7 @@ fn broken_gain_map_in_components_mode_fails_the_decode() {
             .map(|_| ())
     };
 
-    let bad = with_bundle(&bundle(bad_cs));
+    let bad = with_bundle(&bundle(bad_cs, valid_iso.clone()));
     assert!(decode_components(&bad).is_err(), "the decode fails");
     let inv = components(&bad);
     assert_eq!(
@@ -1358,7 +1380,14 @@ fn broken_gain_map_in_components_mode_fails_the_decode() {
         "{inv}"
     );
 
-    let good = with_bundle(&bundle(lossless(8, 8, false)));
+    let bad_iso = with_bundle(&bundle(lossless(8, 8, false), vec![1, 2, 3]));
+    assert!(decode_components(&bad_iso).is_err());
+    assert_eq!(
+        disposition_of(&components(&bad_iso), b"jhgm", 0),
+        Disposition::Malformed,
+    );
+
+    let good = with_bundle(&bundle(lossless(8, 8, false), valid_iso));
     assert!(decode_components(&good).is_ok());
     let inv = components(&good);
     assert_eq!(

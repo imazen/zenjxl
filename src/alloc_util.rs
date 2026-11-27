@@ -22,9 +22,12 @@
 //!
 //! [`AllocPreference`]: zencodec::AllocPreference
 
+#[cfg(test)]
 use alloc::vec::Vec;
+#[cfg(test)]
 use whereat::{At, at};
 
+#[cfg(test)]
 use crate::error::JxlError;
 
 /// Resolve the 3-mode [`AllocPreference`](zencodec::AllocPreference) against
@@ -55,6 +58,7 @@ pub(crate) fn resolve_fallible(
 /// * fallible → allocator-zeroed storage, returning
 ///   [`JxlError::OutOfMemory`] on allocation failure.
 /// * infallible → `vec![0u8; n]` (single `calloc`, aborts on OOM).
+#[cfg(test)]
 pub(crate) fn alloc_zeroed(
     pref: zencodec::AllocPreference,
     site_default_fallible: bool,

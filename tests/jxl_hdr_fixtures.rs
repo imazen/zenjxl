@@ -39,9 +39,10 @@ fn cjxl_pq_fixture_intensity_target_and_cicp() {
         info.intensity_target, 4000.0,
         "cjxl --intensity_target=4000 must round-trip through the codestream"
     );
-    let (cp, tc, _mc, _full) = info.cicp.expect("PQ fixture must carry CICP");
+    let (cp, tc, mc, full) = info.cicp.expect("PQ fixture must carry CICP");
     assert_eq!(cp, 9, "BT.2020 primaries (CICP color_primaries 9)");
     assert_eq!(tc, 16, "PQ transfer (CICP transfer_characteristics 16)");
+    assert_eq!((mc, full), (0, true), "full-range RGB");
 }
 
 /// A real `cjxl`-produced BT.2100-HLG file: peak 1000 nits, HLG transfer,
@@ -50,7 +51,8 @@ fn cjxl_pq_fixture_intensity_target_and_cicp() {
 fn cjxl_hlg_fixture_intensity_target_and_cicp() {
     let info = probe(&fixture("hdr_hlg_1000.jxl")).expect("probe cjxl HLG fixture");
     assert_eq!(info.intensity_target, 1000.0);
-    let (cp, tc, _mc, _full) = info.cicp.expect("HLG fixture must carry CICP");
+    let (cp, tc, mc, full) = info.cicp.expect("HLG fixture must carry CICP");
     assert_eq!(cp, 9, "BT.2020 primaries");
     assert_eq!(tc, 18, "HLG transfer (CICP transfer_characteristics 18)");
+    assert_eq!((mc, full), (0, true), "full-range RGB");
 }

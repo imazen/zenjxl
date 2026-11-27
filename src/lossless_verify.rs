@@ -134,10 +134,10 @@ fn encode_cell(img: ImgRef<'_, Rgb<u8>>, id: &str) -> Result<Vec<u8>, At<JxlErro
 /// Lossless-encode `img` under the measured time+RD-optimal proxy policy
 /// (see the module docs for the sweep evidence and test-split numbers).
 ///
-/// - Typical content (most images): ONE encode with [`LEAN_CANDIDATE`].
+/// - Typical content (most images): ONE encode with `LEAN_CANDIDATE`.
 /// - Low-color-count or near-grayscale content (detected locally in one
 ///   cheap pixel pass; ~20–28% of a mixed corpus): encodes the
-///   [`RICH_CANDIDATES`] set and returns the smallest.
+///   `RICH_CANDIDATES` set and returns the smallest.
 pub fn encode_rgb8_lossless_verified(img: ImgRef<'_, Rgb<u8>>) -> Result<Vec<u8>, At<JxlError>> {
     if !needs_verification(img) {
         return encode_cell(img, LEAN_CANDIDATE);

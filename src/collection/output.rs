@@ -9,12 +9,11 @@ use jxl::api::{
 use zencodec::collection::ImageId;
 use zencodec::image::{
     Auxiliary, AuxiliaryGrid, AuxiliaryImageOwner, AuxiliaryKind, ColorContribution, ImageGeometry,
-    ImageInterpretation, ImageOutput, OutputError, PackedImageOwner, Rect, SourcePrecision,
+    ImageInterpretation, ImageOutput, OutputError, PackedImageOwner, Rect, SourceSampleFormat,
     ValueSlice,
 };
 use zenpixels::{
-    AlphaMode, ChannelLayout, ChannelType, ColorContext, ColorPrimaries, Orientation,
-    PixelDescriptor, PixelFormat, PixelSlice, TransferFunction,
+    AlphaMode, ChannelOrder, Orientation, PixelFormat, PixelView, SampleLayout, SampleType,
 };
 
 /// Retain native source facts without treating them as an output profile or
@@ -59,48 +58,31 @@ pub(super) fn adopt(
 ) -> Result<ImageOutput, Failure> {
     let info = &source.header;
     let layout = match format.color_type {
-        JxlColorType::Grayscale => ChannelLayout::Gray,
-        JxlColorType::GrayscaleAlpha => ChannelLayout::GrayAlpha,
-        JxlColorType::Rgb => ChannelLayout::Rgb,
-        JxlColorType::Rgba => ChannelLayout::Rgba,
-        JxlColorType::Bgra => ChannelLayout::Bgra,
-        JxlColorType::Cmyk => ChannelLayout::Cmyk,
+        JxlColorType::Grayscale => ChannelOrder::Gray,
+        JxlColorType::GrayscaleAlpha => ChannelOrder::GrayAlpha,
+        JxlColorType::Rgb => ChannelOrder::Rgb,
+        JxlColorType::Rgba => ChannelOrder::Rgba,
+        JxlColorType::Bgra => ChannelOrder::Bgra,
+        JxlColorType::Cmyk => ChannelOrder::CmykInverted,
         JxlColorType::Bgr => return Err(Error::other("BGR interpretation is unqualified").into()),
     };
-    let alpha = if layout.has_alpha() {
+    let alpha = if layout.has_alpha_slot() {
         let channel = info
             .extra_channels
             .iter()
             .find(|ec| ec.ec_type == ExtraChannel::Alpha)
             .ok_or_else(|| Error::other("output alpha has no source declaration"))?;
-        Some(alpha_mode(channel.alpha_associated))
+        alpha_mode(channel.alpha_associated)
     } else {
-        None
-    };
-    let icc = match profile {
-        JxlColorProfile::Icc(bytes) => bytes.clone(),
-        JxlColorProfile::Simple(encoding) => encoding
-            .maybe_create_profile()?
-            .ok_or_else(|| Error::other("native output color cannot be represented by ICC"))?,
+        AlphaMode::None
     };
     let mut planes = planes.into_iter();
     let color = planes
         .next()
         .ok_or_else(|| Error::other("missing native color plane"))?;
     let (width, height) = (u32::try_from(color.width)?, u32::try_from(color.height)?);
-    let physical_format = if layout == ChannelLayout::Cmyk {
-        // Native JXL values have reversed ink polarity. An ICC profile alone
-        // does not declare this; preserve it in the converter's format input.
-        PixelFormat::CmykF32Inverted
-    } else {
-        PixelFormat::from_parts(ChannelType::F32, layout, alpha)
-            .ok_or_else(|| Error::other("native output layout has no pixel format"))?
-    };
-    let descriptor = PixelDescriptor::from_pixel_format(physical_format)
-        .with_alpha(alpha)
-        .with_transfer(TransferFunction::Unknown)
-        .with_primaries(ColorPrimaries::Unknown);
-    let context = Arc::new(ColorContext::from_icc(Arc::<[u8]>::from(icc)));
+    let descriptor =
+        crate::decode::output_spec(SampleLayout::new(SampleType::F32, layout), profile, alpha);
     let mut extras = Vec::new();
     extras.try_reserve_exact(info.extra_channels.len())?;
     let mut extra_planes = Vec::new();
@@ -141,15 +123,15 @@ pub(super) fn adopt(
         extras.push(Auxiliary {
             kind,
             name: ec.name.clone(),
-            source_precision: match details.bit_depth {
-                JxlBitDepth::Int { bits_per_sample } => SourcePrecision::Integer {
+            source_sample_format: match details.bit_depth {
+                JxlBitDepth::Int { bits_per_sample } => SourceSampleFormat::Integer {
                     bits: bits_per_sample,
                     signed: false,
                 },
                 JxlBitDepth::Float {
                     bits_per_sample,
                     exponent_bits_per_sample,
-                } => SourcePrecision::Float {
+                } => SourceSampleFormat::Float {
                     bits: bits_per_sample,
                     exponent_bits: exponent_bits_per_sample,
                 },
@@ -202,7 +184,6 @@ pub(super) fn adopt(
             color,
             extras: Arc::new(Extras(extra_planes)),
             descriptor,
-            context,
         },
         extras,
         interpretation,
@@ -215,19 +196,17 @@ pub(super) fn adopt(
 struct Packed {
     color: Plane,
     extras: Arc<Extras>,
-    descriptor: PixelDescriptor,
-    context: Arc<ColorContext>,
+    descriptor: PixelFormat,
 }
 impl PackedImageOwner for Packed {
-    fn pixels(&self) -> Result<PixelSlice<'_>, zencodec::At<OutputError>> {
-        PixelSlice::new(
+    fn pixels(&self) -> Result<PixelView<'_>, zencodec::At<OutputError>> {
+        PixelView::new(
             self.color.bytes.as_slice(),
             self.color.width as u32,
             self.color.height as u32,
             self.color.stride,
-            self.descriptor,
+            &self.descriptor,
         )
-        .map(|p| p.with_color_context(self.context.clone()))
         .map_err(|e| {
             zencodec::At::wrap(OutputError::Mapping(zencodec::frame::MapError::Backend(
                 Box::new(e),
@@ -254,7 +233,7 @@ impl AuxiliaryImageOwner for Extras {
                     plane.width as u32,
                     plane.height as u32,
                     plane.stride,
-                    ChannelType::F32,
+                    SampleType::F32,
                 )
                 // The native requested output planes are reconstructed on the
                 // color grid, including source extra-channel upsampling. Shared

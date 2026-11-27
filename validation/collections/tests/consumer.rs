@@ -72,24 +72,19 @@ fn replacement_releases_native_color_and_keeps_exact_independent_auxiliary_owner
         width: u32,
         rows: u32,
         stride: usize,
-        descriptor: zenpixels::PixelDescriptor,
-        context: Option<Arc<zenpixels::ColorContext>>,
+        descriptor: zenpixels::PixelFormat,
     }
     impl PackedImageOwner for Color {
-        fn pixels(&self) -> Result<zenpixels::PixelSlice<'_>, At<zencodec::image::OutputError>> {
-            let pixels = zenpixels::PixelSlice::new(
+        fn pixels(&self) -> Result<zenpixels::PixelView<'_>, At<zencodec::image::OutputError>> {
+            let pixels = zenpixels::PixelView::new(
                 bytemuck::cast_slice(self.data.as_slice()),
                 self.width,
                 self.rows,
                 self.stride,
-                self.descriptor,
+                &self.descriptor,
             )
             .unwrap();
-            Ok(if let Some(context) = &self.context {
-                pixels.with_color_context(context.clone())
-            } else {
-                pixels
-            })
+            Ok(pixels)
         }
     }
     for (name, view) in [
@@ -129,12 +124,12 @@ fn replacement_releases_native_color_and_keeps_exact_independent_auxiliary_owner
         drop(opened);
         let color = image
             .with_pixels(|pixels| {
-                let stride = pixels.stride();
+                let stride = pixels.stride_bytes();
                 let mut data = destination
-                    .filled(stride * pixels.rows() as usize / 4, 0xa5a5_a5a5u32)
+                    .filled(stride * pixels.height() as usize / 4, 0xa5a5_a5a5u32)
                     .unwrap();
                 let output: &mut [u8] = bytemuck::cast_slice_mut(data.as_mut_slice());
-                for y in 0..pixels.rows() {
+                for y in 0..pixels.height() {
                     let row = pixels.row(y);
                     output[y as usize * stride..y as usize * stride + row.len()]
                         .copy_from_slice(row);
@@ -142,14 +137,13 @@ fn replacement_releases_native_color_and_keeps_exact_independent_auxiliary_owner
                 Color {
                     data: data.freeze(),
                     width: pixels.width(),
-                    rows: pixels.rows(),
+                    rows: pixels.height(),
                     stride,
-                    descriptor: pixels.descriptor(),
-                    context: pixels.color_context().cloned(),
+                    descriptor: pixels.format().clone(),
                 }
             })
             .unwrap();
-        let color_bytes = color.data.charged_bytes();
+        let color_bytes = color.data.backing_allocation_bytes();
         let addresses = {
             let map = image.map().unwrap();
             (1..map.plane_count())
@@ -298,8 +292,11 @@ fn public_collection_retains_views_interpretation_and_owned_samples() {
                     image
                         .with_pixels(|p| {
                             assert_eq!(
-                                p.descriptor().format,
-                                zenpixels::PixelFormat::CmykF32Inverted
+                                p.format().layout,
+                                zenpixels::SampleLayout::new(
+                                    zenpixels::SampleType::F32,
+                                    zenpixels::ChannelOrder::CmykInverted
+                                )
                             )
                         })
                         .unwrap();

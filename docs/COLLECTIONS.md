@@ -16,17 +16,14 @@ This is review code, not a released API. It uses the qualified native selection
 and F32 layer path from [decoder PR68](https://github.com/imazen/zenjxl-decoder/pull/68)
 and explicit CMYK polarity from [zenpixels PR93](https://github.com/imazen/zenpixels/pull/93).
 
-The root integration build also needs zencodec revision
-`3f4fd14feb9bdfed041e426aaa569b236a201158` checked out at `.zencodec`.
-Its root patches replace both registry and Git dependencies with that checkout.
-Native build dependencies now use exact Git pins rather than floating sibling
-checkouts. Decoder test resources remain a separate CI checkout.
-This keeps HDR reconstruction, JPEG metadata and the collection adapter on one
-shared type identity without changing codec math. `just contract-identity`
-checks the resolved graph. Cargo applies patches only at the consuming workspace
-root, so another application must carry its own temporary overrides until these
-dependencies are released. The standalone collection consumer has its own pins
-and does not need this checkout.
+The root integration build pins the zenpixels 0.5 cohort and paired codec
+revisions by Git SHA. `just contract-identity` checks that still, animation,
+HDR and collection adapters share one set of pixel and codec types. Cargo
+applies patches at the consuming workspace root. The standalone collection
+consumer lists the pins for its decode-only feature set and likewise resolves
+from Git without a sibling checkout. CI obtains decoder test resources
+separately.
+
 The [earlier integration receipt](../benchmarks/collection_integration_2026-10-26.json)
 records strict all-feature lint and the existing gain-map, JPEG-lossy, lossless
 round-trip and alpha-mode regression results with its recorded graph. The
@@ -37,7 +34,7 @@ independent pools through one registry plus workspace-limit refusal.
 
 ```rust
 use zenjxl::collection::JxlCollectionConfig;
-use zencodec::{CodecSet, ImageFormat, StopToken, Unstoppable};
+use zencodec::{CodecSet, ImageFormat, SharedPulse};
 use zencodec::collection::{Composition, ImageRequest, OpenRequest};
 use zencodec::operation::PolicySet;
 use zencodec::source::{ReadAtShim, SliceReadAt};
@@ -51,7 +48,7 @@ let mut images = codecs.open_collection(
     &mut source,
     OpenRequest::new(Composition::Uncomposited, 512),
     PolicySet::new(),
-    StopToken::new(Unstoppable),
+    SharedPulse::default(),
 )?;
 let image = images.first_image(&ImageRequest::new())?;
 # Ok(())
@@ -174,8 +171,7 @@ separate from a successful still-image application build.
 With the collection feature enabled, six metadata rewrite tests and three shared
 contract tests pass, as does strict Clippy for those tests and the library.
 The stopped rewrite fixture now passes Some(pulse), preserving its refusal
-assertion. Run `just release-contract-check` from an isolated checkout with the
-pinned `.zencodec` directory. Wrapper receipt: rc0, 16 seconds, peak RSS 0.56 GiB,
+assertion. The historical command was `just release-contract-check` with its recorded checkout. Wrapper receipt: rc0, 16 seconds, peak RSS 0.56 GiB,
 minimum available 13454 MiB. These are build/test resource figures, not image
 processing peak-memory measurements. Independent collection tests, the full
 feature matrix and platform qualification have separate receipts.

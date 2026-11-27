@@ -220,6 +220,9 @@ fn plan<'a>(req: &ScrubRequest<'a>) -> Result<Plan<'a>, Error> {
                     _ => out.remove(req, range, "compressed private JXL box")?,
                 }
             }
+            b"hCdR" if matches!(data.len(), 4 | 24 | 28) => {
+                out.keep(req, range, "JXL HDR content description")?;
+            }
             b"jhgm" => {
                 if gainmap {
                     return Err(Error::Malformed("duplicate JXL gain map"));
@@ -263,7 +266,7 @@ fn remove_reconstruction<'a>(
     )
 }
 fn filter_exif(req: &ScrubRequest<'_>, data: &[u8]) -> Result<Vec<u8>, Error> {
-    req.packet(data.len())?;
+    req.check_metadata_budget(data.len())?;
     let start = 4usize
         .checked_add(be32(data)? as usize)
         .filter(|&n| n <= data.len())
@@ -277,7 +280,7 @@ fn validate_gain_map(req: &ScrubRequest<'_>, data: &[u8]) -> Result<(), Error> {
         return Err(Error::Malformed("JXL gain-map version/header"));
     }
     let n = u16::from_be_bytes([data[1], data[2]]) as usize;
-    req.packet(n)?;
+    req.check_metadata_budget(n)?;
     let metadata = data
         .get(3..3 + n)
         .ok_or(Error::Malformed("JXL gain-map parameters"))?;
@@ -296,7 +299,7 @@ fn validate_gain_map(req: &ScrubRequest<'_>, data: &[u8]) -> Result<(), Error> {
         data.get(p..)
             .ok_or(Error::Malformed("JXL alternate ICC size"))?,
     )? as usize;
-    req.packet(icc)?;
+    req.check_metadata_budget(icc)?;
     p = p
         .checked_add(4)
         .and_then(|v| v.checked_add(icc))

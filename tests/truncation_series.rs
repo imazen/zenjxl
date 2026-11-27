@@ -20,14 +20,19 @@ fn valid_jxl() -> Vec<u8> {
             rgb::Rgb { r: v, g: v, b: v }
         })
         .collect();
-    let buf =
-        zenpixels::PixelBuffer::<rgb::Rgb<u8>>::from_pixels(pixels, w, h).expect("pixel buffer");
+    let buf = zenpixels::PixelBuf::from_typed::<rgb::Rgb<u8>>(
+        pixels,
+        w,
+        h,
+        zenpixels::PixelFormat::RGB8_SRGB,
+    )
+    .expect("pixel buffer");
     JxlEncoderConfig::new()
         .with_lossless(true)
         .job()
         .encoder()
         .expect("encoder")
-        .encode(buf.as_slice().into())
+        .encode(buf.as_view())
         .expect("encode")
         .into_vec()
 }
