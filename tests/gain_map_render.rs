@@ -199,7 +199,7 @@ fn assert_f32_rows(out: &zencodec::decode::DecodeOutput, expected: &[f32]) {
         zenpixels::SampleType::F32
     );
     let bytes: Vec<_> = expected.iter().flat_map(|v| v.to_ne_bytes()).collect();
-    assert_eq!(out.pixels().contiguous_bytes().unwrap().as_ref(), bytes);
+    assert_eq!(out.pixels().to_contiguous_bytes().unwrap().as_ref(), bytes);
 }
 
 // X1: independent lane equations at full weight and exact bypass at zero weight.
@@ -313,7 +313,7 @@ fn hdr_base_passthrough_preserves_pq_and_refuses_lower_target() {
         assert_eq!(output.pixels().facts().depth.unwrap().color_bits(), 16);
         assert_eq!(output.info().source_color.cicp, Some(pq));
         assert_eq!(output.pixels().hdr(), base_only.pixels().hdr());
-        assert_eq!(output.pixels().hdr().cll, Some(cll));
+        assert_eq!(output.pixels().hdr().content_light_level, Some(cll));
         assert_eq!(output.pixels().hdr().mastering, Some(mastering));
         assert!(
             output
@@ -374,7 +374,11 @@ fn rgba_gain_preserves_alpha_and_registered_samples() {
         .extras::<zencodec::decode::DecodedGainMap>()
         .unwrap();
     assert_eq!(
-        gain.pixels.as_view().contiguous_bytes().unwrap().as_ref(),
+        gain.pixels
+            .as_view()
+            .to_contiguous_bytes()
+            .unwrap()
+            .as_ref(),
         gain_codes
     );
 
@@ -469,7 +473,7 @@ fn measured_hdr_envelope_survives_native_encode() {
             output.info().source_color.mastering_display,
             Some(mastering)
         );
-        assert_eq!(output.pixels().hdr().cll, Some(cll));
+        assert_eq!(output.pixels().hdr().content_light_level, Some(cll));
         assert_eq!(output.pixels().hdr().mastering, Some(mastering));
     }
 }

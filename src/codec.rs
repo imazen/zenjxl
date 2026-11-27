@@ -891,11 +891,10 @@ mod encoding {
             }
             // JXL's native headroom and measured content levels are distinct.
             // Legacy inputs may only carry a peak, which still drives the tone mapping.
-            if let Some(peak) = hdr
-                .mastering
-                .map(|m| m.max_luminance)
-                .or_else(|| hdr.cll.map(|cll| f32::from(cll.max_content_light_level)))
-                && peak > 0.0
+            if let Some(peak) = hdr.mastering.map(|m| m.max_luminance).or_else(|| {
+                hdr.content_light_level
+                    .map(|cll| f32::from(cll.max_content_light_level))
+            }) && peak > 0.0
             {
                 metadata = metadata.with_intensity_target(peak);
             }
@@ -963,7 +962,7 @@ mod encoding {
                 *white = None;
             }
             if source.cicp.is_none() {
-                source.cicp = color.to_cicp();
+                source.cicp = color.to_cicp_lossy();
             }
             if metadata_cicp.is_none()
                 && source.icc_profile.is_none()
@@ -1137,7 +1136,9 @@ mod encoding {
                 .metadata
                 .as_ref()
                 .map_or(self.pixels_hdr, |meta| HdrMetadata {
-                    cll: meta.content_light_level.or(self.pixels_hdr.cll),
+                    content_light_level: meta
+                        .content_light_level
+                        .or(self.pixels_hdr.content_light_level),
                     mastering: meta.mastering_display.or(self.pixels_hdr.mastering),
                 });
             let (hdr_bytes, hdr_len) = crate::hdr::encode(hdr).ok_or_else(|| {
@@ -1243,7 +1244,7 @@ mod encoding {
             // untouched); convert once at the boundary, preserving the trace.
             (move || -> Result<EncodeOutput, At<JxlError>> {
                 let width = pixels.width();
-                let height = pixels.rows();
+                let height = pixels.height();
 
                 // Rgbx8 / Bgrx8: byte 3 is undefined padding — strip to 3-channel RGB
                 // so the encoder doesn't treat the padding as alpha.
@@ -1253,7 +1254,7 @@ mod encoding {
                 {
                     self.check_limits(width, height)?;
                     let raw = pixels
-                        .contiguous_bytes()
+                        .to_contiguous_bytes()
                         .map_err(|error| whereat::at!(JxlError::OutOfMemory(error.to_string())))?;
                     let mut rgb =
                         alloc::vec::Vec::with_capacity((width as usize) * (height as usize) * 3);
@@ -1280,7 +1281,7 @@ mod encoding {
                 self.check_limits(width, height)?;
 
                 let data = pixels
-                    .contiguous_bytes()
+                    .to_contiguous_bytes()
                     .map_err(|error| whereat::at!(JxlError::OutOfMemory(error.to_string())))?;
                 let encoded = self.encode_with_metadata(&data, width, height, layout)?;
                 let encoded = self.maybe_attach_gain_map(encoded)?;
@@ -1367,7 +1368,7 @@ mod encoding {
             (move || -> Result<(), At<JxlError>> {
                 let desc = rows.format();
                 let width = rows.width();
-                let num_rows = rows.rows();
+                let num_rows = rows.height();
 
                 self.check_row_control()?;
                 let previous = match &self.stream {
@@ -1416,7 +1417,7 @@ mod encoding {
                     if desc.layout.sample == SampleType::U8
                         && matches!(pf, ChannelOrder::Rgbx | ChannelOrder::Bgrx)
                     {
-                        let raw = rows.contiguous_bytes().map_err(|error| {
+                        let raw = rows.to_contiguous_bytes().map_err(|error| {
                             whereat::at!(JxlError::OutOfMemory(error.to_string()))
                         })?;
                         let mut rgb = alloc::vec::Vec::with_capacity(
@@ -1435,7 +1436,7 @@ mod encoding {
                     } else {
                         (
                             Self::descriptor_to_layout(desc)?,
-                            rows.contiguous_bytes().map_err(|error| {
+                            rows.to_contiguous_bytes().map_err(|error| {
                                 whereat::at!(JxlError::OutOfMemory(error.to_string()))
                             })?,
                         )
@@ -1576,7 +1577,7 @@ mod encoding {
                     JxlEncoder::descriptor_to_layout(desc)?
                 };
                 let w = pixels.width();
-                let h = pixels.rows();
+                let h = pixels.height();
 
                 if self.pixel_data.is_empty() {
                     // Validate dimensions against limits on first frame.
@@ -1608,7 +1609,7 @@ mod encoding {
 
                 let frame_data = if strip_padding {
                     let raw = pixels
-                        .contiguous_bytes()
+                        .to_contiguous_bytes()
                         .map_err(|error| whereat::at!(JxlError::OutOfMemory(error.to_string())))?;
                     let mut rgb = Vec::with_capacity((w as usize) * (h as usize) * 3);
                     if matches!(pf, ChannelOrder::Rgbx) {
@@ -1623,7 +1624,7 @@ mod encoding {
                     rgb
                 } else {
                     pixels
-                        .contiguous_bytes()
+                        .to_contiguous_bytes()
                         .map_err(|error| whereat::at!(JxlError::OutOfMemory(error.to_string())))?
                         .into_owned()
                 };
@@ -2123,9 +2124,10 @@ mod decoding {
         // CTA-861 / H.274 MaxCLL and MaxFALL measure MaxRGB in the output's
         // native primaries. The mastering peak is the nominal alternate-image
         // capacity and is independent of both the measured raster and target.
-        use zenpixels_convert::measure::{LightLevelMethod, measure_cll};
-        let cll = measure_cll(&hdr.as_view(), white, None, LightLevelMethod::MaxRgb)
-            .map_err(|e| whereat::at!(JxlError::InvalidInput(e.to_string())))?;
+        use zenpixels_convert::measure::{LightLevelMethod, measure_content_light_level};
+        let cll =
+            measure_content_light_level(&hdr.as_view(), white, None, LightLevelMethod::MaxRgb)
+                .map_err(|e| whereat::at!(JxlError::InvalidInput(e.to_string())))?;
         let zenpixels::ColorSpace::Rgb { primaries, .. } = hdr.format().color else {
             return Err(whereat::at!(JxlError::UnsupportedOperation(
                 UnsupportedOperation::PixelFormat
@@ -2152,7 +2154,7 @@ mod decoding {
             .map_err(|e| whereat::at!(JxlError::InvalidInput(e.to_string())))?
             .with_origin(base.origin().clone())
             .with_hdr(zenpixels::HdrMetadata {
-                cll: Some(cll),
+                content_light_level: Some(cll),
                 mastering: Some(mastering),
             });
         stop.check()
@@ -2477,7 +2479,7 @@ mod decoding {
                 image_info = image_info.with_xmp(xmp.clone());
             }
 
-            image_info.source_color.content_light_level = info.hdr.cll;
+            image_info.source_color.content_light_level = info.hdr.content_light_level;
             image_info.source_color.mastering_display = info.hdr.mastering;
 
             image_info
@@ -3141,7 +3143,7 @@ mod decoding {
                         let gain_pixels = gm_result
                             .pixels
                             .relabel_color(zenpixels::ColorSpace::Untagged {
-                                channels,
+                                total_channels: channels,
                                 alpha: zenpixels::AlphaMode::None,
                             })
                             .map_err(|e| whereat::at!(JxlError::MalformedImage(e.to_string())))?;
@@ -3321,7 +3323,7 @@ mod decoding {
             // Only clamp when CICP explicitly tells us it's SDR.
             // When CICP is absent (ICC-only), we don't know the gamut.
             let clamp = is_f32
-                && hdr.cll.is_none()
+                && hdr.content_light_level.is_none()
                 && hdr.mastering.is_none()
                 && cicp.is_some()
                 && !is_hdr_or_wide_gamut(cicp);
@@ -5271,7 +5273,7 @@ mod tests {
             }
             let decoder = job.decoder(Cow::Borrowed(encoded.data()), &[]).unwrap();
             let decoded = decoder.decode().unwrap();
-            decoded.pixels().contiguous_bytes().unwrap().into_owned()
+            decoded.pixels().to_contiguous_bytes().unwrap().into_owned()
         };
 
         let default_bytes = decode_with(None);

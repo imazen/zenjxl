@@ -27,7 +27,7 @@ fn integer_grid_survives_native_and_adapter_orientation() {
             "fixture contains only black and white"
         );
         let slice = native.pixels.as_view();
-        for y in 0..slice.rows() {
+        for y in 0..slice.height() {
             let row = slice.row(y);
             match descriptor.layout.sample {
                 SampleType::U8 => assert!(row.iter().all(|&v| v == 0 || v == 255)),
@@ -103,7 +103,12 @@ fn lossless_deep_samples_do_not_inherit_a_coarser_grid() {
         )
         .unwrap();
         assert_eq!(
-            native.pixels.as_view().contiguous_bytes().unwrap().as_ref(),
+            native
+                .pixels
+                .as_view()
+                .to_contiguous_bytes()
+                .unwrap()
+                .as_ref(),
             bytes.as_slice()
         );
         let exact = native.pixels.facts().depth.unwrap();
@@ -119,7 +124,7 @@ fn holds_for(bits: u8, view: &zenpixels::PixelView<'_>) -> bool {
     let storage = view.format().layout.sample.bits();
     let wide = (1u32 << storage) - 1;
     let narrow = (1u32 << bits) - 1;
-    (0..view.rows()).all(|y| {
+    (0..view.height()).all(|y| {
         view.row(y)
             .chunks_exact(usize::from(storage / 8))
             .all(|bytes| {

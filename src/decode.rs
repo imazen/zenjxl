@@ -993,7 +993,7 @@ pub(crate) fn decode_with_options_oriented(
     // When CICP is absent (ICC-only images), we don't know the gamut — don't clamp.
     let hdr = hdr_metadata(data, intensity_target);
     if chosen.channel_type == SampleType::F32
-        && hdr.cll.is_none()
+        && hdr.content_light_level.is_none()
         && hdr.mastering.is_none()
         && cicp.is_some()
         && !is_hdr_or_wide_gamut(cicp)
@@ -1115,7 +1115,7 @@ pub(crate) fn output_spec(
         },
         JxlColorProfile::Icc(icc) => ColorSpace::Icc {
             profile: alloc::sync::Arc::from(icc.as_slice()),
-            channels: (order.channels() - usize::from(order.has_alpha_slot())) as u8,
+            color_channels: (order.channels() - usize::from(order.has_alpha_slot())) as u8,
             alpha,
             intent: RenderingIntent::RelativeColorimetric,
         },
@@ -1177,7 +1177,7 @@ pub(crate) fn color_origin(
 
 pub(crate) fn hdr_metadata(data: &[u8], intensity_target: f32) -> HdrMetadata {
     crate::hdr::from_container(data).unwrap_or_else(|| HdrMetadata {
-        cll: (intensity_target > 255.0).then(|| {
+        content_light_level: (intensity_target > 255.0).then(|| {
             zenpixels::ContentLightLevel::new(intensity_target.min(u16::MAX as f32) as u16, 0)
         }),
         mastering: None,
@@ -1189,7 +1189,7 @@ pub(crate) fn alloc_pixel_storage(
     pref: zencodec::AllocPreference,
     bytes: usize,
 ) -> Result<PixelStorage, At<JxlError>> {
-    PixelStorage::zeroed(sample, bytes).map_err(|_| {
+    PixelStorage::zeroed_bytes(sample, bytes).map_err(|_| {
         if !crate::alloc_util::resolve_fallible(pref, true) {
             let layout = core::alloc::Layout::from_size_align(bytes, sample.min_alignment())
                 .expect("pixel capacity overflow");

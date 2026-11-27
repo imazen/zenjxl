@@ -124,12 +124,12 @@ fn replacement_releases_native_color_and_keeps_exact_independent_auxiliary_owner
         drop(opened);
         let color = image
             .with_pixels(|pixels| {
-                let stride = pixels.stride();
+                let stride = pixels.stride_bytes();
                 let mut data = destination
-                    .filled(stride * pixels.rows() as usize / 4, 0xa5a5_a5a5u32)
+                    .filled(stride * pixels.height() as usize / 4, 0xa5a5_a5a5u32)
                     .unwrap();
                 let output: &mut [u8] = bytemuck::cast_slice_mut(data.as_mut_slice());
-                for y in 0..pixels.rows() {
+                for y in 0..pixels.height() {
                     let row = pixels.row(y);
                     output[y as usize * stride..y as usize * stride + row.len()]
                         .copy_from_slice(row);
@@ -137,7 +137,7 @@ fn replacement_releases_native_color_and_keeps_exact_independent_auxiliary_owner
                 Color {
                     data: data.freeze(),
                     width: pixels.width(),
-                    rows: pixels.rows(),
+                    rows: pixels.height(),
                     stride,
                     descriptor: pixels.format().clone(),
                 }

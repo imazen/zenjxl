@@ -38,7 +38,7 @@ pub(crate) fn encode(hdr: HdrMetadata) -> Option<([u8; 28], usize)> {
         }
         len = 24;
     }
-    if let Some(cll) = hdr.cll {
+    if let Some(cll) = hdr.content_light_level {
         payload[len..len + 2].copy_from_slice(&cll.max_content_light_level.to_be_bytes());
         payload[len + 2..len + 4].copy_from_slice(&cll.max_frame_average_light_level.to_be_bytes());
         len += 4;
@@ -75,7 +75,10 @@ fn decode(payload: &[u8]) -> Option<HdrMetadata> {
         )),
         _ => None,
     };
-    Some(HdrMetadata { cll, mastering })
+    Some(HdrMetadata {
+        content_light_level: cll,
+        mastering,
+    })
 }
 
 /// Read a bounded HDR box without scanning or allocating codestream payloads.
